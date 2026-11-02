@@ -106,6 +106,6 @@ export type ClientMessage =
 export type ServerMessage =
   | { type: 'snapshot'; snapshot: WorldSnapshot }
   | { type: 'event'; event: WorldEvent }
-  | { type: 'status'; mode: 'demo' | 'live'; twitch: string; clients: number; settings: DirectorSettings; pending: WorldEvent[] }
+  | { type: 'status'; mode: 'demo' | 'live'; twitch: string; clients: number; settings: DirectorSettings; pending: WorldEvent[]; capabilities?: Record<string, string> }
   | { type: 'error'; message: string; eventId?: string }
   | { type: 'director-auth'; authorized: boolean };

@@ -49,3 +49,11 @@ Keep normalized `WorldEvent` and `WorldSnapshot` independent of the transport. A
 React Three Fiber **9** pairs with React **19**; Fiber 8 pairs with React 18. [Official installation guide](https://r3f.docs.pmnd.rs/getting-started/installation).
 
 npm `@react-three/rapier@2` peer metadata requires React `^19`, Fiber `^9.0.4`, and Three `>=0.159.0`. Pin compatible major versions together and verify the actual lockfile install. Physics is optional for this society slice; avoid introducing WASM startup cost without a concrete interaction that needs it. [Rapier integration repository](https://github.com/pmndrs/react-three-rapier).
+
+## Adapter review checkpoint
+
+Read-only review of `apps/server/src/{twitch,room,server,security,validation}.ts` and installed Twurple 8.2.0 source confirmed that the chosen callback names and token discovery path match the installed API. Browser event identities are replaced by signed session identities, event payloads are strictly validated, privileged events require Director access, and OAuth state is single-use and session-bound.
+
+Requested corrections: track EventSub revocations (`onRevoke`) so capabilities cannot remain subscribed after Twitch removes subscriptions; throttle malformed/binary WebSocket requests before JSON parsing as well as valid room messages. The installed Twurple listener already deduplicates Twitch notification message IDs for ten minutes and recreates subscriptions after a real socket loss. Seamless server-directed socket handover preserves subscriptions.
+
+This was source/API review. No real OAuth grant, token refresh, subscription delivery, raid, or Channel Points redemption was exercised without broadcaster credentials.

@@ -1,0 +1,57 @@
+{
+  "base": "http://localhost:3011",
+  "startedAt": "2026-11-02T21:00:32.188Z",
+  "checks": [
+    {
+      "name": "Actual WebGPU backend renders a nonblank 3D world",
+      "diag": {
+        "engine": "three.js r187 webgpu",
+        "renderer": "webgpu",
+        "rendererRequested": "webgpu",
+        "rendererFallback": ""
+      },
+      "pixels": {
+        "width": 539,
+        "height": 611,
+        "clear": 0,
+        "visible": 329329,
+        "total": 329329,
+        "colors": 24023
+      }
+    },
+    {
+      "name": "Actual WebGPU character studio renders a nonblank avatar preview",
+      "diag": {
+        "engine": "three.js r187 webgpu",
+        "renderer": "webgpu",
+        "rendererRequested": "webgpu",
+        "rendererFallback": ""
+      },
+      "pixels": {
+        "width": 488,
+        "height": 501,
+        "clear": 0,
+        "visible": 244488,
+        "total": 244488,
+        "colors": 5166
+      }
+    },
+    {
+      "name": "Actual WebGPU overlay preserves nonblank transparent content",
+      "pixels": {
+        "width": 960,
+        "height": 640,
+        "clear": 571323,
+        "visible": 43077,
+        "total": 614400,
+        "colors": 1362
+      }
+    }
+  ],
+  "pageErrors": [],
+  "consoleErrors": [
+    "Failed to load resource: the server responded with a status of 404 (Not Found)"
+  ],
+  "passed": true,
+  "finishedAt": "2026-11-02T21:01:22.143Z"
+}

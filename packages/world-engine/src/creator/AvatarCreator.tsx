@@ -17,6 +17,7 @@ import { isVrmBase, type HumanoidRig } from '../avatars';
 import * as RealisticApi from '../avatars/realistic';
 import { REALISTIC_BASE_MODELS, REALISTIC_SUPPORT, isRealisticBase, type AppearanceSupport } from '../avatars/realistic';
 import type { BaseModelEntry } from '../avatars/catalog';
+import type { RendererPreference } from '../scene/renderer';
 import type { GestureName } from '../interactions/animation/AvatarAnimator';
 import { CreatorPreview, type CameraPreset, type PreviewBase, type PreviewCommand, type PreviewExpression } from './CreatorPreview';
 import { CHARACTER_PRESETS, MAX_ACCESSORIES, MAX_TRAITS, randomAppearance, sanitizeTraits, toggleCapped } from './presets';
@@ -26,6 +27,8 @@ import { CREATOR_CSS } from './styles';
 export interface SavedCharacter { appearance: AvatarAppearance; personality: string[]; displayName: string }
 
 export interface AvatarCreatorExtraProps {
+  /** Optional studio renderer; WebGL remains the default and compatibility fallback. */
+  renderer?: RendererPreference;
   /** Prefill personality trait ids (max 3, unknown ids dropped). */
   initialPersonality?: string[];
   /** Called on save (in addition to `onSave`) with appearance + personality + name. */
@@ -430,7 +433,7 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
       <div className="hwc-layout">
         {/* ------------------------------------------------ preview */}
         <div className="hwc-stage" ref={stageRef} data-testid="creator-stage">
-          <CreatorPreview appearance={appearance} appearanceKey={appearanceKey} camera={camera} cameraNonce={cameraNonce}
+          <CreatorPreview renderer={props.renderer} appearance={appearance} appearanceKey={appearanceKey} camera={camera} cameraNonce={cameraNonce}
             autoRotate={autoRotate} base={base} gesture={gesture} expression={expression} accent={ACCENT} loadingEl={loadingEl} insets={insets}
             onRigReady={onRigReady} />
           <div className="hwc-stage-top" ref={topRef}>

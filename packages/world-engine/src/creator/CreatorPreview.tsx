@@ -8,7 +8,7 @@
  * (debounced ~60 ms while dragging) and the previous rig stays visible until
  * the new one is ready. Everything per-frame lives in refs + useFrame.
  */
-import { memo, useEffect, useMemo, useRef } from 'react';
+import { Component, memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { ContactShadows, Environment, Lightformer, OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
@@ -17,6 +17,14 @@ import { createAvatarRig, isVrmBase, loadAvatarRig, type ExpressionName, type Hu
 import { isRealisticBase } from '../avatars/realistic';
 import { AvatarAnimator, type GestureName } from '../interactions/animation/AvatarAnimator';
 import type { AnimationFamily } from '../world/activities';
+import { createWorldRenderer, type RendererPreference } from '../scene/renderer';
+class CreatorGPUGuard extends Component<{ children: ReactNode; onFailure: () => void }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  componentDidCatch() { this.props.onFailure(); }
+  render() { return this.state.failed ? null : this.props.children; }
+}
+
 
 export type CameraPreset = 'full' | 'upper' | 'face';
 export type PreviewExpression = 'happy' | 'sad' | 'angry' | 'surprised' | 'relaxed' | 'blink';
@@ -25,6 +33,7 @@ export type PreviewBase = Extract<AnimationFamily, 'idle' | 'dance' | 'walk'>;
 export interface PreviewCommand<T extends string> { name: T; nonce: number }
 
 export interface CreatorPreviewProps {
+  renderer?: RendererPreference;
   appearance: AvatarAppearance;
   appearanceKey: string;
   camera: CameraPreset;
@@ -96,6 +105,7 @@ function makeGlowTexture(): THREE.CanvasTexture | null {
 interface OrbitLike { target: THREE.Vector3; update(): void }
 
 function Studio(props: CreatorPreviewProps) {
+  const webgpu = useThree(state => Boolean((state.gl as unknown as { backend?: { isWebGPUBackend?: boolean } }).backend?.isWebGPUBackend));
   const { appearance, appearanceKey, camera: preset, cameraNonce, autoRotate, base, gesture, expression, accent, onRigReady, loadingEl, insets } = props;
   const turntable = useRef<THREE.Group>(null);
   const holder = useRef<THREE.Group>(null);
@@ -280,12 +290,12 @@ function Studio(props: CreatorPreviewProps) {
       <directionalLight position={[1.8, 1.4, -3]} intensity={1.1} color="#ffd2e6" />
       {/* soft frontal "beauty" fill so faces never fall into shadow */}
       <directionalLight position={[0.6, 1.1, 4.5]} intensity={0.65} color="#fff6ee" />
-      <Environment resolution={128} frames={1} environmentIntensity={0.7}>
+      {!webgpu && <Environment resolution={128} frames={1} environmentIntensity={0.7}>
         <Lightformer form="rect" intensity={2.2} color="#ffffff" position={[0, 5, 2]} rotation-x={Math.PI / 2} scale={[6, 3, 1]} />
         <Lightformer form="rect" intensity={1.4} color="#ffe8d6" position={[4, 1.5, 2]} rotation-y={-Math.PI / 2.4} scale={[2.5, 4, 1]} />
         <Lightformer form="rect" intensity={1.1} color="#d6dcff" position={[-4, 1.5, 2]} rotation-y={Math.PI / 2.4} scale={[2.5, 4, 1]} />
         <Lightformer form="ring" intensity={1.6} color={accent} position={[0, 2, -4]} scale={2.5} />
-      </Environment>
+      </Environment>}
 
       <group ref={turntable} rotation-y={-0.22}>
         <group ref={holder} />
@@ -313,7 +323,7 @@ function Studio(props: CreatorPreviewProps) {
         <ringGeometry args={[1.5, 1.515, 128]} />
         <meshBasicMaterial color="#ffffff" transparent opacity={0.08} toneMapped={false} />
       </mesh>
-      <ContactShadows position={[0, 0.003, 0]} scale={2.6} resolution={256} blur={2.2} far={1.8} opacity={0.62} color="#0b0816" />
+      {!webgpu && <ContactShadows position={[0, 0.003, 0]} scale={2.6} resolution={256} blur={2.2} far={1.8} opacity={0.62} color="#0b0816" />}
 
       <OrbitControls
         ref={controls as never}
@@ -335,21 +345,30 @@ function Studio(props: CreatorPreviewProps) {
 }
 
 function CreatorPreviewImpl(props: CreatorPreviewProps) {
-  return (
+  const preference = props.renderer ?? 'webgl';
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [preference]);
+  const effective: RendererPreference = failed ? 'webgl' : preference;
+  const createRenderer = useMemo(() => async (defaults: Parameters<typeof createWorldRenderer>[0]) => createWorldRenderer(defaults, {
+    preference: effective, transparent: true, onStatus: () => {}, onDeviceLost: () => setFailed(true),
+  }), [effective]);
+  const canvas = (
     <Canvas
+      key={effective}
       className="hwc-canvas"
-      dpr={[1, 2]}
-      gl={{ antialias: true, alpha: true, powerPreference: 'high-performance', preserveDrawingBuffer: false }}
+      dpr={effective === 'webgl' ? [1, 2] : [1, 1.5]}
+      gl={effective === 'webgl' ? { antialias: true, alpha: true, powerPreference: 'high-performance', preserveDrawingBuffer: false } : createRenderer}
       camera={{ fov: 28, near: 0.05, far: 60, position: [1.6, 1.2, 4.6] }}
-      onCreated={({ gl, scene }) => { gl.setClearColor(0x000000, 0); scene.background = null; }}
+      onCreated={({ gl, scene }) => { if (effective === 'webgl') gl.domElement.dataset.renderer = 'webgl'; gl.setClearColor(0x000000, 0); scene.background = null; }}
     >
       <Studio {...props} />
     </Canvas>
   );
+  return effective === 'webgl' ? canvas : <CreatorGPUGuard key={effective} onFailure={() => setFailed(true)}>{canvas}</CreatorGPUGuard>;
 }
 
 /** Memoised: only re-renders when the appearance key or a preview command changes. */
 export const CreatorPreview = memo(CreatorPreviewImpl, (a, b) =>
-  a.appearanceKey === b.appearanceKey && a.camera === b.camera && a.cameraNonce === b.cameraNonce
+  a.renderer === b.renderer && a.appearanceKey === b.appearanceKey && a.camera === b.camera && a.cameraNonce === b.cameraNonce
   && a.autoRotate === b.autoRotate && a.base === b.base && a.gesture === b.gesture && a.expression === b.expression
   && a.accent === b.accent && a.onRigReady === b.onRigReady);

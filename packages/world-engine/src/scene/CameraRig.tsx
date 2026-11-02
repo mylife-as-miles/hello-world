@@ -11,7 +11,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
-import type { CameraMode, WorldEvent } from '@hello-world/contracts';
+import type { CameraMode, WorldEvent, ResidentProfile } from '@hello-world/contracts';
 import { useSceneStore } from '../core/SceneContext';
 import type { SceneStore } from '../core/sceneStore';
 import { BUILDINGS, getPoi } from '../world/layout';
@@ -296,6 +296,64 @@ function orbitShot(o: OrbitState, dt: number, speed: number, dist: number, h: nu
 
 /* ----------------------------------------------------------------- rig */
 
+/** Fixed overlay viewing direction. Bounds include labels, gestures, feet and interpolation lag. */
+const OVERLAY_BACK = new THREE.Vector3(0, 0.58, 1).normalize();
+const WORLD_UP = new THREE.Vector3(0, 1, 0);
+const OVERLAY_SAFE_NDC = 0.82;
+
+function includeResidents(
+  box: THREE.Box3,
+  residents: readonly ResidentProfile[],
+  point: THREE.Vector3,
+) {
+  for (const resident of residents) {
+    const { x, z } = resident.location;
+    if (!Number.isFinite(x) || !Number.isFinite(z)) continue;
+    // Renderer residents are grounded at y=0. Their labels/animated hands sit above their bodies.
+    box.expandByPoint(point.set(x - 1.25, -0.35, z - 1.25));
+    box.expandByPoint(point.set(x + 1.25, 3.4, z + 1.25));
+  }
+}
+
+/**
+ * Exact perspective fit for the eight corners of an AABB, including their depth.
+ * In camera basis a corner q has depth D-q.z, so D >= q.z + |q.x| / tan(hfov/2),
+ * and likewise for y. Reserving NDC +/-0.82 leaves an additional 9% frame margin.
+ */
+export function overlayFitDistance(
+  box: THREE.Box3,
+  center: THREE.Vector3,
+  backward: THREE.Vector3,
+  camera: THREE.PerspectiveCamera,
+  right: THREE.Vector3,
+  up: THREE.Vector3,
+  point: THREE.Vector3,
+): number {
+  right.crossVectors(WORLD_UP, backward).normalize();
+  if (right.lengthSq() < 0.5) right.set(1, 0, 0);
+  up.crossVectors(backward, right).normalize();
+  const tanV = Math.tan(THREE.MathUtils.degToRad(camera.getEffectiveFOV()) / 2);
+  const tanH = tanV * Math.max(0.1, camera.aspect);
+  let distance = 8;
+  for (let mask = 0; mask < 8; mask++) {
+    point
+      .set(
+        mask & 1 ? box.max.x : box.min.x,
+        mask & 2 ? box.max.y : box.min.y,
+        mask & 4 ? box.max.z : box.min.z,
+      )
+      .sub(center);
+    const towardCamera = point.dot(backward);
+    distance = Math.max(
+      distance,
+      towardCamera + Math.abs(point.dot(right)) / (tanH * OVERLAY_SAFE_NDC),
+      towardCamera + Math.abs(point.dot(up)) / (tanV * OVERLAY_SAFE_NDC),
+      towardCamera + camera.near + 0.5,
+    );
+  }
+  return distance;
+}
+
 export function CameraRig({ mode, selectedResidentId, transparent = false }: { mode: RigMode; selectedResidentId?: string; transparent?: boolean }) {
   const camera = useThree(s => s.camera) as THREE.PerspectiveCamera;
   const store = useSceneStore();
@@ -315,6 +373,7 @@ export function CameraRig({ mode, selectedResidentId, transparent = false }: { m
     look: new THREE.CatmullRomCurve3(CINE_LOOK.map(p => new THREE.Vector3(...p)), true, 'centripetal'),
     u: 0,
   }), []);
+  const overlay = useMemo(() => ({ bounds: new THREE.Box3(), point: new THREE.Vector3(), right: new THREE.Vector3(), up: new THREE.Vector3(), back: new THREE.Vector3(), sphere: new THREE.Sphere() }), []);
   const director = useRef<Director>({ kind: 'none', actorId: '', until: 0, lastCut: -1e9, lastPush: -1e9, cutPending: false, raid: false });
 
   useEffect(() => { s.follow.init = false; }, [selectedResidentId, s]);
@@ -410,6 +469,15 @@ export function CameraRig({ mode, selectedResidentId, transparent = false }: { m
       const dist = onStage ? 9.4 : 12, h = onStage ? 7.6 : 6.2;
       orbitShot(s, dt, 0.07, dist, h, 1.1);
       rate = 0.9;
+    } else if (mode === 'overlay') {
+      overlay.bounds.makeEmpty();
+      includeResidents(overlay.bounds, store.current.residents, overlay.point);
+      if (store.previous) includeResidents(overlay.bounds, store.previous.residents, overlay.point);
+      overlay.bounds.expandByPoint(overlay.point.set(PORTAL_POS.x - 3, -0.35, PORTAL_POS.z - 1));
+      overlay.bounds.expandByPoint(overlay.point.set(PORTAL_POS.x + 3, 7, PORTAL_POS.z + 1));
+      overlay.bounds.getCenter(s.look);
+      const distance = overlayFitDistance(overlay.bounds, s.look, OVERLAY_BACK, camera, overlay.right, overlay.up, overlay.point);
+      s.pos.copy(s.look).addScaledVector(OVERLAY_BACK, distance);
     } else if (mode === 'cinematic') {
       cine.u = (cine.u + dt / 120) % 1;
       cine.pos.getPointAt(cine.u, s.pos);
@@ -418,9 +486,6 @@ export function CameraRig({ mode, selectedResidentId, transparent = false }: { m
       // eye level, aimed at the street/plaza spot with the most residents
       orbitShot(s, dt, 0.035, 8.6, 1.85, 1.35);
       rate = 1.1;
-    } else if (mode === 'overlay') {
-      overlayPose(store, s.overlay, camera, t, dt, s.pos, s.look);
-      rate = 1.2;
     } else {
       poseFor(mode, t, s.pos, s.look);
       if (mode === 'neighborhood' && s.clusterInit) {
@@ -438,6 +503,16 @@ export function CameraRig({ mode, selectedResidentId, transparent = false }: { m
       const k = 1 - Math.exp(-dt * rate);
       camera.position.lerp(s.pos, k);
       look.current.lerp(s.look, k);
+    }
+    if (mode === 'overlay') {
+      overlay.back.copy(camera.position).sub(look.current);
+      const currentDistance = overlay.back.length();
+      if (currentDistance > 0.001) overlay.back.multiplyScalar(1 / currentDistance); else overlay.back.copy(OVERLAY_BACK);
+      const safeDistance = overlayFitDistance(overlay.bounds, look.current, overlay.back, camera, overlay.right, overlay.up, overlay.point);
+      if (safeDistance > currentDistance) camera.position.copy(look.current).addScaledVector(overlay.back, safeDistance);
+      overlay.bounds.getBoundingSphere(overlay.sphere);
+      const farNeeded = camera.position.distanceTo(overlay.sphere.center) + overlay.sphere.radius + 10;
+      if (camera.far < farNeeded) { camera.far = farNeeded; camera.updateProjectionMatrix(); }
     }
     camera.lookAt(look.current);
   });

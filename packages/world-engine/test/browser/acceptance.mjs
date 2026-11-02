@@ -18,7 +18,8 @@ mkdirSync(out, { recursive: true });
 const results = [];
 const record = (n, name, pass, detail) => { results.push({ n, name, pass, detail }); console.log(`${pass ? 'PASS' : 'FAIL'} #${n} ${name} — ${detail}`); };
 const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
-const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 }, reducedMotion: 'reduce' });
+const Q = process.env.QUALITY ?? 'low';
 const page = await ctx.newPage();
 const errors = [];
 page.on('pageerror', e => errors.push(e.message));
@@ -26,10 +27,10 @@ page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
 
 const snap = () => page.evaluate(() => window.__world.getSnapshot());
 const dispatch = (e) => page.evaluate((ev) => window.__world.dispatch({ id: `acc-${Date.now()}-${Math.random()}`, source: 'demo', timestamp: Date.now(), ...ev }), e);
-const shot = async (name, opts = {}) => { const p = join(out, `${name}.png`); await page.screenshot({ path: p, ...opts }); return p; };
+const shot = async (name, opts = {}) => { const p = join(out, `${name}.png`); await page.screenshot({ path: p, timeout: 180000, ...opts }); return p; };
 
 try {
-  await page.goto(`${base}/?view=world&fresh=1`, { waitUntil: 'domcontentloaded' });
+  await page.goto(`${base}/?view=world&fresh=1&quality=${Q}`, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => !!window.__world, null, { timeout: 60000 });
   await page.waitForTimeout(9000);
   const canvasCount = await page.locator('canvas').count();
@@ -74,7 +75,7 @@ try {
   record(10, 'raid/confetti visible reaction', visitors.length > 0, `${visitors.length} raid visitors; screenshots ${preRaid} vs ${await shot('10b-after-raid')}`);
 
   // 3/4: creator changes appearance, saved appearance survives reload
-  await page.goto(`${base}/?view=creator`, { waitUntil: 'domcontentloaded' });
+  await page.goto(`${base}/?view=creator&quality=${Q}`, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(8000);
   const c1 = await shot('03a-creator');
   const hairButtons = page.locator('[data-testid^="hair-"], button:has-text("Afro"), button:has-text("Mohawk")');
@@ -95,7 +96,7 @@ try {
   record(4, 'Saved appearance survives reload', !!me, me ? `viewer:me restored: ${JSON.stringify(me.appearance)}` : 'viewer:me missing after reload');
 
   // 11: overlay transparency
-  await page.goto(`${base}/?view=overlay`, { waitUntil: 'domcontentloaded' });
+  await page.goto(`${base}/?view=overlay&quality=${Q}`, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(8000);
   const overlayPath = await shot('11-overlay', { omitBackground: true });
   const alpha = await page.evaluate(() => {

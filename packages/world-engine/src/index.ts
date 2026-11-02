@@ -5,6 +5,7 @@
  */
 export { WorldScene } from './scene/WorldScene';
 export { AvatarCreator } from './creator/AvatarCreator';
+export type { AvatarCreatorExtraProps, SavedCharacter } from './creator/AvatarCreator';
 export * from './runtime/index';
 export {
   createPersistentWorldRuntime, createIndexedDbSnapshotStorage, createMemorySnapshotStorage, ENGINE_SAVE_VERSION,

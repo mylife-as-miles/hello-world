@@ -1,83 +1,135 @@
 /**
- * TEMPORARY STUB avatar API (coordinator scaffold). The Character Systems
- * engineer replaces the implementation but MUST keep these exports/signatures.
+ * Public avatar API.
+ *  - createAvatarRig: synchronous procedural "Townie" rig (never throws)
+ *  - loadAvatarRig:   VRM guest skin when the base model is a VRM, else procedural (never rejects)
+ *  - useAvatarRig:    React hook; returns the instant procedural rig while a VRM loads
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import * as THREE from 'three';
 import type { AvatarAppearance } from '@hello-world/contracts';
 import type { AvatarLod, HumanBoneName, HumanoidRig } from './rig';
-import { normalizeAppearance } from './catalog';
+import { HUMAN_BONES } from './rig';
+import { BASE_MODELS, normalizeAppearance } from './catalog';
+import { createTownieRig } from './procedural/townie';
 
 export type { HumanoidRig, HumanBoneName, ExpressionName, AttachSlot, AvatarLod } from './rig';
 export { HUMAN_BONES, EXPRESSIONS } from './rig';
 
 export interface AvatarRigOptions { lod?: AvatarLod }
 
+interface AvatarStats { vrmLoaded: number; vrmFailed: number; proceduralBuilt: number }
+function stats(): AvatarStats {
+  const g = globalThis as unknown as { __HW_AVATAR_STATS?: AvatarStats };
+  g.__HW_AVATAR_STATS ??= { vrmLoaded: 0, vrmFailed: 0, proceduralBuilt: 0 };
+  return g.__HW_AVATAR_STATS;
+}
+
+const disposed = new WeakSet<HumanoidRig>();
+function track(rig: HumanoidRig): HumanoidRig {
+  const inner = rig.dispose.bind(rig);
+  rig.dispose = () => { if (disposed.has(rig)) return; disposed.add(rig); inner(); };
+  return rig;
+}
+
 /** Synchronous procedural rig (always succeeds). */
-export function createAvatarRig(appearanceInput: AvatarAppearance, _opts: AvatarRigOptions = {}): HumanoidRig {
+export function createAvatarRig(appearanceInput: AvatarAppearance, opts: AvatarRigOptions = {}): HumanoidRig {
   const a = normalizeAppearance(appearanceInput);
-  const root = new THREE.Group();
-  const bones = new Map<HumanBoneName, THREE.Object3D>();
-  const skin = new THREE.MeshStandardMaterial({ color: a.skinTone, roughness: 0.7 });
-  const cloth = new THREE.MeshStandardMaterial({ color: a.outfit.color, roughness: 0.85 });
-  const mk = (name: HumanBoneName, parent: THREE.Object3D, pos: [number, number, number]) => {
-    const o = new THREE.Object3D(); o.name = name; o.position.set(...pos); parent.add(o); bones.set(name, o); return o;
-  };
-  const limb = (bone: THREE.Object3D, len: number, r: number, mat: THREE.Material, dir: THREE.Vector3) => {
-    const m = new THREE.Mesh(new THREE.CapsuleGeometry(r, len, 4, 8), mat);
-    m.position.copy(dir.clone().multiplyScalar(len / 2));
-    m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
-    m.castShadow = true; bone.add(m);
-  };
-  const hips = mk('hips', root, [0, 0.95, 0]);
-  const spine = mk('spine', hips, [0, 0.1, 0]);
-  const chest = mk('chest', spine, [0, 0.2, 0]);
-  const neck = mk('neck', chest, [0, 0.25, 0]);
-  const head = mk('head', neck, [0, 0.08, 0]);
-  const down = new THREE.Vector3(0, -1, 0);
-  limb(spine, 0.35, 0.17, cloth, new THREE.Vector3(0, 1, 0));
-  const headMesh = new THREE.Mesh(new THREE.SphereGeometry(0.16, 16, 12), skin); headMesh.position.y = 0.14; headMesh.castShadow = true; head.add(headMesh);
-  for (const side of ['left', 'right'] as const) {
-    const s = side === 'left' ? 1 : -1;
-    const ua = mk(`${side}UpperArm`, chest, [0.2 * s, 0.18, 0]);
-    limb(ua, 0.24, 0.05, cloth, new THREE.Vector3(s, 0, 0));
-    const la = mk(`${side}LowerArm`, ua, [0.27 * s, 0, 0]);
-    limb(la, 0.22, 0.045, skin, new THREE.Vector3(s, 0, 0));
-    mk(`${side}Hand`, la, [0.25 * s, 0, 0]);
-    const ul = mk(`${side}UpperLeg`, hips, [0.09 * s, -0.05, 0]);
-    limb(ul, 0.36, 0.07, cloth, down);
-    const ll = mk(`${side}LowerLeg`, ul, [0, -0.42, 0]);
-    limb(ll, 0.34, 0.06, cloth, down);
-    mk(`${side}Foot`, ll, [0, -0.4, 0.04]);
+  stats().proceduralBuilt++;
+  try {
+    return track(createTownieRig(a, { lod: opts.lod }));
+  } catch (err) {
+    console.error('[avatars] Townie build failed, using fallback figure', err);
+    return track(fallbackRig(a));
   }
-  const hipsRest = hips.position.clone();
-  return {
-    root, kind: 'procedural', height: 1.75,
-    setBoneRotation(bone, q) { bones.get(bone)?.quaternion.copy(q); },
-    setHipsOffset(x, y, z) { hips.position.set(hipsRest.x + x, hipsRest.y + y, hipsRest.z + z); },
-    setExpression() { /* stub */ },
-    getAttachPoint(slot) { return slot === 'back' ? bones.get('chest') ?? null : bones.get(slot) ?? null; },
-    update() { /* stub */ },
-    dispose() { root.traverse(o => { const m = o as THREE.Mesh; if (m.isMesh) m.geometry.dispose(); }); skin.dispose(); cloth.dispose(); },
-  };
+}
+
+export function isVrmBase(baseModelId: string): boolean {
+  return typeof baseModelId === 'string' && (BASE_MODELS.some(m => m.id === baseModelId && m.kind === 'vrm') || baseModelId.startsWith('vrm-'));
 }
 
 /** Async loader: VRM when the base model is a VRM, else procedural. Never rejects. */
 export async function loadAvatarRig(appearance: AvatarAppearance, opts: AvatarRigOptions = {}): Promise<HumanoidRig> {
-  return createAvatarRig(appearance, opts);
+  const a = normalizeAppearance(appearance);
+  if (!isVrmBase(a.baseModelId)) return createAvatarRig(a, opts);
+  try {
+    const mod = await import('./vrm/vrmRig');
+    const rig = await mod.loadVrmRig(a, opts);
+    stats().vrmLoaded++;
+    return track(rig);
+  } catch (err) {
+    stats().vrmFailed++;
+    console.warn('[avatars] VRM load failed, falling back to procedural Townie', err);
+    return createAvatarRig({ ...a, baseModelId: 'townie-classic' }, opts);
+  }
 }
 
-export function isVrmBase(_baseModelId: string): boolean { return false; }
+function appearanceKey(a: AvatarAppearance): string {
+  try { return JSON.stringify(normalizeAppearance(a)); } catch { return 'invalid'; }
+}
 
 /** React hook: returns a rig for the appearance, swapping + disposing when it changes. */
 export function useAvatarRig(appearance: AvatarAppearance, lod: AvatarLod = 'high'): HumanoidRig | null {
-  const key = JSON.stringify(appearance) + lod;
-  const [rig, setRig] = useState<HumanoidRig | null>(null);
+  const key = appearanceKey(appearance) + '|' + lod;
+  const vrm = isVrmBase(normalizeAppearance(appearance).baseModelId);
+  // Instant procedural rig (also used as a placeholder while a VRM loads).
+  const initial = useMemo(() => ({ key, rig: createAvatarRig(vrm ? { ...normalizeAppearance(appearance), baseModelId: 'townie-classic' } : appearance, { lod }) }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [key]);
+  const [current, setCurrent] = useState(initial);
   useEffect(() => {
-    let alive = true; let created: HumanoidRig | null = null;
-    void loadAvatarRig(appearance, { lod }).then(r => { if (alive) { created = r; setRig(r); } else r.dispose(); });
-    return () => { alive = false; created?.dispose(); };
+    let alive = true;
+    let proc = initial.rig;
+    if (disposed.has(proc)) proc = createAvatarRig(vrm ? { ...normalizeAppearance(appearance), baseModelId: 'townie-classic' } : appearance, { lod });
+    let active: HumanoidRig = proc;
+    setCurrent({ key, rig: proc });
+    if (vrm) {
+      void loadAvatarRig(appearance, { lod }).then(r => {
+        if (!alive) { r.dispose(); return; }
+        if (r.kind === 'vrm') {
+          active = r; setCurrent({ key, rig: r });
+          setTimeout(() => proc.dispose(), 60);
+        } else r.dispose();
+      });
+    }
+    return () => { alive = false; active.dispose(); if (active !== proc) proc.dispose(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
-  return rig;
+  const rig = current.key === key ? current.rig : initial.rig;
+  return disposed.has(rig) && rig === initial.rig && current.key === key ? current.rig : rig;
+}
+
+// ---------------------------------------------------------------- emergency fallback
+function fallbackRig(a: AvatarAppearance): HumanoidRig {
+  const root = new THREE.Group();
+  const bones = new Map<HumanBoneName, THREE.Object3D>();
+  const skin = new THREE.MeshStandardMaterial({ color: a.skinTone, roughness: 0.7 });
+  const cloth = new THREE.MeshStandardMaterial({ color: a.outfit.color, roughness: 0.85 });
+  const pos: Record<HumanBoneName, [number, number, number]> = {
+    hips: [0, 0.95, 0], spine: [0, 0.1, 0], chest: [0, 0.15, 0], upperChest: [0, 0.12, 0], neck: [0, 0.13, 0], head: [0, 0.08, 0],
+    leftShoulder: [0.04, 0.08, 0], leftUpperArm: [0.12, 0, 0], leftLowerArm: [0.26, 0, 0], leftHand: [0.24, 0, 0],
+    rightShoulder: [-0.04, 0.08, 0], rightUpperArm: [-0.12, 0, 0], rightLowerArm: [-0.26, 0, 0], rightHand: [-0.24, 0, 0],
+    leftUpperLeg: [0.09, -0.05, 0], leftLowerLeg: [0, -0.42, 0], leftFoot: [0, -0.4, 0], leftToes: [0, -0.05, 0.1],
+    rightUpperLeg: [-0.09, -0.05, 0], rightLowerLeg: [0, -0.42, 0], rightFoot: [0, -0.4, 0], rightToes: [0, -0.05, 0.1],
+  };
+  const parent: Partial<Record<HumanBoneName, HumanBoneName>> = { spine: 'hips', chest: 'spine', upperChest: 'chest', neck: 'upperChest', head: 'neck', leftShoulder: 'upperChest', leftUpperArm: 'leftShoulder', leftLowerArm: 'leftUpperArm', leftHand: 'leftLowerArm', rightShoulder: 'upperChest', rightUpperArm: 'rightShoulder', rightLowerArm: 'rightUpperArm', rightHand: 'rightLowerArm', leftUpperLeg: 'hips', leftLowerLeg: 'leftUpperLeg', leftFoot: 'leftLowerLeg', leftToes: 'leftFoot', rightUpperLeg: 'hips', rightLowerLeg: 'rightUpperLeg', rightFoot: 'rightLowerLeg', rightToes: 'rightFoot' };
+  for (const n of HUMAN_BONES) { const o = new THREE.Object3D(); o.name = n; o.position.set(...pos[n]); bones.set(n, o); (parent[n] ? bones.get(parent[n]!)! : root).add(o); }
+  const geo = new THREE.CapsuleGeometry(0.05, 0.25, 4, 8);
+  const add = (b: HumanBoneName, m: THREE.Material, p: [number, number, number], r: [number, number, number] = [0, 0, 0]) => { const mesh = new THREE.Mesh(geo, m); mesh.position.set(...p); mesh.rotation.set(...r); mesh.castShadow = true; bones.get(b)!.add(mesh); };
+  add('spine', cloth, [0, 0.15, 0]); add('chest', cloth, [0, 0.1, 0]);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.15, 16, 12), skin); head.position.y = 0.14; bones.get('head')!.add(head);
+  for (const s of ['left', 'right'] as const) {
+    const k = s === 'left' ? 1 : -1;
+    add(`${s}UpperArm`, cloth, [0.13 * k, 0, 0], [0, 0, Math.PI / 2]); add(`${s}LowerArm`, skin, [0.12 * k, 0, 0], [0, 0, Math.PI / 2]);
+    add(`${s}UpperLeg`, cloth, [0, -0.2, 0]); add(`${s}LowerLeg`, cloth, [0, -0.2, 0]);
+  }
+  const hips = bones.get('hips')!; const rest = hips.position.clone();
+  return {
+    root, kind: 'procedural', height: 1.65,
+    setBoneRotation(b, q) { bones.get(b)?.quaternion.copy(q); },
+    setHipsOffset(x, y, z) { hips.position.set(rest.x + x, rest.y + y, rest.z + z); },
+    setExpression() { /* none */ },
+    getAttachPoint(slot) { return slot === 'back' ? bones.get('upperChest') ?? null : bones.get(slot) ?? null; },
+    update() { /* none */ },
+    dispose() { root.removeFromParent(); geo.dispose(); head.geometry.dispose(); skin.dispose(); cloth.dispose(); },
+  };
 }

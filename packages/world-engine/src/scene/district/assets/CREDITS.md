@@ -1,8 +1,9 @@
 # Downtown district — credits & licences
 
 The district (`src/scene/district/**`) is **100 % procedural code written for HELLO WORLD**.
-It ships **no third-party binary assets** (no GLB/textures): window textures are drawn at
-runtime on a `<canvas>`; all geometry is generated in `build.ts` from the plan in `plan.ts`.
+It ships **no third-party binary assets** (no GLB/textures/fonts): the window textures and the
+rooftop "HELLO WORLD" sign are drawn at runtime on a `<canvas>` (system font stack); all geometry
+is generated in `build.ts` from the deterministic plan in `plan.ts`.
 
 ## Inspiration (no code or assets copied)
 - **ProceduralBuildingsThreeJS** — https://github.com/achrefelouafi/ProceduralBuildingsThreeJS

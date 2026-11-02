@@ -24,6 +24,7 @@ import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.j
 import type { AvatarAppearance } from '@hello-world/contracts';
 import { HUMAN_BONES, type AttachSlot, type AvatarLod, type ExpressionName, type HumanBoneName, type HumanoidRig } from '../rig';
 import { BODIES, SKELETONS, type RealisticBodyData } from './bodies';
+import { DEFAULT_APPEARANCE } from '../catalog';
 import { GeoBuilder } from '../procedural/geom';
 import { buildHeadAccessories } from '../procedural/accessories';
 import { RX, RY, RZ, HC } from '../procedural/head';
@@ -71,7 +72,8 @@ function stats(): Stats {
 
 /* ------------------------------------------------------------------ assets */
 
-interface PartGeo { geo: THREE.BufferGeometry; hair: boolean; groups: { slot: number; tile: number }[] }
+/** groups[i] uses material i; for hair with `soft`, groups are duplicated (n + i) for the transparent edge pass. */
+interface PartGeo { geo: THREE.BufferGeometry; hair: boolean; soft: boolean; groups: { slot: number; tile: number }[] }
 interface BodyAsset {
   id: string; data: RealisticBodyData; bones: string[]; parents: number[];
   /** Bind pose, local (relative to parent bone / model) and world (model space). */
@@ -117,7 +119,7 @@ function toFloat(a: THREE.BufferAttribute | THREE.InterleavedBufferAttribute, si
 }
 
 /** Rebuild one primitive: float positions/normals in model space, index reordered into (slot, tile) groups, props dropped. */
-function buildPart(mesh: THREE.Mesh, data: RealisticBodyData): PartGeo | null {
+function buildPart(mesh: THREE.Mesh, data: RealisticBodyData, softHair: boolean): PartGeo | null {
   const src = mesh.geometry;
   const slotA = src.getAttribute('_slot'), partA = src.getAttribute('_part'), uvA = src.getAttribute('uv');
   const index = src.index;
@@ -166,8 +168,10 @@ function buildPart(mesh: THREE.Mesh, data: RealisticBodyData): PartGeo | null {
     off += arr.length;
   });
   geo.setIndex(new THREE.BufferAttribute(idx, 1));
+  const soft = hair && softHair;
+  if (soft) { const n = groups.length; for (let gi = 0; gi < n; gi++) { const g = geo.groups[gi]!; geo.addGroup(g.start, g.count, n + gi); } }
   geo.computeBoundingSphere();
-  return { geo, hair, groups };
+  return { geo, hair, soft, groups };
 }
 
 /** World-space rest corrections that turn an A-pose arm chain into a T-pose (identity for T-posed bodies). */
@@ -224,7 +228,7 @@ async function loadBody(id: string, buffer?: ArrayBuffer): Promise<BodyAsset | n
   for (let li = 0; li < 2; li++) {
     const node = gltf.scene.getObjectByName('LOD' + li);
     const parts: PartGeo[] = [];
-    node?.traverse((o) => { if ((o as THREE.Mesh).isMesh) { const p = buildPart(o as THREE.Mesh, data); if (p) parts.push(p); } });
+    node?.traverse((o) => { if ((o as THREE.Mesh).isMesh) { const p = buildPart(o as THREE.Mesh, data, li === 0); if (p) parts.push(p); } });
     lods.push(parts);
   }
   gltf.scene.traverse((o) => { if ((o as THREE.Mesh).isMesh) (o as THREE.Mesh).geometry.dispose(); });
@@ -270,23 +274,50 @@ const texName = (body: BodyAsset, hair: boolean, layer: number): string => `${bo
 /* --------------------------------------------------------------- materials */
 
 const CLS_ROUGH = [0.6, 0.88, 0.12, 0.55];
+/** 'o' opaque body slot, 'h' hair core (alpha-tested, depth-writing, alpha-to-coverage), 'hs' hair soft-edge pass. */
+type MatKind = 'o' | 'h' | 'hs';
 
-function baseMaterial(body: BodyAsset, slot: number, tile: number, hair: boolean, tex: THREE.Texture | null): THREE.MeshStandardMaterial {
-  const key = `${body.id}:${hair ? 'h' : 'o'}:${slot}:${tile}`;
+function baseMaterial(body: BodyAsset, slot: number, tile: number, kind: MatKind, tex: THREE.Texture | null): THREE.MeshStandardMaterial {
+  const key = `${body.id}:${kind}:${slot}:${tile}`;
   let m = matCache.get(key);
   if (!m) {
-    const cls = hair ? 3 : body.data.cls[slot] ?? 1;
+    const cls = kind === 'o' ? body.data.cls[slot] ?? 1 : 3;
     m = new THREE.MeshStandardMaterial({
-      map: tex, color: tex ? 0xffffff : cls === 0 ? 0xc89a7c : 0x777777, roughness: CLS_ROUGH[cls] ?? 0.8, metalness: 0,
-      side: hair ? THREE.DoubleSide : THREE.FrontSide, alphaTest: hair ? 0.4 : 0, envMapIntensity: 0.7,
+      map: tex, color: tex ? 0xffffff : cls === 0 ? 0xc89a7c : cls === 3 ? 0x3a2a20 : 0x777777,
+      roughness: CLS_ROUGH[cls] ?? 0.8, metalness: 0, envMapIntensity: 0.7,
     });
+    if (kind === 'h') {
+      // opaque core: alpha test + depth write; with MSAA (world composer / antialiased canvas) alpha-to-coverage turns
+      // the cut-out edge into real coverage. Its alpha output is masked at draw time (see maskAlphaWrites).
+      m.side = THREE.DoubleSide; m.alphaTest = 0.4; m.alphaToCoverage = true;
+      m.userData.hwMaskAlpha = true;
+    } else if (kind === 'hs') {
+      // soft edges: the thin strand fringe below the core threshold, blended over the core without writing depth
+      m.side = THREE.DoubleSide; m.transparent = true; m.depthWrite = false; m.alphaTest = 0.03;
+    }
     m.name = `realistic:${key}`;
     matCache.set(key, m);
   }
   return m;
 }
 
-/** Garment recolour (Valdrada-style): keep the texture's shading/detail, swap its hue for the outfit colour. */
+/**
+ * Alpha-to-coverage writes the fragment alpha into the colour buffer; on an alpha-enabled canvas (the creator) that
+ * would punch see-through specks at hair edges. Keep RGB writes but mask alpha for the core hair draws.
+ */
+function maskAlphaWrites(mesh: THREE.Mesh): void {
+  mesh.onBeforeRender = (renderer, _s, _c, _g, material) => {
+    if (!(material as THREE.Material).userData.hwMaskAlpha) return;
+    renderer.state.buffers.color.setMask(true); // sync three's cached mask, then drop alpha for this draw only
+    renderer.getContext().colorMask(true, true, true, false);
+  };
+  mesh.onAfterRender = (renderer, _s, _c, _g, material) => {
+    if ((material as THREE.Material).userData.hwMaskAlpha) renderer.getContext().colorMask(true, true, true, true);
+  };
+}
+
+/** Garment recolour (Valdrada-style), partial and luminance-preserving: the outfit hue at the texel's own brightness,
+ *  blended ~50% so the fabric's pattern, folds and original character stay visible. */
 function tintedMaterial(base: THREE.MeshStandardMaterial, tint: THREE.Color): THREE.MeshStandardMaterial {
   const m = base.clone();
   m.name = base.name + ':tint';
@@ -297,9 +328,10 @@ function tintedMaterial(base: THREE.MeshStandardMaterial, tint: THREE.Color): TH
       .replace('#include <common>', '#include <common>\nuniform vec3 uHwTint;')
       .replace('#include <map_fragment>', `#include <map_fragment>
       {
-        // luminance keeps folds/stitching; the floor lets dark garments still read as the chosen colour
-        float hwL = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722));
-        diffuseColor.rgb = mix(diffuseColor.rgb, uHwTint * clamp(0.22 + hwL * 1.9, 0.0, 1.3), 0.85);
+        const vec3 hwW = vec3(0.2126, 0.7152, 0.0722);
+        float hwL = dot(diffuseColor.rgb, hwW);
+        vec3 hwC = min(uHwTint * (hwL / max(dot(uHwTint, hwW), 0.02)), vec3(1.0));
+        diffuseColor.rgb = mix(diffuseColor.rgb, hwC, 0.5);
       }`);
   };
   m.customProgramCacheKey = () => 'hw-realistic-tint';
@@ -372,12 +404,14 @@ class RealisticRig implements HumanoidRig {
     this.kneeHeight = (body.restWorldP[kneeIdx]?.y ?? 0.5) * this.scale;
 
     const skeleton = (this.skeleton = new THREE.Skeleton(this.bones, body.boneInverses.map((mm) => mm.clone())));
-    const tint = body.data.set === 'mh' && appearance.outfit?.color ? safeColor(appearance.outfit.color) : null;
+    // the catalog default colour means "no preference": keep the scan's own outfit so looks match the descriptions
+    const tintStr = appearance.outfit?.color?.trim().toLowerCase() ?? '';
+    const tint = body.data.set === 'mh' && tintStr && tintStr !== DEFAULT_APPEARANCE.outfit.color.toLowerCase() ? safeColor(tintStr) : null;
     const li = lod === 'low' && body.lods[1]?.length ? 1 : 0;
     for (const part of body.lods[li]!) {
-      const mats = part.groups.map(({ slot, tile }) => {
+      const mats: THREE.Material[] = part.groups.map(({ slot, tile }) => {
         const tex = textures.get(texName(body, part.hair, body.data.layers[slot]! + tile)) ?? null;
-        const base = baseMaterial(body, slot, tile, part.hair, tex);
+        const base = baseMaterial(body, slot, tile, part.hair ? 'h' : 'o', tex);
         if (tint && !part.hair && body.data.part[slot] === 1 && body.data.cls[slot] === 1) {
           const tm = tintedMaterial(base, tint);
           this.ownMaterials.push(tm);
@@ -385,8 +419,12 @@ class RealisticRig implements HumanoidRig {
         }
         return base;
       });
+      if (part.soft) {
+        for (const { slot, tile } of part.groups) mats.push(baseMaterial(body, slot, tile, 'hs', textures.get(texName(body, true, body.data.layers[slot]! + tile)) ?? null));
+      }
       const mesh = new THREE.SkinnedMesh(part.geo, mats);
       mesh.name = part.hair ? 'realistic-hair' : 'realistic-body';
+      if (part.hair) maskAlphaWrites(mesh);
       mesh.castShadow = true; mesh.receiveShadow = !part.hair;
       mesh.boundingSphere = POSE_BOUNDS.clone(); // generous fixed bounds (any pose, incl. raised arms / sitting) keep culling valid
       this.model.add(mesh);
@@ -454,7 +492,8 @@ class RealisticRig implements HumanoidRig {
     this.dirty = true;
   }
 
-  setExpression(_name: ExpressionName, _weight: number): void { /* these bodies ship without morph targets */ }
+  /** No-op: the scans have no morph targets and the CARLA GEN2 skeleton has no jaw or eyelid bones (only eye_L/R). */
+  setExpression(_name: ExpressionName, _weight: number): void { /* unsupported */ }
 
   getAttachPoint(slot: AttachSlot): THREE.Object3D | null { return this.attach[slot] ?? null; }
 

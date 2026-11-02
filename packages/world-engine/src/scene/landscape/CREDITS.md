@@ -35,6 +35,12 @@ SOFTWARE.
 | `terrain.ts` | `src/terrain/compiler/heightField.ts` → `sampleHeightField` | Landform composition: massif mask (spine × regional fbm), domain-warped ridged multifractal range (`RIDGE_SHARPNESS`, amplitudes), billow foothills, fbm plains, drainage-valley carving with flattened floors. Re-scaled (domain ×7.5, heights ÷7.5), radial spine, town blend, lake basin are ours |
 | `forest.ts` | `src/tree/forestPresets.ts` → `generateForestLayoutInRegion`, `standCover`, `habitatNoise`, `gridHash`, `SpacingGrid`, `hashString`, `mulberry32` ('temperate-mixed' density/gap rate) | Region forest layout (rejection sampling, three-scale stand field, open-grown size bias, spacing grid). Region coverage (ring, slope, tree line, lake, district), species mix and scale are ours |
 
+Ours (no third-party code): `buildLandscape.ts` (log-polar LOD mesh, vertex-colour
+material + WebGL shader patch, lake), `rocks.ts` (boulder scatter), `Landscape.tsx`,
+`terrain.test.ts`, and the town-seam blend / lake basin / radial envelope in `terrain.ts`.
+The town ground colour formula reproduced in `buildLandscape.ts` comes from this
+repo's own `src/scene/town.ts`.
+
 Not used: super-terrain's WebGPU/TSL rendering (`src/terrain/rendering/**`),
 workers, BVH/CSG modules (three-mesh-bvh / three-bvh-csg / meshoptimizer are not
 dependencies here), the tree mesh generator (used separately by

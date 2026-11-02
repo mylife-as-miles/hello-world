@@ -16,26 +16,51 @@ export function fill(template: string, vars: Vars): string {
   return template.replace(/\{(\w+)\}/g, (_m, k: string) => vars[k] ?? '').replace(/\s+([,.!?])/g, '$1').replace(/\s{2,}/g, ' ').trim();
 }
 
-/** Pick from a bank, avoiding templates used recently anywhere in town. */
+export const LINE_REUSE_SECONDS = 180;
+
+/** Pick from a bank, never reusing a template within ~3 sim-minutes town-wide (least-recently-used fallback). */
 export function choose(w: World, key: string, bank: Bank, salt: string): string {
-  let idx = 0;
-  for (let attempt = 0; attempt < 5; attempt++) {
-    idx = w.rng.int(bank.length, `line:${key}`, salt);
-    if (!w.recentLines.includes(`${key}#${idx}`)) break;
+  const fresh: number[] = [];
+  let lru = 0;
+  let lruAt = Infinity;
+  for (let i = 0; i < bank.length; i++) {
+    const at = w.lineUsedAt.get(`${key}#${i}`);
+    if (at === undefined || w.simTime - at >= LINE_REUSE_SECONDS) fresh.push(i);
+    else if (at < lruAt) { lruAt = at; lru = i; }
   }
-  w.recentLines.push(`${key}#${idx}`);
-  if (w.recentLines.length > 48) w.recentLines.shift();
+  const idx = fresh.length ? fresh[w.rng.int(fresh.length, `line:${key}`, salt)]! : lru;
+  w.lineUsedAt.set(`${key}#${idx}`, w.simTime);
+  if (w.lineUsedAt.size > 1500) for (const [k, at] of [...w.lineUsedAt]) if (w.simTime - at > LINE_REUSE_SECONDS) w.lineUsedAt.delete(k);
   return bank[idx]!;
 }
 
-function flavored(w: World, a: Agent, key: string, generic: Bank, byTrait: Partial<Record<string, Bank>>, p = 0.5): string {
+/** True when the bank still has a template not used in the last ~3 minutes. */
+export function hasFresh(w: World, key: string, bank: Bank): boolean {
+  for (let i = 0; i < bank.length; i++) { const at = w.lineUsedAt.get(`${key}#${i}`); if (at === undefined || w.simTime - at >= LINE_REUSE_SECONDS) return true; }
+  return false;
+}
+
+/** First source with a fresh template wins (keeps personality flavour); otherwise least-recently-used across all. */
+export function chooseFrom(w: World, sources: Array<readonly [string, Bank]>, salt: string): string {
+  for (const [key, bank] of sources) if (bank.length && hasFresh(w, key, bank)) return choose(w, key, bank, salt);
+  let best: readonly [string, Bank] = sources[0]!;
+  let bestAt = Infinity;
+  for (const src of sources) for (let i = 0; i < src[1].length; i++) { const at = w.lineUsedAt.get(`${src[0]}#${i}`) ?? -Infinity; if (at < bestAt) { bestAt = at; best = src; } }
+  return choose(w, best[0], best[1], salt);
+}
+
+function flavored(w: World, a: Agent, key: string, generic: Bank, byTrait: Partial<Record<string, Bank>>, p = 0.5, fallback?: readonly [string, Bank]): string {
   const traits = a.personality.filter(t => byTrait[t]);
   const grumpy = traits.includes('grumpy');
+  const sources: Array<readonly [string, Bank]> = [];
   if (traits.length && w.rng.chance(grumpy ? 0.75 : p, `flavor:${key}`, a.id)) {
     const t = grumpy ? 'grumpy' : w.rng.pick(traits, `flavor-t:${key}`, a.id);
-    return choose(w, `${key}:${t}`, byTrait[t]!, a.id);
+    sources.push([`${key}:${t}`, byTrait[t]!]);
   }
-  return choose(w, key, generic, a.id);
+  sources.push([key, generic]);
+  for (const t of traits) sources.push([`${key}:${t}`, byTrait[t]!]);
+  if (fallback) sources.push(fallback);
+  return chooseFrom(w, sources, a.id);
 }
 
 const first = (name: string) => name;
@@ -47,59 +72,96 @@ const OPENERS: Record<WorldClock['period'], Bank> = {
   morning: [
     'Morning, {name}! Sleep okay?', 'Good morning, {name}! The air smells like cinnamon buns.', '{name}! Early bird, huh?',
     'Hey {name}, coffee first or chit-chat first?', 'Rise and shine, {name}!', 'Morning, {name}! Big plans today?',
+    'Oh, good morning {name}! Fresh day, fresh start.', '{name}! You’re up early. Couldn’t sleep either?', 'Top of the morning, {name}!',
+    'Hey {name}! The bakery just opened, I can smell it from here.',
   ],
   afternoon: [
     'Afternoon, {name}! What have you been up to?', 'Hey {name}! Perfect day for a stroll.', 'Oh hi, {name}! Fancy meeting you {at}.',
-    '{name}! Just the person I wanted to see.', 'Heyyy {name}, how is your day going?', '{name}! Long time no see. Like, an hour.',
+    '{name}! Just the person I wanted to see.', 'Heyyy {name}, how’s your day going?', '{name}! Long time no see. Like, an hour.',
+    'Hi {name}! Taking a break too?', 'Hey {name}, got a minute?', '{name}! I was hoping I’d bump into someone fun.',
+    'Afternoon, {name}. Busy day in town, huh?',
   ],
   evening: [
     'Evening, {name}! The lamps are flickering on.', 'Hey {name}, catching the golden hour?', '{name}! You heading to the stage tonight?',
-    'Look who it is! Evening, {name}.', '{name}! Perfect evening for a wander, right?',
+    'Look who it is! Evening, {name}.', '{name}! Perfect evening for a wander, right?', 'Hey {name}, how was your day?',
+    'Evening, {name}. I could use a little company.', '{name}! The sky’s putting on a show tonight.', 'Oh hey {name}, winding down too?',
+    'Hi {name}! Dinner plans, or are we snacking again?',
   ],
   night: [
     'Still up, {name}? Me too.', 'Hey {name}... the stars are wild tonight.', 'Welcome to the night owl club, {name}.',
-    '{name}! Fancy seeing you out this late.', 'Psst, {name}. The town is so pretty at night.',
+    '{name}! Fancy seeing you out this late.', 'Psst, {name}. The town is so pretty at night.', 'Can’t sleep either, {name}?',
+    '{name}! Midnight snack run?', 'Evening, {name}... or is it morning now?', 'Hey {name}, listen to how quiet it is.',
+    '{name}! The fountain sparkles at night, have you seen?',
   ],
 };
 const OPENERS_BY_TRAIT: Partial<Record<string, Bank>> = {
-  grumpy: ['Oh. It’s you, {name}.', '{name}. Don’t make it weird.', 'Hmph. Hello, {name}.', '{name}. I suppose you want to chat.'],
-  shy: ['Oh! Um, hi {name}...', 'H-hey {name}. Nice to see you.', 'Hi {name}... I was hoping I’d see you.'],
-  playful: ['{name}! Tag, you’re it!', 'Psst, {name}. Wanna hear a secret? Kidding. Hi!', '{name}! Bet you can’t guess what I just saw.'],
-  chaotic: ['{name}! I’ve SO much to tell you. Most of it’s true.', '{name}!! Did you see that pigeon? Iconic.', '{name}, quick: cats or capes? Wrong. Both.'],
-  romantic: ['{name}, you’re glowing today!', 'Hello, {name}. This place suits you.'],
-  bookish: ['Hello, {name}. I just finished a chapter, perfect timing.', '{name}! I was reading about you. Kidding. Hi!'],
-  foodie: ['{name}! Have you tried the new pastries yet?', '{name}, I smell waffles. Do you smell waffles?'],
-  competitive: ['{name}. Rematch at the arcade later?', '{name}! Ready to lose at Star Blaster again?'],
-  energetic: ['{name}! Race you to the fountain!', '{name}! Isn’t today amazing?!'],
-  kind: ['{name}! I hope your day has been lovely.', 'Hi {name}! You look like you could use a friend.'],
-  curious: ['{name}! Did you know the fountain hums at night?', '{name}, ever wonder where the portal goes?'],
-  friendly: ['{name}! Always great to see you!', 'Hey hey, {name}!'],
-  creative: ['{name}! I just had the best idea for a dance move.', '{name}, the light here is gorgeous today.'],
-  lazy: ['Oh hey {name}. Don’t mind me, just conserving energy.', '{name}... is it nap o’clock yet?'],
+  grumpy: ['Oh. It’s you, {name}.', '{name}. Don’t make it weird.', 'Hmph. Hello, {name}.', '{name}. I suppose you want to chat.', 'Make it quick, {name}.'],
+  shy: ['Oh! Um, hi {name}...', 'H-hey {name}. Nice to see you.', 'Hi {name}... I was hoping I’d see you.', 'Um. Hi. It’s me. Hi, {name}.'],
+  playful: ['{name}! Tag, you’re it!', 'Psst, {name}. Wanna hear a secret? Kidding. Hi!', '{name}! Bet you can’t guess what I just saw.', 'Boo! Ha, got you, {name}!'],
+  chaotic: ['{name}! I have SO much to tell you. Most of it is true.', '{name}!! Did you see that pigeon? Iconic.', '{name}, quick: cats or capes? Wrong. Both.', '{name}! I just invented a new sport. It’s mostly yelling.'],
+  romantic: ['{name}, you’re glowing today!', 'Hello, {name}. This place suits you.', '{name}! You make this town look good.'],
+  bookish: ['Hello, {name}. I just finished a chapter, perfect timing.', '{name}! I was reading about you. Kidding. Hi!', 'Ah, {name}. Just the person to discuss plot twists with.'],
+  foodie: ['{name}! Have you tried the new pastries yet?', '{name}, I smell waffles. Do you smell waffles?', '{name}! Quick, rate your breakfast out of ten.'],
+  competitive: ['{name}. Rematch at the arcade later?', '{name}! Ready to lose at Star Blaster again?', '{name}! I’ve been practicing. Be afraid.'],
+  energetic: ['{name}! Race you to the fountain!', '{name}! Isn’t today amazing?!', '{name}! I’ve been up for hours! Hi!'],
+  kind: ['{name}! I hope your day has been lovely.', 'Hi {name}! You look like you could use a friend.', '{name}! I saved you a smile. Here it is.'],
+  curious: ['{name}! Did you know the fountain hums at night?', '{name}, ever wonder where the portal goes?', '{name}! Have you ever counted the lamps in town? I have.'],
+  friendly: ['{name}! Always great to see you!', 'Hey hey, {name}!', '{name}! There’s my favorite neighbor!'],
+  creative: ['{name}! I just had the best idea for a dance move.', '{name}, the light here is gorgeous today.', '{name}! Hold still, I want to remember this color.'],
+  lazy: ['Oh hey {name}. Don’t mind me, just conserving energy.', '{name}... is it nap o’clock yet?', 'Hi {name}. I walked all the way here. Exhausting.'],
   'night-owl': ['The night is young, {name}!', '{name}! Finally, someone who gets it. Night is the best.'],
 };
 
+const OPENERS_ANY: Bank = [
+  'Hey, {name}! Got a sec?', 'Oh! {name}! Hi!', 'There you are, {name}!', '{name}! How’s life treating you?', 'Well hello, {name}!',
+  'Hi {name}! What’s the latest?', 'Hey {name}, you’ll never guess my day.', '{name}! Come here, I need an opinion.', 'Ahoy, {name}!', 'Hiya, {name}! Fancy a chat?',
+];
+const RESPONSES_ANY: Bank = [
+  'Oh! Hi there, {name}.', 'Hey, {name}! Nice to see a friendly face.', '{name}! What a nice surprise.', 'Hello hello, {name}!',
+  'Well, if it isn’t {name}!', 'Hi {name}! How are things?', 'Hey {name}! Good timing.', '{name}! Long time, no chat.',
+];
+const AGREE: Bank = [
+  'Totally!', 'Right?!', 'Couldn’t agree more.', 'Ha! Exactly.', 'So true.', 'I was just thinking that!',
+  'Yes! A hundred percent.', 'Love that.', 'Same here!', 'You always say the best things.',
+];
 const INTROS: Bank = [
-  'Hi! I’m {me}. I don’t think we have met!', 'Hello there! {me}, nice to meet you.', 'Hey, are you new around here? I’m {me}!',
-  'Hi! {me}. I live over at {home}.', 'Oh, a new face! I’m {me}.',
+  'Hi! I’m {me}. I don’t think we’ve met!', 'Hello there! {me}, nice to meet you.', 'Hey, are you new around here? I’m {me}!',
+  'Hi! I’m {me}, I live over at {home}.', 'Oh, a new face! I’m {me}.', 'Hi there! I’m {me}. And you are...?',
+  'Hello! {me} here. Love your style, by the way.', 'Hey! I’ve seen you around. I’m {me}!', 'Hi! I’m {me}. Welcome to the neighborhood, officially.',
+  'Hey there, neighbor! The name’s {me}.',
 ];
 const INTROS_BY_TRAIT: Partial<Record<string, Bank>> = {
-  grumpy: ['...I’m {me}. You’re new.', 'Name’s {me}. Don’t wear it out.'],
-  shy: ['Um, hi... I’m {me}. Nice to meet you.'],
-  playful: ['Hi hi! I’m {me}, local legend. Allegedly.'],
+  grumpy: ['...I’m {me}. You’re new.', 'Name’s {me}. Don’t wear it out.', '{me}. I live here. Obviously.'],
+  shy: ['Um, hi... I’m {me}. Nice to meet you.', 'H-hello. I’m {me}. Sorry, I’m bad at this.'],
+  playful: ['Hi hi! I’m {me}, local legend. Allegedly.', 'Greetings, traveler! I’m {me}. Ha, kidding. Hi!'],
+  chaotic: ['I’m {me}! I’ve lived here for a hundred years. Or a week.'],
+  bookish: ['Hello. I’m {me}. I’m usually behind a book.'],
+  foodie: ['Hi! I’m {me}. Ask me anything about the café menu.'],
 };
 const VISITOR_INTROS: Bank = [
   'Hi! I came through the portal with the {channel} raid!', 'Hello! Visiting from {channel}. This town is adorable!', 'Hey! Raid party member, reporting for fun!',
 ];
 const INTRO_REPLIES_POS: Bank = [
-  '{name}! Lovely to meet you. I’m {me}.', 'Hi {name}! I’m {me}. We’re going to be friends, I can tell.',
-  'Oh hey! {me}. Welcome to my favorite-neighbors list, {name}.', 'Nice to meet you, {name}! I’m {me}.',
+  'Hi! I’m {me}. Lovely to meet you, {name}.', 'Nice to meet you, {name}! I’m {me}.', '{name}! I’m {me}. I think we’re going to be friends.',
+  'Hey {name}! I’m {me}. Welcome to the neighbor club!', 'So nice to finally meet you, {name}. I’m {me}!', 'Hi {name}! I’m {me}. Want the grand tour sometime?',
+  'I’m {me}, and I’ve already decided I like you, {name}.', 'Oh, hi! I’m {me}. Your timing is perfect, {name}.', 'Hey! {me} here. Any friend of the town is a friend of mine.',
+  'Hello, {name}! I’m {me}. You’ll love it here.',
 ];
-const INTRO_REPLIES_NEG: Bank = ['Mm. {me}. Hi, I guess.', '{me}. Nice to... yeah.', 'I’m {me}. I’m also busy.'];
+const INTRO_REPLIES_POS_BY_TRAIT: Partial<Record<string, Bank>> = {
+  grumpy: ['{me}. ...Fine. Nice to meet you, {name}.', 'I’m {me}. You seem tolerable, {name}.'],
+  shy: ['Oh! I’m {me}. N-nice to meet you, {name}.'],
+  playful: ['I’m {me}! Wanna be best friends? Too soon? Okay.'],
+};
+const INTRO_REPLIES_NEG: Bank = [
+  'Mm. {me}. Hi, I guess.', 'I’m {me}. I’m also busy.', '{me}. Can we do this later?', 'Hmph. {me}. Hello.',
+  'I’m {me}. Not really a people person right now.', '{me}. Sure. Hi.',
+];
 
 const RESPONSES_POS: Bank = [
   'Hey {name}! Great to see you!', 'Oh, hi {name}! You just made my day.', '{name}! I was hoping I’d run into you.',
-  'Ha, hi {name}! Always a pleasure.', 'Hiya {name}! Pull up a cobblestone.', 'Hey you! How is it going, {name}?',
+  'Ha, hi {name}! Always a pleasure.', 'Hiya {name}! Pull up a cobblestone.', 'Hey you! How’s it going, {name}?',
+  '{name}! Perfect timing, I was getting bored.', 'Hi {name}! You look great today.', 'Oh hey, {name}! What’s new?',
+  '{name}! My favorite person to bump into.', 'Hey {name}! I was just thinking about you.', 'Hi hi, {name}! Come, sit, chat.',
 ];
 const RESPONSES_POS_BY_TRAIT: Partial<Record<string, Bank>> = {
   grumpy: ['Hmph. Fine. Hi, {name}.', '...Okay, that was nice. Hi.', 'You again. ...Good.'],
@@ -111,7 +173,8 @@ const RESPONSES_POS_BY_TRAIT: Partial<Record<string, Bank>> = {
 };
 const RESPONSES_NEG: Bank = [
   'Not now, {name}.', 'Ugh, I’m not in the mood, {name}.', 'Can’t a person sulk in peace?', 'Mm. Sure. Whatever.',
-  '{name}, I’ve had a day. Later?',
+  '{name}, I’ve had a day. Later?', 'Hmph. Hi, {name}.', 'Not today, {name}.', 'I’m kind of busy, {name}.',
+  'Mm-hm. Sure, {name}.', 'Can it wait, {name}?',
 ];
 const RESPONSES_TIRED: Bank = ['Sorry {name}, I’m running on fumes.', '*yawns* Oh, hi {name}...', 'Five more minutes, {name}...'];
 
@@ -215,14 +278,19 @@ const BEFRIEND_NO: Bank = ['Let’s hang out a bit more first, {name}!', 'Maybe!
 
 const WELCOMES: Bank = [
   'Welcome to the neighborhood, {name}!', 'Hey {name}! Welcome to town. The café is that way!', 'A new face! Welcome, {name}!',
-  'Welcome, {name}! You picked a great day to move in.', 'Hi {name}! Welcome! You’re going to love it here.',
+  'Welcome, {name}! You picked a great day to move in.', 'Hi {name}! Welcome! You’re going to love it here.', 'Welcome, welcome, {name}! Make yourself at home.',
+  '{name}! Welcome! Ask me anything, I know every shortcut.', 'Oh, hello {name}! Welcome to the friendliest town around.', 'Welcome, {name}! The stage gets lively at night.',
+  'Hey, welcome {name}! Want me to show you the fountain?',
 ];
 const WELCOMES_BY_TRAIT: Partial<Record<string, Bank>> = {
   grumpy: ['Another one. ...Welcome, {name}.', 'Hmph. Welcome, {name}. Wipe your feet.'],
   foodie: ['Welcome, {name}! First stop: Sunbeam Café. Trust me.'],
   playful: ['Welcome, {name}! You’re it! Kidding. Welcome!'],
 };
-const NEWCOMER_HELLO: Bank = ['Hi everyone! I’m {me}!', 'Hello, neighborhood!', 'Wow, this place is even cuter in person!', 'Hi! Just moved in. I’m {me}!'];
+const NEWCOMER_HELLO: Bank = [
+  'Hi everyone! I’m {me}!', 'Hello, neighborhood!', 'Wow, this place is even cuter in person!', 'Hi! Just moved in. I’m {me}!',
+  'Hey hey! {me} has arrived!', 'Hello! Is this where the fun is?', 'Hi all! Where’s the café everyone talks about?', 'Hiya! New neighbor here!',
+];
 const REJOIN_HELLO: Bank = ['I’m back, everyone!', 'Hello again, neighborhood!', 'Did you miss me?'];
 const NEW_LOOK: Bank = ['New look, who dis?', 'Fresh fit! What do you think?', 'Feeling brand new today!', 'Do you like it? I just changed my whole look!', 'Mirror, mirror... nailed it.'];
 const LOOK_COMPLIMENTS: Bank = ['Ooh, {name}! Love the new look!', '{name}?! Barely recognized you. Gorgeous!', 'Okay {name}, that style is a whole upgrade.', 'New look suits you, {name}!'];
@@ -287,7 +355,7 @@ function heTopic(t: TopicDef, w: World, s: Agent, vars: Vars): Topic {
   return {
     id: t.id, label: t.label, joke: !!t.joke,
     line: fill(choose(w, `topic:${t.id}`, t.lines, s.id), vars),
-    reply: fill(choose(w, `reply:${t.id}`, t.replies, s.id), vars),
+    reply: fill(chooseFrom(w, [[`reply:${t.id}`, t.replies], ['reply:any', AGREE]], s.id), vars),
   };
 }
 
@@ -296,34 +364,36 @@ export function pickTopic(ctx: TopicContext): Topic {
   const { w, speaker, listener, place, friendship, memories, vars } = ctx;
   const clock = worldClock(w.simTime);
   const cands: Array<{ w: number; make: () => Topic | null }> = [];
+  const fresh = (t: TopicDef, weight: number) => (hasFresh(w, `topic:${t.id}`, t.lines) ? weight : 0);
   if (friendship >= 65 && memories.length) {
     cands.push({ w: 2.2, make: () => {
       const cb = memoryCallback(w, speaker, listener, memories);
       return cb ? { id: 'memory', label: 'old times', line: cb, reply: fill(choose(w, 'reply:memory', MEMORY_REPLIES, listener.id), vars), joke: false } : null;
     } });
   }
-  if (w.simTime - w.facts.raidAt < 200 && w.facts.raidChannel) cands.push({ w: 1.6, make: () => heTopic(RAID_TOPIC, w, speaker, vars) });
-  if (w.simTime - w.facts.confettiAt < 90) cands.push({ w: 1.2, make: () => heTopic(CONFETTI_TOPIC, w, speaker, vars) });
+  if (w.simTime - w.facts.raidAt < 200 && w.facts.raidChannel) cands.push({ w: fresh(RAID_TOPIC, 1.6), make: () => heTopic(RAID_TOPIC, w, speaker, vars) });
+  if (w.simTime - w.facts.confettiAt < 90) cands.push({ w: fresh(CONFETTI_TOPIC, 1.2), make: () => heTopic(CONFETTI_TOPIC, w, speaker, vars) });
   const nc = w.facts.newcomer;
   if (nc && w.simTime - nc.at < 240 && nc.name !== speaker.displayName && nc.name !== listener.displayName) {
-    cands.push({ w: 1.2, make: () => heTopic(NEWCOMER_TOPIC, w, speaker, { ...vars, newcomer: nc.name }) });
+    cands.push({ w: fresh(NEWCOMER_TOPIC, 1.2), make: () => heTopic(NEWCOMER_TOPIC, w, speaker, { ...vars, newcomer: nc.name }) });
   }
   const dancer = [...w.agents.values()].find(o => o !== speaker && o !== listener && o.activity.startsWith('dancing'));
-  if (dancer) cands.push({ w: 0.9, make: () => heTopic(DANCER_TOPIC, w, speaker, { ...vars, dancer: dancer.displayName }) });
-  cands.push({ w: w.weather === 'sunny' ? 0.55 : 1.4, make: () => heTopic(WEATHER_TOPICS[w.weather], w, speaker, vars) });
+  if (dancer) cands.push({ w: fresh(DANCER_TOPIC, 0.9), make: () => heTopic(DANCER_TOPIC, w, speaker, { ...vars, dancer: dancer.displayName }) });
+  cands.push({ w: fresh(WEATHER_TOPICS[w.weather], w.weather === 'sunny' ? 0.55 : 1.4), make: () => heTopic(WEATHER_TOPICS[w.weather], w, speaker, vars) });
   const pt = PLACE_TOPICS[place.kind];
-  if (pt) cands.push({ w: 0.9, make: () => heTopic(pt, w, speaker, vars) });
+  if (pt) cands.push({ w: fresh(pt, 0.9), make: () => heTopic(pt, w, speaker, vars) });
   const needs = speaker.needs;
-  if (needs.energy < 30) cands.push({ w: 1.1, make: () => heTopic(NEED_TOPICS.energy, w, speaker, vars) });
-  if (needs.fun < 30) cands.push({ w: 1, make: () => heTopic(NEED_TOPICS.fun, w, speaker, vars) });
-  if (needs.social < 25) cands.push({ w: 0.9, make: () => heTopic(NEED_TOPICS.social, w, speaker, vars) });
+  if (needs.energy < 30) cands.push({ w: fresh(NEED_TOPICS.energy, 1.1), make: () => heTopic(NEED_TOPICS.energy, w, speaker, vars) });
+  if (needs.fun < 30) cands.push({ w: fresh(NEED_TOPICS.fun, 1), make: () => heTopic(NEED_TOPICS.fun, w, speaker, vars) });
+  if (needs.social < 25) cands.push({ w: fresh(NEED_TOPICS.social, 0.9), make: () => heTopic(NEED_TOPICS.social, w, speaker, vars) });
   for (const trait of speaker.personality) {
     const t = TRAIT_TOPICS[trait];
-    if (t) cands.push({ w: 0.8, make: () => heTopic(t, w, speaker, vars) });
+    if (t) cands.push({ w: fresh(t, 0.8), make: () => heTopic(t, w, speaker, vars) });
   }
-  cands.push({ w: 0.6, make: () => heTopic(TIME_TOPICS[clock.period], w, speaker, vars) });
+  cands.push({ w: fresh(TIME_TOPICS[clock.period], 0.6), make: () => heTopic(TIME_TOPICS[clock.period], w, speaker, vars) });
   let total = 0;
   for (const c of cands) total += c.w;
+  if (total <= 0) return heTopic(TIME_TOPICS[clock.period], w, speaker, vars);
   let r = w.rng.float('topic', speaker.id) * total;
   for (const c of cands) {
     r -= c.w;
@@ -384,15 +454,15 @@ export function placeVars(w: World, speaker: Agent, listener: Agent | null, at: 
 export const lines = {
   opener(w: World, s: Agent, vars: Vars): string {
     const period = worldClock(w.simTime).period;
-    return fill(flavored(w, s, `open:${period}`, OPENERS[period], OPENERS_BY_TRAIT, 0.45), vars);
+    return fill(flavored(w, s, `open:${period}`, OPENERS[period], OPENERS_BY_TRAIT, 0.45, ['open:any', OPENERS_ANY]), vars);
   },
   intro(w: World, s: Agent, vars: Vars): string { return fill(s.visitor ? choose(w, 'intro-visitor', VISITOR_INTROS, s.id) : flavored(w, s, 'intro', INTROS, INTROS_BY_TRAIT, 0.5), vars); },
   introReply(w: World, s: Agent, positive: boolean, vars: Vars): string {
-    return fill(choose(w, positive ? 'intro-pos' : 'intro-neg', positive ? INTRO_REPLIES_POS : INTRO_REPLIES_NEG, s.id), vars);
+    return fill(positive ? flavored(w, s, 'intro-pos', INTRO_REPLIES_POS, INTRO_REPLIES_POS_BY_TRAIT, 0.4) : choose(w, 'intro-neg', INTRO_REPLIES_NEG, s.id), vars);
   },
   response(w: World, s: Agent, positive: boolean, vars: Vars): string {
     if (!positive) return fill(s.needs.energy < 20 ? choose(w, 'resp-tired', RESPONSES_TIRED, s.id) : choose(w, 'resp-neg', RESPONSES_NEG, s.id), vars);
-    return fill(flavored(w, s, 'resp-pos', RESPONSES_POS, RESPONSES_POS_BY_TRAIT, 0.5), vars);
+    return fill(flavored(w, s, 'resp-pos', RESPONSES_POS, RESPONSES_POS_BY_TRAIT, 0.5, ['resp-any', RESPONSES_ANY]), vars);
   },
   compliment(w: World, s: Agent, vars: Vars): string { return fill(flavored(w, s, 'compliment', COMPLIMENTS, COMPLIMENTS_BY_TRAIT, 0.45), vars); },
   complimentReply(w: World, s: Agent, positive: boolean, vars: Vars): string {
@@ -433,6 +503,48 @@ export const lines = {
   danceGrumble(w: World, s: Agent, vars: Vars): string { return fill(choose(w, 'dance-grumble', DANCE_GRUMBLE, s.id), vars); },
   celebrateReply(w: World, s: Agent, vars: Vars): string { return fill(choose(w, 'celebrate', CELEBRATE_REPLIES, s.id), vars); },
 };
+
+export type MemoryKind = 'met' | 'greet' | 'chat' | 'rebuff' | 'compliment' | 'gift' | 'friends' | 'declined' | 'welcome' | 'reply' | 'raid' | 'asleep';
+
+/** Clause templates keep both names + simple past so callbacks can personalise them ("you gave me…"). */
+const MEMORY_CLAUSES: Record<MemoryKind, Bank> = {
+  met: ['{a} met {b} {at}', '{a} said hello to {b} for the first time {at}', '{a} and {b} first crossed paths {at}', '{a} bumped into {b} {at}', '{a} and {b} got introduced {at}', '{a} struck up a conversation with {b} {at}'],
+  greet: ['{a} greeted {b} {at}', '{a} waved hello to {b} {at}', '{a} stopped to say hi to {b} {at}', '{a} called out to {b} {at}', '{a} gave {b} a big hello {at}', '{a} said hey to {b} {at}'],
+  chat: ['{a} and {b} chatted about {topic} {at}', '{a} and {b} talked about {topic} {at}', '{a} told {b} all about {topic} {at}', '{a} and {b} swapped stories about {topic} {at}', '{a} and {b} had a long talk about {topic} {at}', '{a} and {b} debated {topic} {at}'],
+  rebuff: ['{a} tried to chat with {b} {at}', '{a} tried to start a conversation with {b} {at}', '{a} asked {b} how things were {at}', '{a} tried to cheer up {b} {at}', '{a} waved at {b} {at}', '{a} tried to make small talk with {b} {at}'],
+  compliment: ["{a} complimented {b}'s {thing} {at}", "{a} raved about {b}'s {thing} {at}", "{a} admired {b}'s {thing} {at}", "{a} noticed {b}'s {thing} {at}", "{a} praised {b}'s {thing} {at}", "{a} told {b} the {thing} looked amazing {at}"],
+  gift: ['{a} gave {b} {item} {at}', '{a} surprised {b} with {item} {at}', '{a} brought {b} {item} {at}', '{a} handed {b} {item} {at}', '{a} shared {item} with {b} {at}', '{a} left {item} for {b} {at}'],
+  friends: ['{a} and {b} became friends {at}', '{a} and {b} made their friendship official {at}', '{a} and {b} sealed their friendship with a high five {at}', '{a} and {b} became inseparable {at}', '{a} and {b} shook on being friends {at}', '{a} asked {b} to be best friends {at}'],
+  declined: ['{a} asked {b} to be friends {at}', '{a} offered {b} a friendship bracelet {at}', '{a} hoped to become friends with {b} {at}', '{a} asked {b} to be best friends {at}', '{a} popped the friendship question to {b} {at}', '{a} asked if {b} wanted to be friends {at}'],
+  welcome: ['{a} welcomed {b} to town {at}', '{a} showed {b} around {at}', '{a} greeted {b} on arrival {at}', '{a} gave {b} a warm welcome {at}', '{a} was the first to welcome {b} {at}', '{a} told {b} all the best spots {at}'],
+  reply: ['{a} chatted with {b} {at}', '{a} and {b} traded a few words {at}', '{b} answered {a} {at}', '{a} got a reply from {b} {at}', '{a} and {b} shared a laugh {at}', '{a} said something that made {b} reply {at}'],
+  raid: ['{a} welcomed {b} through the portal', '{a} cheered as {b} arrived through the portal', '{a} high-fived {b} at the portal', '{a} met {b} when the raid arrived'],
+  asleep: ['{a} tiptoed past a sleeping {b} {at}', '{a} tried to wake {b} {at}', '{a} found {b} fast asleep {at}'],
+};
+const MEMORY_ENDINGS: Record<string, Bank> = {
+  'met+': ['{b} seemed delighted', '{b} said hi back', '{b} smiled right away', 'they hit it off', '{b} asked about the café', 'instant friends, probably'],
+  'met-': ['{b} barely looked up', '{b} kept it short', '{b} seemed busy', 'it was a little awkward', '{b} mumbled a hello', '{b} wandered off'],
+  'greet+': ['{b} beamed', '{b} waved back', '{b} smiled from ear to ear', '{b} waved with both hands', '{b} laughed', '{b} looked genuinely happy'],
+  'greet-': ['{b} just grunted', '{b} looked away', '{b} was not in the mood', '{b} pretended not to hear', '{b} muttered something', '{b} sighed loudly'],
+  'rebuff-': ['{b} was not in the mood', '{b} wanted some space', '{b} grumbled and walked off', '{b} barely looked up', '{b} sighed dramatically', 'it did not go well'],
+  'compliment+': ['{b} blushed', '{b} beamed', '{b} grinned', '{b} did a little twirl', '{b} said thanks twice', '{b} pretended not to be pleased'],
+  'compliment-': ['{b} rolled their eyes', '{b} shrugged it off', '{b} looked suspicious', '{b} did not buy it', '{b} changed the subject', '{b} said flattery will not work'],
+  'gift+': ['{b} loved it', '{b} was thrilled', '{b} hugged {a}', '{b} kept smiling all day', '{b} promised to treasure it', '{b} did a happy dance'],
+  'friends+': ['a proper high five', '{b} said yes', 'matching grins all round', 'they celebrated with cocoa', 'pinky promise included', 'the whole plaza cheered'],
+  'declined-': ['{b} wants to hang out more first', '{b} said maybe after cocoa', '{b} wants to take it slow', '{b} needs a little more time', '{b} laughed and said not yet', '{b} said ask again tomorrow'],
+  'welcome+': ['{b} waved hello', '{b} felt right at home', '{b} asked about the café', '{b} looked thrilled', '{b} promised to visit the stage', '{b} said thanks'],
+  'welcome-': ['{a} grumbled a little', '{a} kept it short', '{a} muttered a welcome', '{a} did not smile much', '{a} looked suspicious', '{a} said wipe your feet'],
+  'raid+': ['the whole raid cheered', 'confetti everywhere', 'what a party', 'so many new faces'],
+  'asleep+': ['{b} snored on', '{b} mumbled something about waffles', '{b} did not stir'],
+};
+
+/** "clause — tail" with varied phrasing (≥ 6 variants for common kinds), deterministic and non-repeating. */
+export function memoryLine(w: World, kind: MemoryKind, positive: boolean, v: Vars, quote?: string): string {
+  const clause = fill(choose(w, `mem-c:${kind}`, MEMORY_CLAUSES[kind], v.a ?? ''), v);
+  const tails = MEMORY_ENDINGS[`${kind}${positive ? '+' : '-'}`] ?? MEMORY_ENDINGS[`${kind}+`];
+  const tail = quote ? `"${quote}"` : tails ? fill(choose(w, `mem-t:${kind}${positive ? '+' : '-'}`, tails, v.a ?? ''), v) : '';
+  return tail ? `${clause} — ${tail}` : clause;
+}
 
 /** A compliment-worthy detail of someone's look ("varsity jacket", "teal hair", "dance moves"). */
 export function complimentThing(w: World, target: Agent): string {

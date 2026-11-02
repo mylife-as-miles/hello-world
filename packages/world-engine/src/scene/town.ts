@@ -611,6 +611,7 @@ function buildStage(c: Ctx) {
   c.solid.add(c.P.rbox(1.9, 0.14, 0.5, 0.03), '#b9b2a6', at(mtx(0, 0.07, 3.0)));
   c.solid.add(c.P.rbox(1.9, 0.27, 0.42, 0.03), '#c9c2b6', at(mtx(0, 0.135, 2.62)));
   for (const pole of stagePoles()) {
+    c.occ?.push({ x: pole.x, z: pole.z, r: 0.2, h: STAGE_POLE_HEIGHT + 0.2 });
     c.solid.add(c.P.cyl(8), '#6b4f3a', mtx(pole.x, STAGE_POLE_HEIGHT / 2, pole.z, 0, 0.07, STAGE_POLE_HEIGHT, 0.07));
     c.solid.add(c.P.sphere(8, 6), '#e2b85c', mtx(pole.x, STAGE_POLE_HEIGHT + 0.08, pole.z, 0, 0.1, 0.1, 0.1));
     c.solid.add(c.P.cyl(8), '#5a4232', mtx(pole.x, 0.12, pole.z, 0, 0.16, 0.24, 0.16));

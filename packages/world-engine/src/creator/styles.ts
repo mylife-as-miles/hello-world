@@ -85,6 +85,13 @@ export const CREATOR_CSS = /* css */ `
 .hwc-real-sub { font-size: 11.5px; color: var(--hwc-faint); }
 .hwc-base .hwc-realtag { display: inline-block; margin-top: 4px; padding: 1px 6px; border-radius: 6px; font-size: 9.5px; font-weight: 700; letter-spacing: 0.04em; background: rgba(255, 214, 150, 0.16); color: #ffd9a6; }
 .hwc-base-real.is-on { border-color: #ffd29a; background: rgba(255, 210, 154, 0.12); }
+.hwc-fixed { margin-top: 14px; padding: 14px 14px 8px; border-radius: 18px; border: 1px solid rgba(255, 214, 150, 0.3);
+  background: linear-gradient(160deg, rgba(255, 214, 150, 0.11), rgba(162, 143, 255, 0.07)); box-shadow: inset 0 1px 0 rgba(255,255,255,.05); }
+.hwc-fixed-head { display: flex; align-items: center; gap: 9px; }
+.hwc-fixed-head b { font-size: 16px; font-weight: 680; letter-spacing: -0.01em; }
+.hwc-fixed-badge { font-size: 9.5px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 750; padding: 3px 8px; border-radius: 999px; background: rgba(255, 214, 150, 0.2); color: #ffdcae; }
+.hwc-fixed-line { margin: 7px 0 12px; font-size: 12px; color: var(--hwc-muted); line-height: 1.4; }
+.hwc-tint { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .hwc-base .hwc-credit { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .hwc-real-credits { display: flex; flex-direction: column; gap: 3px; margin-top: 10px; padding-top: 8px; border-top: 1px solid rgba(255, 214, 150, 0.14); }
 .hwc-real-credits small { font-size: 10px; color: var(--hwc-faint); line-height: 1.35; }

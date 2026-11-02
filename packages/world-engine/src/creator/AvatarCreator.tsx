@@ -106,6 +106,10 @@ function realisticBases(): BaseModelEntry[] {
  * and src/avatars/realistic/index.ts; prefers an exported list if one appears.
  */
 const HEAD_PIECES = ['beanie', 'cap', 'crown', 'headphones'];
+/** Outfit colour meaning "keep the scan's authored colours" (the realistic loader skips tinting for it). */
+const AUTHORED_TINT = DEFAULT_APPEARANCE.outfit.color.toLowerCase();
+const TINT_COLORS = OUTFIT_COLORS.filter(c => c.toLowerCase() !== AUTHORED_TINT);
+const FIXED_SECTIONS: readonly SectionId[] = ['face', 'hair', 'outfit', 'extras'];
 function wearableAccessories(baseModelId: string, realistic: boolean, vrm: boolean): string[] | null {
   if (!realistic && !vrm) return null; // Townies wear everything
   const key = realistic ? 'REALISTIC_ACCESSORIES' : 'VRM_ACCESSORIES';
@@ -118,7 +122,7 @@ function wearableAccessories(baseModelId: string, realistic: boolean, vrm: boole
 
 /** Drop a trailing parenthetical ("Elena (photoreal)" → "Elena"); provenance is shown by the tag/credit. */
 const shortLabel = (label: string) => label.replace(/\s*\([^)]*\)\s*$/, '') || label;
-const realisticTag = (id: string) => (id.startsWith('rb-') ? 'Photoreal · Rocketbox (MIT)' : 'Photoreal · MetaHuman licence');
+const realisticTag = (id: string) => (id.startsWith('rb-') ? 'Realistic · Rocketbox (MIT)' : 'Photoreal · MetaHuman licence');
 
 function BaseCard({ m, on, onPick, tag }: { m: BaseModelEntry; on: boolean; onPick: () => void; tag?: string }) {
   return (
@@ -154,11 +158,13 @@ function Section({ id, domId, title, sub, action, children, onEngage }: {
   );
 }
 
-function Swatches({ label, colors, value, onChange, testIdPrefix }: {
+function Swatches({ label, colors, value, onChange, testIdPrefix, noneSelected = false }: {
   label: string; colors: readonly string[]; value: string; onChange: (hex: string) => void; testIdPrefix?: string;
+  /** True when the value means "no colour chosen" (e.g. a photoreal body's authored colours). */
+  noneSelected?: boolean;
 }) {
   const v = value.toLowerCase();
-  const custom = !colors.some(c => c.toLowerCase() === v);
+  const custom = !noneSelected && !colors.some(c => c.toLowerCase() === v);
   return (
     <div className="hwc-swatches" role="group" aria-label={label}>
       {colors.map((c, i) => (
@@ -264,6 +270,13 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
   // flag if the avatar API's support matrix grows one.
   const supportFlags = support as AppearanceSupport & { expressions?: boolean };
   const expressionsApply = supportFlags.expressions ?? !realistic;
+  // VRM guests and realistic scans have an authored look: instead of a stack of disabled
+  // sections they get one compact card listing what *can* change.
+  const fixedLook = realistic || vrm;
+  const fixedTitle = realistic ? (appearance.baseModelId.startsWith('rb-') ? 'Realistic body' : 'Photoreal body') : 'VRM guest';
+  const fixedLine = realistic ? 'Face & hair come from the scan.' : 'Face, hair & outfit come from the avatar.';
+  const visibleSections = fixedLook ? SECTIONS.filter(x => !FIXED_SECTIONS.includes(x.id)) : SECTIONS;
+  const tintOriginal = appearance.outfit.color.toLowerCase() === AUTHORED_TINT;
   const wearable = wearableAccessories(appearance.baseModelId, realistic, vrm);
   const accessoryOptions = wearable ? ACCESSORIES.filter(x => wearable.includes(x.id)) : ACCESSORIES;
   const wornCount = wearable ? appearance.accessories.filter(x => wearable.includes(x)).length : appearance.accessories.length;
@@ -295,6 +308,8 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
     setActivePreset(null);
   };
   const reset = () => {
+    outfitPicked.current = false;
+    colorBeforeScan.current = null;
     setAppearance(initial.appearance);
     setPersonality(initial.personality);
     traitsFromPreset.current = initial.personality.length === 0;
@@ -303,6 +318,34 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
   };
   const toggleTrait = (id: string) => { traitsFromPreset.current = false; setPersonality(list => toggleCapped(list, id, MAX_TRAITS)); };
   const toggleAccessory = (id: string) => edit(a => ({ ...a, accessories: toggleCapped(a.accessories, id, MAX_ACCESSORIES) }));
+  // An explicit outfit-colour pick survives base switches; otherwise switching to a realistic
+  // scan resets to the authored colours instead of tinting it with a default/preset colour.
+  const outfitPicked = useRef(false);
+  const pickOutfitColor = (c: string) => { outfitPicked.current = true; setOutfit({ color: c }); };
+  const colorBeforeScan = useRef<string | null>(null);
+  const pickBase = (id: string) => edit(a => {
+    const next: AvatarAppearance = { ...a, baseModelId: id };
+    const toScan = isRealisticBase(id), fromScan = isRealisticBase(a.baseModelId);
+    if (toScan && !fromScan && !outfitPicked.current) {
+      colorBeforeScan.current = a.outfit.color;
+      next.outfit = { ...a.outfit, color: AUTHORED_TINT };
+    } else if (!toScan && fromScan && colorBeforeScan.current && a.outfit.color.toLowerCase() === AUTHORED_TINT) {
+      next.outfit = { ...a.outfit, color: colorBeforeScan.current }; // give the Townie its colour back
+      colorBeforeScan.current = null;
+    }
+    return next;
+  });
+  const fixedCardRef = useRef<HTMLDivElement>(null);
+  const prevFixed = useRef(false);
+  useEffect(() => {
+    // Bring the new card into view when switching to a fixed-look body (panel scroll only).
+    const card = fixedCardRef.current, box = scrollRef.current;
+    if (fixedLook && !prevFixed.current && card && box) {
+      const top = card.offsetTop - 12;
+      if (top < box.scrollTop || card.offsetTop + card.offsetHeight > box.scrollTop + box.clientHeight) box.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+    }
+    prevFixed.current = fixedLook;
+  }, [fixedLook]);
 
   const [saved, setSaved] = useState(false);
   const savedTimer = useRef(0);
@@ -456,7 +499,7 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
             </div>
           </header>
           <nav className="hwc-nav" aria-label="Creator sections">
-            {SECTIONS.map(s => (
+            {visibleSections.map(s => (
               <button key={s.id} type="button" className={cls(activeSection === s.id && 'is-on', sectionFixed[s.id] && 'is-dim')} aria-current={activeSection === s.id ? 'true' : undefined}
                 title={sectionFixed[s.id] ? `${s.label}: fixed by ${baseName}` : undefined}
                 aria-controls={secId(s.id)} data-testid={`nav-${s.id}`} onClick={() => jumpTo(s.id)}>
@@ -486,7 +529,7 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
               <div className="hwc-label" style={{ marginTop: 0 }}>Townie bodies <small>fully customisable</small></div>
               <div className="hwc-bases" role="group" aria-label="Townie base bodies">
                 {BASE_MODELS.filter(m => m.kind !== 'vrm' && !isRealisticBase(m.id)).map(m => (
-                  <BaseCard key={m.id} m={m} on={appearance.baseModelId === m.id} onPick={() => edit(a => ({ ...a, baseModelId: m.id }))} />
+                  <BaseCard key={m.id} m={m} on={appearance.baseModelId === m.id} onPick={() => pickBase(m.id)} />
                 ))}
               </div>
               {BASE_MODELS.some(m => m.kind === 'vrm' && !isRealisticBase(m.id)) && (
@@ -494,7 +537,7 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
                   <div className="hwc-label">Guest avatars <small>VRM · fixed look</small></div>
                   <div className="hwc-bases" role="group" aria-label="VRM guest avatars">
                     {BASE_MODELS.filter(m => m.kind === 'vrm' && !isRealisticBase(m.id)).map(m => (
-                      <BaseCard key={m.id} m={m} on={appearance.baseModelId === m.id} onPick={() => edit(a => ({ ...a, baseModelId: m.id }))} />
+                      <BaseCard key={m.id} m={m} on={appearance.baseModelId === m.id} onPick={() => pickBase(m.id)} />
                     ))}
                   </div>
                 </>
@@ -507,7 +550,7 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
                   </div>
                   <div className="hwc-bases">
                     {realBases.map(m => (
-                      <BaseCard key={m.id} m={m} tag={realisticTag(m.id)} on={appearance.baseModelId === m.id} onPick={() => edit(a => ({ ...a, baseModelId: m.id }))} />
+                      <BaseCard key={m.id} m={m} tag={realisticTag(m.id)} on={appearance.baseModelId === m.id} onPick={() => pickBase(m.id)} />
                     ))}
                   </div>
                   <div className="hwc-real-credits">
@@ -515,104 +558,152 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
                   </div>
                 </div>
               )}
-              <div className="hwc-label">Proportions</div>
-              {support.body ? (
+              {fixedLook ? (
+                <div className="hwc-fixed" ref={fixedCardRef} data-testid="fixed-look-card" role="group" aria-label={`${fixedTitle} options`}>
+                  <div className="hwc-fixed-head">
+                    <span className="hwc-fixed-badge">{fixedTitle}</span>
+                    <b>{baseName}</b>
+                  </div>
+                  <p className="hwc-fixed-line">{fixedLine} Here's what you can make yours:</p>
+                  {support.body && (
+                    <Slider label="Height" value={appearance.body.height} ends={['Shorter', 'Taller']} testId="slider-height" onChange={v => setBody({ height: v })} />
+                  )}
+                  {support.outfitColor && (
+                    <>
+                      <div className="hwc-label">Outfit tint <small>recolours the top</small></div>
+                      <div className="hwc-tint">
+                        <button type="button" className={cls('hwc-chip', tintOriginal && 'is-on')} aria-pressed={tintOriginal} data-testid="tint-original"
+                          onClick={() => pickOutfitColor(AUTHORED_TINT)}>Original</button>
+                        <Swatches label="Outfit tint" colors={TINT_COLORS} value={appearance.outfit.color} noneSelected={tintOriginal} testIdPrefix="tint" onChange={pickOutfitColor} />
+                      </div>
+                    </>
+                  )}
+                  {support.accessories && accessoryOptions.length > 0 && (
+                    <>
+                      <div className="hwc-label">Head accessories <small>{wornCount} worn</small></div>
+                      <div className="hwc-chips" role="group" aria-label="Head accessories">
+                        {accessoryOptions.map(x => {
+                          const on = appearance.accessories.includes(x.id);
+                          return (
+                            <button key={x.id} type="button" className={cls('hwc-chip', on && 'is-on')} aria-pressed={on} data-testid={`acc-${x.id}`} onClick={() => toggleAccessory(x.id)}>
+                              <span className="hwc-check" aria-hidden="true">{on && <Icon name="check" size={11} />}</span>{x.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </>
+                  )}
+                </div>
+              ) : (
                 <>
-                  <Slider label="Height" value={appearance.body.height} ends={['Shorter', 'Taller']} testId="slider-height" onChange={v => setBody({ height: v })} />
-                  {buildApplies
-                    ? <Slider label="Build" value={appearance.body.build} ends={['Slim', 'Sturdy']} testId="slider-build" onChange={v => setBody({ build: v })} />
-                    : <Note>Build is fixed on {baseName}; height scales the whole body.</Note>}
+                  <div className="hwc-label">Proportions</div>
+                  {support.body ? (
+                    <>
+                      <Slider label="Height" value={appearance.body.height} ends={['Shorter', 'Taller']} testId="slider-height" onChange={v => setBody({ height: v })} />
+                      {buildApplies
+                        ? <Slider label="Build" value={appearance.body.build} ends={['Slim', 'Sturdy']} testId="slider-build" onChange={v => setBody({ build: v })} />
+                        : <Note>Build is fixed on {baseName}; height scales the whole body.</Note>}
+                    </>
+                  ) : <Note>{baseName} is {fixedWhy}; height and build are fixed.</Note>}
+                  <div className="hwc-label">Skin tone</div>
+                  {support.skinTone
+                    ? <Swatches label="Skin tone" colors={SKIN_TONES} value={appearance.skinTone} testIdPrefix="skin" onChange={c => edit(a => ({ ...a, skinTone: c }))} />
+                    : <Note>{baseName} is {fixedWhy}; its skin is part of the model. Skin tones apply to Townie bodies.</Note>}
                 </>
-              ) : <Note>{baseName} is {fixedWhy}; height and build are fixed.</Note>}
-              <div className="hwc-label">Skin tone</div>
-              {support.skinTone
-                ? <Swatches label="Skin tone" colors={SKIN_TONES} value={appearance.skinTone} testIdPrefix="skin" onChange={c => edit(a => ({ ...a, skinTone: c }))} />
-                : <Note>{baseName} is {fixedWhy}; its skin is part of the model. Skin tones apply to Townie bodies.</Note>}
+              )}
             </Section>
 
-            <Section id="face" domId={secId('face')} title="Face" sub={support.face ? 'Eyes and features' : 'Fixed by this body'} onEngage={frameFace}>
-              {support.face ? (
-                <>
-                  <div className="hwc-label" style={{ marginTop: 0 }}>Eye colour</div>
-                  <Swatches label="Eye colour" colors={EYE_COLORS} value={appearance.face.eyeColor} testIdPrefix="eye" onChange={c => setFace({ eyeColor: c })} />
-                  <div className="hwc-label">Features</div>
-                  <Slider label="Eye size" value={appearance.face.eyeSize} ends={['Small', 'Big']} testId="slider-eyes" onChange={v => setFace({ eyeSize: v })} />
-                  <Slider label="Nose size" value={appearance.face.noseSize} ends={['Button', 'Bold']} testId="slider-nose" onChange={v => setFace({ noseSize: v })} />
-                  <Slider label="Mouth size" value={appearance.face.mouthSize} ends={['Small', 'Wide']} testId="slider-mouth" onChange={v => setFace({ mouthSize: v })} />
-                </>
-              ) : <Note>{baseName} is {fixedWhy}, so eye colour and face shape stay as authored. Try the expression buttons on the preview.</Note>}
-            </Section>
+            {!fixedLook && (
+              <Section id="face" domId={secId('face')} title="Face" sub={support.face ? 'Eyes and features' : 'Fixed by this body'} onEngage={frameFace}>
+                {support.face ? (
+                  <>
+                    <div className="hwc-label" style={{ marginTop: 0 }}>Eye colour</div>
+                    <Swatches label="Eye colour" colors={EYE_COLORS} value={appearance.face.eyeColor} testIdPrefix="eye" onChange={c => setFace({ eyeColor: c })} />
+                    <div className="hwc-label">Features</div>
+                    <Slider label="Eye size" value={appearance.face.eyeSize} ends={['Small', 'Big']} testId="slider-eyes" onChange={v => setFace({ eyeSize: v })} />
+                    <Slider label="Nose size" value={appearance.face.noseSize} ends={['Button', 'Bold']} testId="slider-nose" onChange={v => setFace({ noseSize: v })} />
+                    <Slider label="Mouth size" value={appearance.face.mouthSize} ends={['Small', 'Wide']} testId="slider-mouth" onChange={v => setFace({ mouthSize: v })} />
+                  </>
+                ) : <Note>{baseName} is {fixedWhy}, so eye colour and face shape stay as authored. Try the expression buttons on the preview.</Note>}
+              </Section>
+            )}
 
-            <Section id="hair" domId={secId('hair')} title="Hair" sub={support.hair ? `${HAIR_STYLES.length} styles · any colour` : 'Fixed by this body'}>
-              {support.hair ? (
-                <>
-                  <div className="hwc-grid" role="group" aria-label="Hairstyle">
-                    {HAIR_STYLES.map(h => (
-                      <button key={h.id} type="button" className={cls('hwc-tile', appearance.hairStyle === h.id && 'is-on')} aria-pressed={appearance.hairStyle === h.id}
-                        aria-label={`Hairstyle ${h.label}`} data-testid={`hair-${h.id}`} onClick={() => edit(a => ({ ...a, hairStyle: h.id }))}>
-                        <Bust hair={h.id} hairColor={appearance.hairColor} skin={appearance.skinTone} outfit="rgba(255,255,255,.14)" eye={appearance.face.eyeColor} size={50} />
-                        {h.label}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="hwc-label">Hair colour</div>
-                  <Swatches label="Hair colour" colors={HAIR_COLORS} value={appearance.hairColor} testIdPrefix="hair-color" onChange={c => edit(a => ({ ...a, hairColor: c }))} />
-                </>
-              ) : <Note>{baseName} is {fixedWhy}; its hair is part of the model. Hairstyles and hair colours apply to Townie bodies.</Note>}
-            </Section>
-
-            <Section id="outfit" domId={secId('outfit')} title="Outfit" sub={support.outfitPieces ? 'Mix pieces, then pick a colour' : support.outfitColor ? 'Pick a colour' : 'Fixed by this body'}>
-              {support.outfitPieces ? (
-                <>
-                  <div className="hwc-label" style={{ marginTop: 0 }}>Top</div>
-                  <div className="hwc-chips" role="group" aria-label="Top">
-                    {TOPS.map(t => (
-                      <button key={t.id} type="button" className={cls('hwc-chip', appearance.outfit.top === t.id && 'is-on')} aria-pressed={appearance.outfit.top === t.id}
-                        data-testid={`top-${t.id}`} onClick={() => setOutfit({ top: t.id })}><i style={{ '--dot': appearance.outfit.color } as CSSProperties} />{t.label}</button>
-                    ))}
-                  </div>
-                  <div className="hwc-label">Bottom</div>
-                  <div className="hwc-chips" role="group" aria-label="Bottom">
-                    {BOTTOMS.map(b => (
-                      <button key={b.id} type="button" className={cls('hwc-chip', appearance.outfit.bottom === b.id && 'is-on')} aria-pressed={appearance.outfit.bottom === b.id}
-                        data-testid={`bottom-${b.id}`} onClick={() => setOutfit({ bottom: b.id })}><i style={{ '--dot': bottomColor(b.id) } as CSSProperties} />{b.label}</button>
-                    ))}
-                  </div>
-                  <div className="hwc-label">Shoes</div>
-                  <div className="hwc-chips" role="group" aria-label="Shoes">
-                    {SHOES.map(s => (
-                      <button key={s.id} type="button" className={cls('hwc-chip', appearance.outfit.shoes === s.id && 'is-on')} aria-pressed={appearance.outfit.shoes === s.id}
-                        data-testid={`shoes-${s.id}`} onClick={() => setOutfit({ shoes: s.id })}><i style={{ '--dot': shoeColor(s.id) } as CSSProperties} />{s.label}</button>
-                    ))}
-                  </div>
-                </>
-              ) : <Note>{baseName} wears its own outfit pieces — tops, bottoms and shoes apply to Townie bodies.</Note>}
-              {support.outfitColor ? (
-                <>
-                  <div className="hwc-label">Outfit colour <small>tints your top</small></div>
-                  <Swatches label="Outfit colour" colors={OUTFIT_COLORS} value={appearance.outfit.color} testIdPrefix="outfit-color" onChange={c => setOutfit({ color: c })} />
-                </>
-              ) : <Note>{baseName}'s outfit colours are fixed.</Note>}
-            </Section>
-
-            <Section id="extras" domId={secId('extras')} title="Accessories" sub={wearable ? `${wornCount} head piece${wornCount === 1 ? '' : 's'} worn` : `${wornCount}/${MAX_ACCESSORIES} equipped`}>
-              {support.accessories ? (
-                <>
-                  <div className="hwc-chips" role="group" aria-label="Accessories">
-                    {accessoryOptions.map(x => {
-                      const on = appearance.accessories.includes(x.id);
-                      return (
-                        <button key={x.id} type="button" className={cls('hwc-chip', on && 'is-on')} aria-pressed={on} data-testid={`acc-${x.id}`} onClick={() => toggleAccessory(x.id)}>
-                          <span className="hwc-check" aria-hidden="true">{on && <Icon name="check" size={11} />}</span>{x.label}
+            {!fixedLook && (
+              <Section id="hair" domId={secId('hair')} title="Hair" sub={support.hair ? `${HAIR_STYLES.length} styles · any colour` : 'Fixed by this body'}>
+                {support.hair ? (
+                  <>
+                    <div className="hwc-grid" role="group" aria-label="Hairstyle">
+                      {HAIR_STYLES.map(h => (
+                        <button key={h.id} type="button" className={cls('hwc-tile', appearance.hairStyle === h.id && 'is-on')} aria-pressed={appearance.hairStyle === h.id}
+                          aria-label={`Hairstyle ${h.label}`} data-testid={`hair-${h.id}`} onClick={() => edit(a => ({ ...a, hairStyle: h.id }))}>
+                          <Bust hair={h.id} hairColor={appearance.hairColor} skin={appearance.skinTone} outfit="rgba(255,255,255,.14)" eye={appearance.face.eyeColor} size={50} />
+                          {h.label}
                         </button>
-                      );
-                    })}
-                  </div>
-                  {wearable && <Note>Only head pieces fit {baseName}; other accessories apply to Townie bodies.</Note>}
-                  {!wearable && appearance.accessories.length >= MAX_ACCESSORIES && <Note>Max {MAX_ACCESSORIES} — picking another swaps out the oldest.</Note>}
-                </>
-              ) : <Note>{baseName} can't wear accessories.</Note>}
-            </Section>
+                      ))}
+                    </div>
+                    <div className="hwc-label">Hair colour</div>
+                    <Swatches label="Hair colour" colors={HAIR_COLORS} value={appearance.hairColor} testIdPrefix="hair-color" onChange={c => edit(a => ({ ...a, hairColor: c }))} />
+                  </>
+                ) : <Note>{baseName} is {fixedWhy}; its hair is part of the model. Hairstyles and hair colours apply to Townie bodies.</Note>}
+              </Section>
+            )}
+
+            {!fixedLook && (
+              <Section id="outfit" domId={secId('outfit')} title="Outfit" sub={support.outfitPieces ? 'Mix pieces, then pick a colour' : support.outfitColor ? 'Pick a colour' : 'Fixed by this body'}>
+                {support.outfitPieces ? (
+                  <>
+                    <div className="hwc-label" style={{ marginTop: 0 }}>Top</div>
+                    <div className="hwc-chips" role="group" aria-label="Top">
+                      {TOPS.map(t => (
+                        <button key={t.id} type="button" className={cls('hwc-chip', appearance.outfit.top === t.id && 'is-on')} aria-pressed={appearance.outfit.top === t.id}
+                          data-testid={`top-${t.id}`} onClick={() => setOutfit({ top: t.id })}><i style={{ '--dot': appearance.outfit.color } as CSSProperties} />{t.label}</button>
+                      ))}
+                    </div>
+                    <div className="hwc-label">Bottom</div>
+                    <div className="hwc-chips" role="group" aria-label="Bottom">
+                      {BOTTOMS.map(b => (
+                        <button key={b.id} type="button" className={cls('hwc-chip', appearance.outfit.bottom === b.id && 'is-on')} aria-pressed={appearance.outfit.bottom === b.id}
+                          data-testid={`bottom-${b.id}`} onClick={() => setOutfit({ bottom: b.id })}><i style={{ '--dot': bottomColor(b.id) } as CSSProperties} />{b.label}</button>
+                      ))}
+                    </div>
+                    <div className="hwc-label">Shoes</div>
+                    <div className="hwc-chips" role="group" aria-label="Shoes">
+                      {SHOES.map(s => (
+                        <button key={s.id} type="button" className={cls('hwc-chip', appearance.outfit.shoes === s.id && 'is-on')} aria-pressed={appearance.outfit.shoes === s.id}
+                          data-testid={`shoes-${s.id}`} onClick={() => setOutfit({ shoes: s.id })}><i style={{ '--dot': shoeColor(s.id) } as CSSProperties} />{s.label}</button>
+                      ))}
+                    </div>
+                  </>
+                ) : <Note>{baseName} wears its own outfit pieces — tops, bottoms and shoes apply to Townie bodies.</Note>}
+                {support.outfitColor ? (
+                  <>
+                    <div className="hwc-label">Outfit colour <small>tints your top</small></div>
+                    <Swatches label="Outfit colour" colors={OUTFIT_COLORS} value={appearance.outfit.color} testIdPrefix="outfit-color" onChange={pickOutfitColor} />
+                  </>
+                ) : <Note>{baseName}'s outfit colours are fixed.</Note>}
+              </Section>
+            )}
+
+            {!fixedLook && (
+              <Section id="extras" domId={secId('extras')} title="Accessories" sub={wearable ? `${wornCount} head piece${wornCount === 1 ? '' : 's'} worn` : `${wornCount}/${MAX_ACCESSORIES} equipped`}>
+                {support.accessories ? (
+                  <>
+                    <div className="hwc-chips" role="group" aria-label="Accessories">
+                      {accessoryOptions.map(x => {
+                        const on = appearance.accessories.includes(x.id);
+                        return (
+                          <button key={x.id} type="button" className={cls('hwc-chip', on && 'is-on')} aria-pressed={on} data-testid={`acc-${x.id}`} onClick={() => toggleAccessory(x.id)}>
+                            <span className="hwc-check" aria-hidden="true">{on && <Icon name="check" size={11} />}</span>{x.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {wearable && <Note>Only head pieces fit {baseName}; other accessories apply to Townie bodies.</Note>}
+                    {!wearable && appearance.accessories.length >= MAX_ACCESSORIES && <Note>Max {MAX_ACCESSORIES} — picking another swaps out the oldest.</Note>}
+                  </>
+                ) : <Note>{baseName} can't wear accessories.</Note>}
+              </Section>
+            )}
 
             <Section id="personality" domId={secId('personality')} title="Personality" sub={`Pick up to ${MAX_TRAITS} · shapes how they live in town (${personality.length}/${MAX_TRAITS})`}>
               <div className="hwc-traits" role="group" aria-label="Personality traits">

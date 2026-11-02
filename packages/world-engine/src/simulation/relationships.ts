@@ -41,7 +41,9 @@ export function ensureRel(w: World, a: Agent, b: Agent): Relationship {
 export function adjustFriendship(w: World, a: Agent, b: Agent, delta: number): { before: number; after: number; rel: Relationship } {
   const rel = ensureRel(w, a, b);
   const before = rel.friendship;
-  const rate = delta > 0 ? (a.temperament.friendshipRate + b.temperament.friendshipRate) / 2 : 1;
+  // Diminishing gains: close friendships grow slowly (×0.8 at 80, ×0.4 at 90, ×0.12 near 100).
+  const taper = before < 60 ? 1 : before < 80 ? 1 - (before - 60) / 100 : Math.max(0.12, (100 - before) / 25);
+  const rate = delta > 0 ? ((a.temperament.friendshipRate + b.temperament.friendshipRate) / 2) * taper : 1;
   rel.friendship = Math.round(clamp(before + delta * rate, 0, 100) * 10) / 10;
   rel.lastInteractionAt = Math.max(rel.lastInteractionAt, Math.floor(w.now));
   return { before, after: rel.friendship, rel };

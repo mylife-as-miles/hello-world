@@ -41,6 +41,15 @@ describe('simulation: seeds & contract shape', () => {
     for (const r of s.residents) for (const k of ['energy', 'social', 'fun'] as const) { expect(r.needs[k]).toBeGreaterThanOrEqual(35); expect(r.needs[k]).toBeLessThanOrEqual(85); }
   });
 
+  it('seed relationships were last active the evening before the 08:00 start (≈ 10–16 h earlier)', () => {
+    const { rt } = runtime();
+    for (const r of rt.getSnapshot().relationships) {
+      const hoursAgo = (T0 - r.lastInteractionAt) / 3_600_000;
+      expect(hoursAgo).toBeGreaterThan(9);
+      expect(hoursAgo).toBeLessThan(16);
+    }
+  });
+
   it('memory callbacks understand both stamp styles and speak in first person', () => {
     expect(memoryClause('Yesterday · 18:20 · Kiki and Toby raced around Town Plaza — Toby claims it was a tie.')).toBe('Kiki and Toby raced around Town Plaza');
     expect(memoryClause('Day 2 09:14 · Nova greeted PixelCat at Town Plaza — PixelCat beamed.')).toBe('Nova greeted PixelCat at Town Plaza');
@@ -168,6 +177,30 @@ describe('simulation: life', () => {
     expect(end.find(r => r.id === 'seed:kiki')!.needs.fun).toBeGreaterThan(20);
   });
 
+  it('dialogue never repeats a line within 3 sim-minutes and memories vary their phrasing', () => {
+    const { rt, tick } = runtime();
+    const lastSaid = new Map<string, number>();
+    const seenIds = new Set<string>();
+    for (let i = 0; i < 1200; i++) {
+      tick(1);
+      const snap = rt.getSnapshot();
+      for (const e of snap.eventHistory) {
+        if (e.source !== 'simulation' || !e.text || seenIds.has(e.id)) continue;
+        seenIds.add(e.id);
+        const prev = lastSaid.get(e.text);
+        if (prev !== undefined) expect(snap.simulationTime - prev, e.text).toBeGreaterThanOrEqual(170);
+        lastSaid.set(e.text, snap.simulationTime);
+      }
+    }
+    const tails = new Map<string, number>();
+    for (const r of rt.getSnapshot().relationships) for (const m of r.memories) {
+      if (m.startsWith('Yesterday')) continue;
+      const clause = m.split(' · ').slice(1).join(' · ').split(' — ')[0]!.replace(/^\S+ /, '').split(' ')[0]!;
+      tails.set(clause, (tails.get(clause) ?? 0) + 1);
+    }
+    expect(tails.size).toBeGreaterThanOrEqual(5);
+  });
+
   it('seats are exclusive and sitters stand exactly on seat coordinates', () => {
     const { rt, tick } = runtime();
     for (let i = 0; i < 300; i++) {
@@ -255,7 +288,7 @@ describe('simulation: contract events', () => {
     const rel = snap.relationships.find(r => r.residentA === 'seed:nova' && r.residentB === 'seed:pixelcat')!;
     expect(rel.friendship).toBeGreaterThan(f0.friendship);
     const mem = rel.memories[rel.memories.length - 1]!;
-    expect(mem).toMatch(/^Day 1 \d\d:\d\d · Nova greeted PixelCat .* — PixelCat .+\.$/);
+    expect(mem).toMatch(/^Day 1 \d\d:\d\d · Nova .*PixelCat.* — .+\.$/);
     const saved = JSON.parse(JSON.stringify(snap)) as WorldSnapshot;
     const { rt: rt2 } = runtime({ initialSnapshot: saved });
     const s2 = rt2.getSnapshot();
@@ -318,7 +351,7 @@ describe('simulation: contract events', () => {
     expect(s.residents.find(r => r.id === 'seed:bram')!.activity).toBe('thanking Mochi');
     const rel = s.relationships.find(r => r.residentA === 'seed:bram' && r.residentB === 'seed:mochi')!;
     expect(rel.friendship - f0).toBeGreaterThanOrEqual(8);
-    expect(rel.memories[rel.memories.length - 1]).toContain('Mochi gave Bram a rose');
+    expect(rel.memories[rel.memories.length - 1]).toMatch(/Mochi .*(Bram.*a rose|a rose.*Bram)/);
     rt.dispatch(ev('dance', 'tw:newbie', 'Newbie', {}, at()));
     expect(rt.getSnapshot().residents.some(r => r.id === 'tw:newbie')).toBe(true);
     rt.dispatch(ev('dance', 'seed:kiki', 'Kiki', {}, at()));

@@ -8,7 +8,7 @@ import type { WorldClock } from '../world/time';
 import { clamp, type Agent, type Needs } from './state';
 
 /** Points lost per simulation second (1 s = 1 game minute). */
-export const BASE_DECAY: Readonly<Needs> = { energy: 0.06, social: 0.11, fun: 0.1 };
+export const BASE_DECAY: Readonly<Needs> = { energy: 0.06, social: 0.13, fun: 0.1 };
 
 /**
  * Diminishing returns: gains taper off above ~55 so needs hover in the 30–80
@@ -36,7 +36,8 @@ export function decayNeeds(a: Agent, dt: number, clock: WorldClock): void {
   const t = a.temperament;
   const sleeping = isSleeping(a);
   const owl = t.nightOwl > 0.5;
-  const tiredness = clock.period === 'night' ? (owl ? 0.6 : 1.25) : owl && clock.period === 'morning' ? 1.2 : 1;
+  // Evenings make (non night-owl) residents visibly tired; owls fade in the morning instead.
+  const tiredness = clock.period === 'night' ? (owl ? 0.6 : 1.7) : clock.period === 'evening' ? (owl ? 0.8 : 1.5) : owl && clock.period === 'morning' ? 1.3 : 1;
   if (!sleeping) a.needs.energy = clampNeed(a.needs.energy - BASE_DECAY.energy * t.energyDecay * tiredness * dt);
   a.needs.social = clampNeed(a.needs.social - BASE_DECAY.social * t.socialDecay * (sleeping ? 0.25 : 1) * dt);
   a.needs.fun = clampNeed(a.needs.fun - BASE_DECAY.fun * t.funDecay * (sleeping ? 0.2 : 1) * dt);

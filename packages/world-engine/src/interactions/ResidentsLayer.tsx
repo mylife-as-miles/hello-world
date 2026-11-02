@@ -43,8 +43,14 @@ const BUBBLE_MIN_SCALE = 1;
 const BUBBLE_MAX_SCALE = 1.3;
 /** Distance (m) at which bubbles reach their minimum scale. */
 const BUBBLE_SCALE_DISTANCE = 11.5;
-const NAMEPLATE_SOLID = 22;
-const NAMEPLATE_FAR = 36;
+/** Nameplates are fully visible up to this distance (m), then fade out by NAMEPLATE_FAR. */
+const NAMEPLATE_SOLID = 45;
+const NAMEPLATE_FAR = 55;
+/** On-screen pill height clamp (px). Text is ~0.58 of the pill → ≥ ~12.7 px in wide shots. */
+const NAMEPLATE_MIN_PX = 22;
+const NAMEPLATE_MAX_PX = 30;
+/** Natural world-space pill height (m) between the clamps. */
+const NAMEPLATE_WORLD_H = 0.26;
 /** Only residents this close to a confetti burst / raid portal cheer. */
 const CHEER_RADIUS = 12;
 const VIEWER_EMOTE_SCALE = 1.35;
@@ -78,6 +84,8 @@ class BubbleHub {
   readonly scale = new Map<string, number>();
   /** Horizontal offset (px) applied to dodge the inspector card. */
   readonly dx = new Map<string, number>();
+  /** Ids whose bubble is currently visible (their nameplate hides meanwhile). */
+  readonly shown = new Set<string>();
   private seq = 0;
   subscribe(id: string, cb: (b: BubbleData | null) => void): () => void {
     this.subs.set(id, cb);
@@ -95,7 +103,7 @@ class BubbleHub {
   }
   tick(now: number) {
     for (const [id, b] of this.active) {
-      if (now - b.start > b.duration) { this.active.delete(id); this.els.delete(id); this.sizes.delete(id); this.scale.delete(id); this.dx.delete(id); this.subs.get(id)?.(null); }
+      if (now - b.start > b.duration) { this.active.delete(id); this.els.delete(id); this.sizes.delete(id); this.scale.delete(id); this.dx.delete(id); this.shown.delete(id); this.subs.get(id)?.(null); }
     }
   }
 }
@@ -163,8 +171,8 @@ const _v2 = new THREE.Vector3();
 const _sphere = new THREE.Sphere();
 const _frustum = new THREE.Frustum();
 const _m = new THREE.Matrix4();
-/** Frustum shared by all residents, recomputed once per frame. */
-const frameCache = { time: -1, frustum: _frustum };
+/** Frustum + pixels-per-metre-at-1m shared by all residents, recomputed once per frame. */
+const frameCache = { time: -1, frustum: _frustum, pxk: 600 };
 const nowS = () => performance.now() / 1000;
 
 /** Client rect of a visible ResidentInspector card near this canvas (bubbles avoid it). */
@@ -261,7 +269,7 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
           break;
         case 'wave':
           withHandle(actor, h => { face(h, target); h.play('wave'); });
-          withHandle(target, h => { face(h, actor); h.play('greet', 0.6); setTimeout(() => emoteAt(h, 'bang', 1), 300); });
+          withHandle(target, h => { face(h, actor); h.play('greet', 0.6); setTimeout(() => emoteAt(h, 'hello', 1), 300); });
           break;
         case 'dance':
           withHandle(actor, h => { h.reaction = { family: 'dance', until: now() + 8 }; emoteAt(h, 'note', 2); });
@@ -290,7 +298,7 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
           }
           withHandle(actor, h => {
             face(h, target);
-            if (action === 'greet') { h.play('greet'); emoteAt(h, 'bang', 1); }
+            if (action === 'greet') { h.play('greet'); emoteAt(h, 'hello', 1); }
             else if (action === 'compliment') { h.play('bow'); emoteAt(h, 'sparkle', 3); }
             else if (action === 'befriend') { h.play('cheer'); emoteAt(h, 'heart', 3); }
             else if (action === 'celebrate') { h.reaction = { family: 'celebrate', until: now() + 3.5 }; emoteAt(h, 'sparkle', 4); }
@@ -445,6 +453,7 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
         if (show) shown++;
         const fadingOut = c.now - b.start > b.duration - 0.5;
         el.style.opacity = show && !fadingOut ? '1' : '0';
+        if (show && !fadingOut) hub.shown.add(r.id); else hub.shown.delete(r.id);
       }
     }
   });
@@ -632,6 +641,8 @@ const Resident = memo(function Resident(p: ResidentProps) {
       frameCache.time = state.clock.elapsedTime;
       _m.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
       _frustum.setFromProjectionMatrix(_m);
+      const fov = (camera as THREE.PerspectiveCamera).isPerspectiveCamera ? (camera as THREE.PerspectiveCamera).fov : 50;
+      frameCache.pxk = state.size.height / (2 * Math.tan((fov * Math.PI) / 360));
     }
     _sphere.center.set(pos.x, pos.y + 0.9, pos.z); _sphere.radius = 1.3;
     const onScreen = _frustum.intersectsSphere(_sphere);
@@ -640,11 +651,14 @@ const Resident = memo(function Resident(p: ResidentProps) {
     const plateS = plateRef.current;
     if (plateS) {
       const fade = 1 - Math.min(1, Math.max(0, (camDist - NAMEPLATE_SOLID) / (NAMEPLATE_FAR - NAMEPLATE_SOLID)));
-      plateS.visible = fade > 0.02 && !hub.active.has(id);
+      plateS.visible = fade > 0.02 && !hub.shown.has(id);
       plateMat.opacity = fade;
-      const sc = 0.2 + camDist * 0.006;
+      // Readable in wide shots: clamp the on-screen pill height, keep depth cue in between.
+      const pxPerM = frameCache.pxk / Math.max(1, camDist);
+      const px = Math.min(NAMEPLATE_MAX_PX, Math.max(NAMEPLATE_MIN_PX, NAMEPLATE_WORLD_H * pxPerM));
+      const sc = px / pxPerM;
       plateS.scale.set(sc * plate.aspect, sc, 1);
-      plateS.position.y = handle.height + 0.28 + sc * 0.3;
+      plateS.position.y = handle.height + 0.16 + sc * 0.55;
     }
 
     const anim = handle.animator;

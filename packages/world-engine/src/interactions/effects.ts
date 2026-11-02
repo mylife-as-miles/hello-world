@@ -8,8 +8,8 @@
  */
 import * as THREE from 'three';
 
-export type EmoteKind = 'heart' | 'note' | 'sparkle' | 'anger' | 'cloud' | 'zzz' | 'bang';
-const EMOTE_KINDS: EmoteKind[] = ['heart', 'note', 'sparkle', 'anger', 'cloud', 'zzz', 'bang'];
+export type EmoteKind = 'heart' | 'note' | 'sparkle' | 'anger' | 'cloud' | 'zzz' | 'bang' | 'hello';
+const EMOTE_KINDS: EmoteKind[] = ['heart', 'note', 'sparkle', 'anger', 'cloud', 'zzz', 'bang', 'hello'];
 
 function canvas(w: number, h: number): [HTMLCanvasElement, CanvasRenderingContext2D] {
   const c = document.createElement('canvas');
@@ -90,6 +90,24 @@ function drawEmote(kind: EmoteKind): HTMLCanvasElement {
       g.strokeText('z', 96, 34); g.fillText('z', 96, 34);
       break;
     }
+    case 'hello': {
+      // Friendly waving hand (greeting) with two motion arcs.
+      g.save();
+      g.translate(60, 70); g.rotate(-0.32); g.translate(-60, -70);
+      g.fillStyle = '#ffd166'; g.strokeStyle = '#c4861c'; g.lineWidth = 5;
+      const part = (x: number, y: number, w: number, h: number, r: number) => { g.beginPath(); g.roundRect(x, y, w, h, r); g.fill(); g.stroke(); };
+      part(36, 24, 13, 48, 6.5);   // index
+      part(50, 18, 13, 54, 6.5);   // middle
+      part(64, 22, 13, 50, 6.5);   // ring
+      part(78, 32, 12, 40, 6);     // pinky
+      g.save(); g.translate(38, 84); g.rotate(-0.95); part(-7, -30, 14, 34, 7); g.restore(); // thumb
+      part(34, 56, 57, 50, 18);    // palm (drawn last so it covers finger bases)
+      g.restore();
+      g.strokeStyle = '#ffffff'; g.lineWidth = 6; g.lineCap = 'round';
+      g.beginPath(); g.arc(98, 40, 16, -1.1, 0.25); g.stroke();
+      g.beginPath(); g.arc(98, 40, 28, -1.0, 0.15); g.stroke();
+      break;
+    }
     case 'bang': {
       g.fillStyle = '#ffd84d'; g.strokeStyle = '#ffffff'; g.lineWidth = 6;
       g.beginPath(); g.roundRect(30, 14, 68, 100, 22); g.fill(); g.stroke();
@@ -142,11 +160,11 @@ export class EmoteSystem {
       const a = Math.random() * Math.PI * 2, r = spread * Math.sqrt(Math.random());
       s.position.set(x + Math.cos(a) * r * 0.6, y + Math.random() * 0.15, z + Math.sin(a) * r * 0.6);
       p.active = true; p.life = -n * 0.12;
-      p.max = kind === 'zzz' ? 2.6 : kind === 'cloud' || kind === 'anger' ? 1.9 : 1.6 + Math.random() * 0.5;
+      p.max = kind === 'zzz' ? 2.6 : kind === 'hello' ? 1.15 : kind === 'cloud' || kind === 'anger' ? 1.9 : 1.6 + Math.random() * 0.5;
       p.vx = Math.cos(a) * r * 0.5; p.vz = Math.sin(a) * r * 0.5;
-      p.vy = kind === 'zzz' ? 0.32 : kind === 'cloud' ? 0.12 : 0.55 + Math.random() * 0.3;
+      p.vy = kind === 'zzz' ? 0.32 : kind === 'cloud' ? 0.12 : kind === 'hello' ? 0.35 : 0.55 + Math.random() * 0.3;
       if (kind === 'zzz') p.vx += 0.12;
-      p.size = (kind === 'sparkle' ? 0.22 + Math.random() * 0.14 : kind === 'cloud' ? 0.5 : kind === 'bang' ? 0.34 : 0.27 + Math.random() * 0.08) * scale;
+      p.size = (kind === 'sparkle' ? 0.22 + Math.random() * 0.14 : kind === 'cloud' ? 0.5 : kind === 'bang' ? 0.17 : kind === 'hello' ? 0.19 : 0.27 + Math.random() * 0.08) * scale;
       p.wob = Math.random() * 6;
       s.visible = false; m.opacity = 0;
     }

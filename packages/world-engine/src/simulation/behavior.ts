@@ -62,7 +62,9 @@ export function decide(w: World, a: Agent, clock: WorldClock): void {
   if (a.needsWelcome) { a.needsWelcome = false; startWelcomeWalk(w, a); return; }
   if (!a.visitor && w.simTime - a.moodShownAt > 40) {
     const low = lowestNeed(a);
+    const sleepyHour = (clock.period === 'evening' || clock.period === 'night') && a.temperament.nightOwl < 0.5;
     if (low.value < 24 && w.rng.chance(0.7, 'mood-show', a.id)) { a.moodShownAt = w.simTime; showLowNeed(w, a, low.key); return; }
+    if (sleepyHour && a.needs.energy < 40 && w.rng.chance(0.6, 'mood-tired', a.id)) { a.moodShownAt = w.simTime; showLowNeed(w, a, 'energy'); return; }
   }
   const choices = scoreChoices(w, a, clock).sort((x, y) => y.score - x.score);
   const social = socializeCandidate(w, a);
@@ -113,7 +115,7 @@ export function ambientCompany(w: World, dt: number): void {
   }
   for (let i = 0; i < list.length; i++) {
     const a = list[i]!;
-    if (near[i]! > 0 && a.action?.type !== 'sleep') applyEffects(a, { energy: 0, social: 0.04 * Math.min(3, near[i]!), fun: 0 }, dt);
+    if (near[i]! > 0 && a.action?.type !== 'sleep') applyEffects(a, { energy: 0, social: 0.025 * Math.min(3, near[i]!), fun: 0 }, dt);
   }
 }
 

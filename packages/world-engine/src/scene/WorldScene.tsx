@@ -27,6 +27,7 @@ import { WeatherFx } from './Weather';
 import { CameraRig, poseFor, type RigMode } from './CameraRig';
 import { PostFX } from './PostFX';
 import { Hud } from './Hud';
+import { EventBanner } from './EventBanner';
 import { buildOverlayProps, groundHeight } from './town';
 import { DowntownDistrict, districtOccupied } from './district';
 import { GeneratedTrees, PARK_TREE_PLACEMENTS, TREE_VARIANT_INDEX, type TreePlacement } from './foliage';
@@ -139,6 +140,7 @@ export function WorldScene(props: WorldSceneProps & WorldSceneExtraProps) {
         />
       )}
       {showHud && !transparent && <Hud store={store} />}
+      <EventBanner store={store} />
     </div>
   );
 }

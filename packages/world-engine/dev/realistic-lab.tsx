@@ -53,14 +53,14 @@ const seatMat = new THREE.MeshStandardMaterial({ color: 0x8a6a4a, roughness: 0.8
 function appearanceFor(id: string, i: number): AvatarAppearance {
   return {
     baseModelId: id, skinTone: '#c89a7c', hairStyle: 'short', hairColor: '#2a1d14',
-    outfit: { top: 'tee', bottom: 'jeans', shoes: 'sneakers', color: params.has('tint') ? ['#d9534f', '#3a7bd5', '#4caf50', '#e0a030'][i % 4]! : '' },
+    outfit: { top: 'tee', bottom: 'jeans', shoes: 'sneakers', color: params.get('tint') === 'default' ? '#ff7a59' : params.has('tint') ? ['#d9534f', '#3a7bd5', '#4caf50', '#e0a030'][i % 4]! : '' },
     accessories: params.has('acc') ? [['cap'], ['beanie'], ['headphones'], ['crown']][i % 4]! : [], face: { eyeColor: '#3b2a1a', eyeSize: 0.5, noseSize: 0.5, mouthSize: 0.5 }, body: { height: 0.6, build: 0.5 },
   };
 }
 
 async function main() {
   const set = params.get('set');
-  const ids = REALISTIC_BASE_MODELS.map((b) => b.id).filter((id) => !set || id.startsWith(set + '-'));
+  const ids = REALISTIC_BASE_MODELS.map((b) => b.id).filter((id) => (!set || id.startsWith(set + '-')) && (!params.get('only') || params.get('only')!.split(',').includes(id)));
   const n = ids.length;
   const t0 = performance.now();
   for (let row = 0; row < 2; row++) {

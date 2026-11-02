@@ -59,7 +59,7 @@ function createWorld(opts: Parameters<CreateSimulation>[0]): World {
     nextEncounterId: 1,
     scheduleSeq: 0,
     nextSocialAt: 3,
-    recentLines: [],
+    lineUsedAt: new Map(),
     facts: { raidAt: -1e9, raidChannel: '', confettiAt: -1e9, newcomer: null, lastGrumbleAt: -1e9, lastAmbientAt: -1e9, lastChatReplyAt: -1e9, lastWelcomeAt: -1e9 },
     llm: { provider: null, inFlight: 0, ready: [], nextAt: 0 },
   };

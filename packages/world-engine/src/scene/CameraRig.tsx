@@ -34,7 +34,7 @@ const OCCLUDERS: Occluder[] = (() => {
     out.push({ kind: 'box', x: b.position.x, z: b.position.z, hw: b.width / 2 + 0.45, hd: b.depth / 2 + 0.45, c: Math.cos(b.rotation), s: Math.sin(b.rotation), h });
   }
   const stage = getPoi('stage')?.position;
-  if (stage) out.push({ kind: 'circle', x: stage.x, z: stage.z, r: 3.15, h: 3.7 });
+  if (stage) out.push({ kind: 'circle', x: stage.x, z: stage.z, r: 3.15, h: 3.2 });
   out.push({ kind: 'circle', x: 0, z: 0, r: 2.35, h: 2.6 });
   const portal = getPoi('portal')?.position;
   if (portal) out.push({ kind: 'box', x: portal.x, z: portal.z, hw: 3.3, hd: 0.7, c: 1, s: 0, h: 5.2 });
@@ -142,10 +142,11 @@ const PORTAL_POS = getPoi('portal')?.position ?? { x: 0, z: -24 };
 const DIRECTED_KINDS = new Set<WorldEvent['kind']>(['join', 'raid', 'gift', 'social', 'dance', 'chat', 'wave', 'confetti']);
 
 interface Director {
-  kind: 'none' | 'actor' | 'portal';
+  kind: 'none' | 'actor' | 'portal' | 'speaker';
   actorId: string;
   until: number;
   lastCut: number;
+  lastPush: number;
   cutPending: boolean;
   raid: boolean;
 }
@@ -274,6 +275,20 @@ function overlayPose(store: SceneStore, f: OverlayFit, cam: THREE.PerspectiveCam
   outLook.set(cx, H - D * Math.tan(OVERLAY_PITCH), cz);
 }
 
+interface OrbitState { pos: THREE.Vector3; look: THREE.Vector3; clusterS: THREE.Vector3; orbit: number }
+
+/** Slow orbit around the smoothed cluster centre; skips ahead past occluded angles. */
+function orbitShot(o: OrbitState, dt: number, speed: number, dist: number, h: number, lookY: number) {
+  o.orbit += dt * speed;
+  for (let i = 0; i < 10; i++) {
+    const cx = o.clusterS.x + Math.sin(o.orbit) * dist, cz = o.clusterS.z + Math.cos(o.orbit) * dist;
+    if (!blocked(cx, h, cz, o.clusterS.x, lookY, o.clusterS.z)) break;
+    o.orbit += 0.33;
+  }
+  o.pos.set(o.clusterS.x + Math.sin(o.orbit) * dist, h, o.clusterS.z + Math.cos(o.orbit) * dist);
+  o.look.set(o.clusterS.x, lookY, o.clusterS.z);
+}
+
 /* ----------------------------------------------------------------- rig */
 
 export function CameraRig({ mode, selectedResidentId }: { mode: RigMode; selectedResidentId?: string }) {
@@ -294,23 +309,29 @@ export function CameraRig({ mode, selectedResidentId }: { mode: RigMode; selecte
     look: new THREE.CatmullRomCurve3(CINE_LOOK.map(p => new THREE.Vector3(...p)), true, 'centripetal'),
     u: 0,
   }), []);
-  const director = useRef<Director>({ kind: 'none', actorId: '', until: 0, lastCut: -1e9, cutPending: false, raid: false });
+  const director = useRef<Director>({ kind: 'none', actorId: '', until: 0, lastCut: -1e9, lastPush: -1e9, cutPending: false, raid: false });
 
   useEffect(() => { s.follow.init = false; }, [selectedResidentId, s]);
 
   // Event director: cut to what matters (viewer/twitch/demo events only, never simulation chatter).
   useEffect(() => store.onEvent(({ event }) => {
     if (event.source === 'simulation' || !DIRECTED_KINDS.has(event.kind)) return;
-    if (event.kind === 'chat' && !event.targetId) return;
     const d = director.current;
     const now = performance.now() / 1000;
-    const isPortal = event.kind === 'raid' || event.kind === 'join';
-    if (event.kind !== 'raid' && now - d.lastCut < 3.5) return;
     if (d.raid && now < d.until && event.kind !== 'raid') return; // never interrupt a raid shot
+    if (event.kind === 'chat' && !event.targetId) {
+      // untargeted chat: gentle push-in on the speaker, rate-limited
+      if (now - d.lastPush < 8 || (d.kind !== 'none' && now < d.until)) return;
+      d.kind = 'speaker'; d.actorId = event.actorId; d.raid = false;
+      d.until = now + 5; d.lastPush = now; d.cutPending = false;
+      return;
+    }
+    if (event.kind !== 'raid' && now - d.lastCut < 3.5) return;
+    const isPortal = event.kind === 'raid' || event.kind === 'join';
     d.kind = isPortal ? 'portal' : 'actor';
     d.actorId = event.actorId;
     d.raid = event.kind === 'raid';
-    d.until = now + (event.kind === 'raid' ? 10 : 7);
+    d.until = now + (event.kind === 'raid' ? 9 : 6);
     d.lastCut = now;
     d.cutPending = true;
   }), [store]);
@@ -328,7 +349,14 @@ export function CameraRig({ mode, selectedResidentId }: { mode: RigMode; selecte
     let rate = 1.4;
     const d = director.current;
     const now = performance.now() / 1000;
-    const directed = (mode === 'cinematic' || mode === 'street') && d.kind !== 'none' && now < d.until;
+    // densest resident group (shared by neighborhood bias, street and cinematic)
+    if (s.clusterAt < 0 || t - s.clusterAt > 1.5) {
+      s.clusterAt = t;
+      if (densestCluster(store, s.cluster) && !s.clusterInit) { s.clusterS.copy(s.cluster); s.clusterInit = true; }
+    }
+    if (s.clusterInit) s.clusterS.lerp(s.cluster, 1 - Math.exp(-dt * 0.5));
+    const directable = mode !== 'overlay';
+    const directed = directable && d.kind !== 'none' && now < d.until;
     if (directed) {
       snap = d.cutPending;
       d.cutPending = false;
@@ -337,45 +365,49 @@ export function CameraRig({ mode, selectedResidentId }: { mode: RigMode; selecte
         const age = d.until - now;
         if (d.raid) { s.pos.set(p.x + 8 + Math.sin(age * 0.1) * 1.5, 5.5, p.z + 15); s.look.set(p.x, 5.2, p.z); }
         else { s.pos.set(p.x + 4.5, mode === 'street' ? 1.8 : 3.4, p.z + 10.5); s.look.set(p.x, 1.8, p.z + 1.5); }
+        rate = 2.2;
       } else {
         const r = store.getResident(d.actorId);
-        if (!r) { d.kind = 'none'; }
-        else frame(s.actor, r.location.x, r.location.z, dt, mode === 'street' ? 5.2 : 7.2, mode === 'street' ? 1.9 : 3.3, 1.15, s.pos, s.look, snap);
+        if (!r) d.until = 0;
+        else if (d.kind === 'speaker') {
+          frame(s.actor, r.location.x, r.location.z, dt, 5.4, mode === 'street' ? 1.8 : 2.5, 1.3, s.pos, s.look, false);
+          rate = 1.6;
+        } else {
+          frame(s.actor, r.location.x, r.location.z, dt, mode === 'street' ? 5.2 : 7.2, mode === 'street' ? 1.9 : 3.3, 1.15, s.pos, s.look, snap);
+          rate = 2.2;
+        }
       }
-      rate = 2.2;
+      if (d.until === 0) poseFor(mode === 'street' ? 'street' : 'neighborhood', t, s.pos, s.look);
     } else if (mode === 'follow') {
       const r = selectedResidentId ? store.getResident(selectedResidentId) : undefined;
       if (r) frame(s.follow, r.location.x, r.location.z, dt, 6.8, 3.1, 1.15, s.pos, s.look, false);
       else poseFor('neighborhood', t, s.pos, s.look);
       rate = 2.4;
+    } else if (mode === 'cinematic' && s.clusterInit) {
+      // slow orbit around the liveliest group; down-angle capped at ~35°
+      const onStage = Math.hypot(s.clusterS.x - STAGE_POS.x, s.clusterS.z - STAGE_POS.z) < 3.15;
+      const dist = onStage ? 9.4 : 12, h = onStage ? 7.6 : 6.2;
+      orbitShot(s, dt, 0.07, dist, h, 1.1);
+      rate = 0.9;
     } else if (mode === 'cinematic') {
-      if (s.clusterAt < 0 || t - s.clusterAt > 1.5) {
-        s.clusterAt = t;
-        if (densestCluster(store, s.cluster) && !s.clusterInit) { s.clusterS.copy(s.cluster); s.clusterInit = true; }
-      }
-      if (s.clusterInit) {
-        s.clusterS.lerp(s.cluster, 1 - Math.exp(-dt * 0.5));
-        s.orbit += dt * 0.07;
-        const onStage = Math.hypot(s.clusterS.x - STAGE_POS.x, s.clusterS.z - STAGE_POS.z) < 3.15;
-        const dist = onStage ? 9 : 12, h = onStage ? 9.5 : 6.2;
-        for (let i = 0; i < 8; i++) {
-          const cx = s.clusterS.x + Math.sin(s.orbit) * dist, cz = s.clusterS.z + Math.cos(s.orbit) * dist;
-          if (!blocked(cx, h, cz, s.clusterS.x, 1.1, s.clusterS.z)) break;
-          s.orbit += 0.35;
-        }
-        s.pos.set(s.clusterS.x + Math.sin(s.orbit) * dist, h, s.clusterS.z + Math.cos(s.orbit) * dist);
-        s.look.set(s.clusterS.x, 1.1, s.clusterS.z);
-        rate = 0.9;
-      } else {
-        cine.u = (cine.u + dt / 120) % 1;
-        cine.pos.getPointAt(cine.u, s.pos);
-        cine.look.getPointAt(cine.u, s.look);
-      }
+      cine.u = (cine.u + dt / 120) % 1;
+      cine.pos.getPointAt(cine.u, s.pos);
+      cine.look.getPointAt(cine.u, s.look);
+    } else if (mode === 'street' && s.clusterInit) {
+      // eye level, aimed at the street/plaza spot with the most residents
+      orbitShot(s, dt, 0.035, 8.6, 1.85, 1.35);
+      rate = 1.1;
     } else if (mode === 'overlay') {
       overlayPose(store, s.overlay, camera, t, dt, s.pos, s.look);
       rate = 1.2;
     } else {
       poseFor(mode, t, s.pos, s.look);
+      if (mode === 'neighborhood' && s.clusterInit) {
+        // subtle bias of the look target towards the densest group (±3 m)
+        const bx = Math.max(-3, Math.min(3, s.clusterS.x - 4.2)), bz = Math.max(-3, Math.min(3, s.clusterS.z - 0.2));
+        s.look.x += bx; s.look.z += bz;
+        s.pos.x += bx * 0.6; s.pos.z += bz * 0.6;
+      }
     }
     if (first.current || snap) {
       camera.position.copy(s.pos);

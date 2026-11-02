@@ -103,6 +103,16 @@ const SEED_RELATIONSHIPS: Array<{ a: string; b: string; friendship: number; minu
   ] },
 ];
 
+/** Minutes between the latest "Yesterday · HH:MM" memory and the 08:00 start (≈ 14 h for an evening memory). */
+function minutesBeforeStart(memories: string[]): number {
+  let best = Infinity;
+  for (const m of memories) {
+    const hit = /^Yesterday · (\d\d):(\d\d) · /.exec(m);
+    if (hit) best = Math.min(best, 24 * 60 - (Number(hit[1]) * 60 + Number(hit[2])) + 8 * 60);
+  }
+  return Number.isFinite(best) ? best : 14 * 60;
+}
+
 export function seedWorld(w: World): void {
   for (const s of SEEDS) {
     const id = `seed:${s.name.toLowerCase()}`;
@@ -127,7 +137,7 @@ export function seedWorld(w: World): void {
     const [ra, rb] = r.a < r.b ? [r.a, r.b] : [r.b, r.a];
     w.relationships.set(pairKey(ra, rb), {
       residentA: ra, residentB: rb, friendship: r.friendship,
-      lastInteractionAt: Math.max(0, Math.floor(w.now - r.minutesAgo * 60_000)), memories: [...r.memories],
+      lastInteractionAt: Math.max(0, Math.floor(w.now - minutesBeforeStart(r.memories) * 60_000)), memories: [...r.memories],
     });
   }
   w.nextSocialAt = 2;

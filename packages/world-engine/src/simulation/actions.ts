@@ -111,6 +111,8 @@ function timeFactor(type: ActionType, p: PoiDef, c: WorldClock, t: Temperament):
     case 'admire': return c.period === 'evening' ? 1.2 : 1;
     case 'watch': return c.period === 'evening' || night ? 1.3 : 1;
     case 'wander': return night ? (owl ? 1.2 : 0.8) : 1;
+    case 'rest': return owl ? 1 : c.period === 'evening' ? 1.4 : night ? 1.3 : 1;
+    case 'sit': return !owl && c.period === 'evening' ? 1.2 : 1;
     default: return 1;
   }
 }

@@ -7,14 +7,14 @@ import type { PoiDef } from '../world/layout';
 import { hashString } from '../avatars/catalog';
 import { mix32 } from './rng';
 import { cancelEncounter, clearAction, gesture, goThen, interrupt, startAction } from './actions';
-import { complimentThing, GIFT_ITEMS, lines, pickTopic, placeVars, requestExtraLine, withArticle } from './dialogue';
+import { complimentThing, GIFT_ITEMS, lines, memoryLine, pickTopic, placeVars, requestExtraLine, withArticle } from './dialogue';
 import { meetingPoint, WALK_SPEED } from './movement';
 import { bump, feel, isSleeping, urgency } from './needs';
 import { atPlace, homeFor, nearestPoi, spotAround } from './places';
 import { addMemory, adjustFriendship, friendshipOf, getRel, pairKey, reactsPositively } from './relationships';
 import { cleanText, dist, emit, schedule, type Agent, type Encounter, type EncounterKind, type PlannedLine, type World } from './state';
 
-const CHAT_EFFECTS = { energy: 0, social: 2, fun: 0.15 };
+const CHAT_EFFECTS = { energy: 0, social: 1.2, fun: 0.12 };
 
 export function socialAvailable(w: World, a: Agent): boolean {
   if (a.leaving || w.simTime < a.socialReadyAt) return false;
@@ -116,28 +116,29 @@ function finishEncounter(w: World, enc: Encounter, A: Agent, B: Agent): void {
   w.encounters.delete(enc.id);
   const r = (lo: number, hi: number) => w.rng.range(lo, hi, 'enc-delta', `${A.id}|${B.id}`);
   const delta = !enc.positive ? -r(1.5, 4)
-    : enc.kind === 'gift' ? r(8, 12) : enc.kind === 'compliment' ? r(5, 9) : enc.kind === 'greet' ? r(3, 6) : r(2.5, 5.5);
+    : enc.kind === 'gift' ? r(7, 11) : enc.kind === 'compliment' ? r(4, 7) : enc.kind === 'greet' ? r(2.5, 5) : r(1.5, 3.5);
   const { before, after } = adjustFriendship(w, A, B, delta);
   const a = A.displayName, b = B.displayName;
   const recent = w.simTime - (w.memoryAt.get(pairKey(A.id, B.id)) ?? -1e9) < 60;
   let memory: string | null = null;
-  if (!enc.positive) memory = enc.kind === 'compliment' ? `${a} complimented ${b}'s ${enc.thing ?? 'style'} ${enc.placeAt} — ${b} rolled their eyes` : `${a} tried to chat with ${b} ${enc.placeAt} — ${b} was not in the mood`;
-  else if (enc.kind === 'greet') memory = `${a} met ${b} ${enc.placeAt} — ${b} ${w.rng.pick(['said hi back', 'seemed delighted', 'smiled right away'], 'mem-tail', a)}`;
-  else if (enc.kind === 'compliment') memory = `${a} complimented ${b}'s ${enc.thing ?? 'style'} ${enc.placeAt} — ${b} ${w.rng.pick(['blushed', 'beamed', 'grinned'], 'mem-tail', a)}`;
-  else if (enc.kind === 'gift') memory = `${a} gave ${b} ${withArticle(enc.item ?? 'flowers')} ${enc.placeAt} — ${b} loved it`;
-  else if (!recent) memory = `${a} and ${b} chatted about ${enc.topicLabel} ${enc.placeAt} — "${cleanText(enc.quote, 80)}"`;
+  const mv = { a, b, at: enc.placeAt, thing: enc.thing ?? 'style', item: withArticle(enc.item ?? 'flowers'), topic: enc.topicLabel };
+  if (!enc.positive) memory = enc.kind === 'compliment' ? memoryLine(w, 'compliment', false, mv) : enc.kind === 'greet' ? memoryLine(w, 'met', false, mv) : memoryLine(w, 'rebuff', false, mv);
+  else if (enc.kind === 'greet') memory = memoryLine(w, 'met', true, mv);
+  else if (enc.kind === 'compliment') memory = memoryLine(w, 'compliment', true, mv);
+  else if (enc.kind === 'gift') memory = memoryLine(w, 'gift', true, mv);
+  else if (!recent) memory = memoryLine(w, 'chat', true, mv, cleanText(enc.quote, 80));
   if (memory) addMemory(w, A, B, memory);
   feel(A, enc.positive ? 0.25 : -0.15);
   feel(B, enc.positive ? 0.2 : -0.1);
   for (const p of [A, B]) {
     if (p.action?.encounterId === enc.id) clearAction(w, p);
     const t = p.temperament;
-    if (enc.positive) bump(p, { social: 5 });
+    if (enc.positive) bump(p, { social: 3 });
     p.socialReadyAt = w.simTime + w.rng.range(22, 40, 'social-cd', p.id) * (t.shyness > 0.5 ? 1.6 : 1) * (p.needs.social < 30 ? 0.35 : 1);
   }
   if (enc.positive && before < 70 && after >= 70) {
     emit(w, 'social', A, { target: B, text: lines.milestone(w, A, placeVars(w, A, B, enc.placeAt)), payload: { action: 'befriend', sentiment: 'positive' } });
-    addMemory(w, A, B, `${a} and ${b} became friends ${enc.placeAt} — a proper high five`);
+    addMemory(w, A, B, memoryLine(w, 'friends', true, { a, b, at: enc.placeAt }));
     gesture(w, A, `celebrating with ${b}`, 3, { priority: 0.5 });
     gesture(w, B, `celebrating with ${a}`, 3, { priority: 0.5 });
   } else if (!enc.positive) {
@@ -252,7 +253,7 @@ function newcomerHello(w: World, a: Agent): void {
     if (!(B.action && B.action.priority >= 2)) gesture(w2, B, `greeting ${A.displayName}`, 3, { priority: 1 });
     emit(w2, 'social', B, { target: A, text: positive ? lines.welcome(w2, B, placeVars(w2, B, A, at)) : lines.snub(w2, B, placeVars(w2, B, A, at)), payload: { action: 'greet', sentiment: positive ? 'positive' : 'negative' } });
     adjustFriendship(w2, B, A, positive ? w2.rng.range(4, 8, 'welcome', A.id) : -2);
-    addMemory(w2, B, A, `${B.displayName} welcomed ${A.displayName} to town ${at} — ${positive ? `${A.displayName} waved hello` : `${B.displayName} grumbled a little`}`);
+    addMemory(w2, B, A, memoryLine(w2, 'welcome', positive, { a: B.displayName, b: A.displayName, at }));
     bump(A, { social: 6, fun: 3 });
     bump(B, { social: 4 });
   });

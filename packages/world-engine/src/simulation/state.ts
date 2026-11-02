@@ -160,7 +160,8 @@ export interface World {
   nextEncounterId: number;
   scheduleSeq: number;
   nextSocialAt: number;
-  recentLines: string[];
+  /** template key → sim time last used (town-wide anti-repetition). */
+  lineUsedAt: Map<string, number>;
   facts: WorldFacts;
   llm: { provider: DialogueProvider | null; inFlight: number; ready: ReadyLine[]; nextAt: number };
 }

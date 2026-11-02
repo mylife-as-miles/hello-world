@@ -8,7 +8,7 @@ import { appearanceFromSeed, hashString, normalizeAppearance } from '../avatars/
 import { POIS, SPAWN_POINT } from '../world/layout';
 import { worldClock } from '../world/time';
 import { gesture, goThen, interrupt, removeAgent, scoreChoices, startAction, startChoice } from './actions';
-import { lines, placeVars, requestExtraLine, withArticle } from './dialogue';
+import { complimentThing, lines, memoryLine, placeVars, requestExtraLine, withArticle } from './dialogue';
 import { meetingPoint, WALK_SPEED } from './movement';
 import { bump, feel, isSleeping } from './needs';
 import { compatibility, defaultPersonality, temperamentFor } from './personality';
@@ -180,7 +180,7 @@ function onChat(w: World, e: WorldEvent): void {
     emit(w2, positive ? 'chat' : 'social', R, { target: A, text, payload: positive ? { reaction: 'reply', sentiment: 'positive' } : { action: 'greet', sentiment: 'negative' } });
     adjustFriendship(w2, R, A, positive ? 1.5 : -1);
     const key = pairKey(A.id, R.id);
-    if (w2.simTime - (w2.memoryAt.get(key) ?? -1e9) > 120) addMemory(w2, A, R, `${A.displayName} chatted with ${R.displayName} ${at} — "${cleanText(heard, 60)}"`);
+    if (w2.simTime - (w2.memoryAt.get(key) ?? -1e9) > 120) addMemory(w2, A, R, memoryLine(w2, 'reply', true, { a: A.displayName, b: R.displayName, at }, cleanText(heard, 60)));
     const rel = getRel(w2, A.id, R.id);
     requestExtraLine(w2, 'reply', R, A, text, rel?.memories ?? [], rel?.friendship, at, heard);
   });
@@ -248,9 +248,9 @@ function onGift(w: World, e: WorldEvent): void {
     const far = dist(a, t) > 10;
     goThen(w, a, meetingPoint(t, a, 1.1, `${a.id}|gift`), `${far ? 'running' : 'walking'} to ${t.displayName}`, `gifting ${item} to ${t.displayName}`, 3, { run: far });
   } else gesture(w, a, `gifting ${item} to ${t.displayName}`, 3);
-  const { after } = adjustFriendship(w, a, t, w.rng.range(8, 15, 'gift', t.id));
+  const { after } = adjustFriendship(w, a, t, w.rng.range(8, 13, 'gift', t.id));
   void after;
-  addMemory(w, a, t, `${a.displayName} gave ${t.displayName} ${item} ${at} — ${t.displayName} ${woken ? 'woke up smiling' : 'was thrilled'}`);
+  addMemory(w, a, t, woken ? `${memoryLine(w, 'gift', true, { a: a.displayName, b: t.displayName, at, item }).split(' — ')[0]} — ${t.displayName} woke up smiling` : memoryLine(w, 'gift', true, { a: a.displayName, b: t.displayName, at, item }));
   bump(t, { social: 8, fun: 6 });
   bump(a, { social: 5, fun: 3 });
   feel(t, 0.4);
@@ -277,7 +277,7 @@ function onSocial(w: World, e: WorldEvent): void {
   if (!t) { gesture(w, a, 'waving hello', 3); return; }
   const verb = action === 'compliment' ? 'complimenting' : action === 'befriend' ? 'befriending' : 'greeting';
   gesture(w, a, `${verb} ${t.displayName}`, 3, { effects: { energy: 0, social: 1, fun: 0.3 } });
-  if (!awake(t)) { if (t.leaving) return; addMemory(w, a, t, `${a.displayName} tiptoed past a sleeping ${t.displayName} ${at} — ${t.displayName} snored on`); return; }
+  if (!awake(t)) { if (t.leaving) return; addMemory(w, a, t, memoryLine(w, 'asleep', true, { a: a.displayName, b: t.displayName, at })); return; }
   const va = placeVars(w, t, a, at);
   if (action === 'befriend') {
     const rel = getRel(w, a.id, t.id);
@@ -287,7 +287,7 @@ function onSocial(w: World, e: WorldEvent): void {
     if (yes) gesture(w, a, `celebrating with ${t.displayName}`, 4);
     emit(w, 'social', t, { target: a, text: lines.befriendReply(w, t, yes, va), payload: { action: 'befriend', sentiment: sent(yes) } });
     adjustFriendship(w, a, t, yes ? w.rng.range(15, 25, 'befriend', t.id) : 3);
-    addMemory(w, a, t, yes ? `${a.displayName} and ${t.displayName} became friends ${at} — ${t.displayName} said yes` : `${a.displayName} asked ${t.displayName} to be friends ${at} — ${t.displayName} wants to hang out more first`);
+    addMemory(w, a, t, memoryLine(w, yes ? 'friends' : 'declined', yes, { a: a.displayName, b: t.displayName, at }));
     feel(t, yes ? 0.4 : 0);
     bump(t, { social: yes ? 10 : 3 });
     return;
@@ -300,7 +300,8 @@ function onSocial(w: World, e: WorldEvent): void {
   const delta = positive ? (kind === 'compliment' ? w.rng.range(5, 10, 'soc', t.id) : w.rng.range(4, 8, 'soc', t.id)) : -w.rng.range(2, 4, 'soc', t.id);
   adjustFriendship(w, a, t, delta);
   const tail = positive ? w.rng.pick(kind === 'compliment' ? ['blushed', 'beamed', 'did a little twirl'] : ['beamed', 'waved back', 'smiled from ear to ear'], 'soc-tail', t.id) : w.rng.pick(['just grunted', 'looked away', 'was not in the mood'], 'soc-tail', t.id);
-  addMemory(w, a, t, kind === 'compliment' ? `${a.displayName} complimented ${t.displayName} ${at} — ${t.displayName} ${tail}` : `${a.displayName} greeted ${t.displayName} ${at} — ${t.displayName} ${tail}`);
+  void tail;
+  addMemory(w, a, t, memoryLine(w, kind === 'compliment' ? 'compliment' : 'greet', positive, { a: a.displayName, b: t.displayName, at, thing: complimentThing(w, t) }));
   feel(t, positive ? 0.25 : -0.1);
   bump(t, { social: positive ? 5 : 1 });
   bump(a, { social: 4 });
@@ -394,7 +395,7 @@ function onRaid(w: World, e: WorldEvent): void {
       ...(i === 0 ? { onArrive: (w2: World, ag: Agent) => {
         const v = [...w2.agents.values()].find(o => o.group === group);
         emit(w2, 'social', ag, { ...(v ? { target: v } : {}), text: lines.raidWelcome(w2, ag, placeVars(w2, ag, v ?? null, '')), payload: { action: 'greet', sentiment: 'positive', reaction: 'raid-welcome' } });
-        if (v) { adjustFriendship(w2, ag, v, 6); addMemory(w2, ag, v, `${ag.displayName} welcomed ${v.displayName} through the portal — the whole raid cheered`); }
+        if (v) { adjustFriendship(w2, ag, v, 6); addMemory(w2, ag, v, memoryLine(w2, 'raid', true, { a: ag.displayName, b: v.displayName, at: '' })); }
       } } : {}),
     });
   });

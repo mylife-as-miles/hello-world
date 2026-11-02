@@ -36,6 +36,11 @@ export interface GeneratedTreesProps {
   farDistance?: number;
   /** Soft blob contact shadows under the crowns. Default true. */
   blobShadows?: boolean;
+  /**
+   * Budget of non-impostor trees per frame (nearest win). Default 70 (high) / 40 (low); full
+   * crowns are further capped at 16 on 'high'. Bounds worst-case triangles for big forests.
+   */
+  maxDetailed?: number;
 }
 
 /** Variant order = asset order (placement `variant` index). Town kinds: round→broadleaf, pine→conifer. */
@@ -101,7 +106,10 @@ function loadTreeAssets(): Promise<TreeAssets> {
     atlas.needsUpdate = true;
     assetsValue = { variants, atlas };
     return assetsValue;
-  })();
+  })().catch((error: unknown) => {
+    assetsPromise = null; // allow a later mount to retry
+    throw error;
+  });
   return assetsPromise;
 }
 
@@ -322,14 +330,18 @@ interface VariantBatch {
   colors: Float32Array; // 3 per tree
   positions: Float32Array; // 3 per tree (LOD distance)
   band: Uint8Array; // current band per tree
+  prev: Uint8Array; // band before this update (change detection)
   meshes: [trunksNear: THREE.InstancedMesh, crownsNear: THREE.InstancedMesh, trunksMid: THREE.InstancedMesh, crownsMid: THREE.InstancedMesh, cards: THREE.InstancedMesh];
 }
 interface LodStats { near: number; mid: number; far: number }
 interface BuiltForest {
   group: THREE.Group;
   wind: { value: number };
-  /** Re-partitions trees by camera distance; returns per-band counts. */
-  updateLod(camera: THREE.Vector3, nearDistance: number, farDistance: number, force: boolean): LodStats;
+  /**
+   * Re-partitions trees by camera distance, then enforces budgets: at most `maxNear` full
+   * crowns and `maxDetailed` non-impostor trees (nearest win). Returns per-band counts.
+   */
+  updateLod(camera: THREE.Vector3, nearDistance: number, farDistance: number, maxNear: number, maxDetailed: number, force: boolean): LodStats;
   dispose(): void;
 }
 
@@ -410,7 +422,7 @@ function buildForest(assets: TreeAssets, impostors: Impostors, placements: Reado
     meshes[0].receiveShadow = quality === 'high';
     group.add(...meshes);
     disposables.push(...meshes);
-    batches.push({ matrices, colors, positions, band: new Uint8Array(count).fill(255), meshes });
+    batches.push({ matrices, colors, positions, band: new Uint8Array(count).fill(255), prev: new Uint8Array(count), meshes });
   });
 
   if (blobShadows) {
@@ -438,10 +450,12 @@ function buildForest(assets: TreeAssets, impostors: Impostors, placements: Reado
   const HYST = 4; // metres of hysteresis so trees on a band edge do not flicker
   return {
     group, wind,
-    updateLod(camera, nearDistance, farDistance, force) {
+    updateLod(camera, nearDistance, farDistance, maxNear, maxDetailed, force) {
       const stats: LodStats = { near: 0, mid: 0, far: 0 };
-      for (const b of batches) {
-        let changed = force;
+      const detailed: number[] = []; // flat [distance, batch, index] triples of non-impostor trees
+      let nearCount = 0;
+      batches.forEach((b, bi) => {
+        b.prev.set(b.band);
         const count = b.band.length;
         for (let i = 0; i < count; i++) {
           const dx = b.positions[i * 3]! - camera.x, dy = b.positions[i * 3 + 1]! - camera.y, dz = b.positions[i * 3 + 2]! - camera.z;
@@ -455,8 +469,25 @@ function buildForest(assets: TreeAssets, impostors: Impostors, placements: Reado
             const edgeHigh = prev === 0 ? nearDistance : prev === 1 ? farDistance : Infinity;
             if (d > edgeLow - HYST && d < edgeHigh + HYST) next = prev as Band;
           }
-          if (next !== prev) { b.band[i] = next; changed = true; }
+          b.band[i] = next;
+          if (next < 2) { detailed.push(d, bi, i); if (next === 0) nearCount++; }
         }
+      });
+      // budgets: keep the nearest trees detailed, demote the rest (full → sparse → impostor)
+      const detailedCount = detailed.length / 3;
+      if (detailedCount > maxDetailed || nearCount > maxNear) {
+        const order = Array.from({ length: detailedCount }, (_, k) => k).sort((x, y) => detailed[x * 3]! - detailed[y * 3]!);
+        let keptNear = 0;
+        order.forEach((k, rank) => {
+          const b = batches[detailed[k * 3 + 1]!]!, i = detailed[k * 3 + 2]!;
+          if (rank >= maxDetailed) { b.band[i] = 2; return; }
+          if (b.band[i] === 0) { if (keptNear < maxNear) keptNear++; else b.band[i] = 1; }
+        });
+      }
+      for (const b of batches) {
+        const count = b.band.length;
+        let changed = force;
+        for (let i = 0; i < count && !changed; i++) if (b.band[i] !== b.prev[i]) changed = true;
         if (changed) {
           const cursor = [0, 0, 0, 0, 0];
           const mats = b.meshes.map((m) => m.instanceMatrix.array as Float32Array);
@@ -496,7 +527,7 @@ function placementsKey(placements: ReadonlyArray<TreePlacement>): string {
   return `${placements.length}:${h >>> 0}`;
 }
 
-export function GeneratedTrees({ quality, placements, farDistance, blobShadows = true }: GeneratedTreesProps) {
+export function GeneratedTrees({ quality, placements, farDistance, blobShadows = true, maxDetailed }: GeneratedTreesProps) {
   const gl = useThree((s) => s.gl);
   const key = placementsKey(placements);
   // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed by content on purpose
@@ -533,18 +564,20 @@ export function GeneratedTrees({ quality, placements, farDistance, blobShadows =
   const far = farDistance ?? (quality === 'high' ? 80 : 40);
   // full crowns + trunk shadows only close up on 'high'; 'low' never draws the full crown
   const near = quality === 'high' ? Math.min(45, far * 0.6) : 0;
-  const last = useRef({ x: NaN, y: NaN, z: NaN, built: null as BuiltForest | null, far: NaN, near: NaN, eye: new THREE.Vector3() });
+  const maxNear = quality === 'high' ? 16 : 0;
+  const maxDet = maxDetailed ?? (quality === 'high' ? 70 : 40);
+  const last = useRef({ x: NaN, y: NaN, z: NaN, built: null as BuiltForest | null, far: NaN, near: NaN, budget: NaN, eye: new THREE.Vector3() });
   useFrame(({ camera }, dt) => {
     if (!built) return;
     built.wind.value += Math.min(dt, 0.1);
     const l = last.current;
     // camera in the forest group's local space (works when mounted under a transformed parent)
     const c = built.group.worldToLocal(camera.getWorldPosition(l.eye));
-    const fresh = l.built !== built || l.far !== far || l.near !== near;
+    const fresh = l.built !== built || l.far !== far || l.near !== near || l.budget !== maxDet;
     if (fresh || (c.x - l.x) ** 2 + (c.y - l.y) ** 2 + (c.z - l.z) ** 2 > 1) {
-      const stats = built.updateLod(c, near, far, fresh);
+      const stats = built.updateLod(c, near, far, maxNear, maxDet, fresh);
       built.group.userData.lod = stats; // { near, mid, far } tree counts, handy for debugging/HUDs
-      l.x = c.x; l.y = c.y; l.z = c.z; l.built = built; l.far = far; l.near = near;
+      l.x = c.x; l.y = c.y; l.z = c.z; l.built = built; l.far = far; l.near = near; l.budget = maxDet;
     }
   });
   return built ? <primitive object={built.group} /> : null;

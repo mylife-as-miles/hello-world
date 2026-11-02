@@ -11,14 +11,14 @@ const MH_CREDIT = 'CARLA Simulator (carla.org), CC BY 4.0 · contains Epic MetaH
 const RB_CREDIT = 'Microsoft Rocketbox Avatar Library, MIT (c) 2020 Microsoft · via Valdrada';
 
 export const REALISTIC_BASE_MODELS: BaseModelEntry[] = [
-  { id: 'mh-elena', label: 'Elena (photoreal)', kind: 'realistic', file: 'SK_EuroW_.glb', credit: MH_CREDIT, description: 'Photoreal woman — denim, cardigan, sneakers' },
-  { id: 'mh-marco', label: 'Marco (photoreal)', kind: 'realistic', file: 'SK_euroM_.glb', credit: MH_CREDIT, description: 'Photoreal man — jacket, jeans' },
-  { id: 'mh-amara', label: 'Amara (photoreal)', kind: 'realistic', file: 'SK_AfroW_03_GEN23.glb', credit: MH_CREDIT, description: 'Photoreal woman — casual shirt and trousers' },
-  { id: 'mh-kenji', label: 'Kenji (photoreal)', kind: 'realistic', file: 'SK_AsiaM_v2.glb', credit: MH_CREDIT, description: 'Photoreal man — layered streetwear' },
-  { id: 'rb-sofia', label: 'Sofia (Rocketbox)', kind: 'realistic', file: 'RB_Female_Adult_01.glb', credit: RB_CREDIT, description: 'Realistic woman — casual outfit' },
-  { id: 'rb-daniel', label: 'Daniel (Rocketbox)', kind: 'realistic', file: 'RB_Male_Adult_01.glb', credit: RB_CREDIT, description: 'Realistic man — casual outfit' },
-  { id: 'rb-claire', label: 'Claire (Rocketbox)', kind: 'realistic', file: 'RB_Business_Female_01.glb', credit: RB_CREDIT, description: 'Realistic woman — business wear' },
-  { id: 'rb-james', label: 'James (Rocketbox)', kind: 'realistic', file: 'RB_Business_Male_01.glb', credit: RB_CREDIT, description: 'Realistic man — business suit' },
+  { id: 'mh-elena', label: 'Elena (photoreal)', kind: 'realistic', file: 'SK_EuroW_.glb', credit: MH_CREDIT, description: 'Photoreal woman — brown knit cardigan, black jeans' },
+  { id: 'mh-marco', label: 'Marco (photoreal)', kind: 'realistic', file: 'SK_euroM_.glb', credit: MH_CREDIT, description: 'Photoreal man — maroon varsity jacket, grey jeans' },
+  { id: 'mh-amara', label: 'Amara (photoreal)', kind: 'realistic', file: 'SK_AfroW_03_GEN23.glb', credit: MH_CREDIT, description: 'Photoreal woman — mustard top, grey trousers' },
+  { id: 'mh-kenji', label: 'Kenji (photoreal)', kind: 'realistic', file: 'SK_AsiaM_v2.glb', credit: MH_CREDIT, description: 'Photoreal man — brown jacket, camo trousers' },
+  { id: 'rb-sofia', label: 'Sofia (realistic)', kind: 'realistic', file: 'RB_Female_Adult_01.glb', credit: RB_CREDIT, description: 'Realistic woman — pink shirt, jeans (Rocketbox)' },
+  { id: 'rb-daniel', label: 'Daniel (realistic)', kind: 'realistic', file: 'RB_Male_Adult_01.glb', credit: RB_CREDIT, description: 'Realistic man — striped polo, shorts (Rocketbox)' },
+  { id: 'rb-claire', label: 'Claire (realistic)', kind: 'realistic', file: 'RB_Business_Female_01.glb', credit: RB_CREDIT, description: 'Realistic woman — dark business suit (Rocketbox)' },
+  { id: 'rb-james', label: 'James (realistic)', kind: 'realistic', file: 'RB_Business_Male_01.glb', credit: RB_CREDIT, description: 'Realistic man — dark suit and red tie (Rocketbox)' },
 ];
 
 export interface AppearanceSupport {

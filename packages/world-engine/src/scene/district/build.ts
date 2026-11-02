@@ -256,11 +256,12 @@ function addBuilding(f: Writer, p: Writer, lot: DistrictLot, high: boolean, bare
   let thx = hx, thz = hz;
   if (towerSplit < floors) {
     // setback ledge + upper shaft
-    p.box(lot.x - hx - 0.35, top, lot.z - hz - 0.35, lot.x + hx + 0.35, top + 0.6, lot.z + hz + 0.35, trim);
+    const lx0 = lot.x - hx - 0.35, lx1 = lot.x + hx + 0.35, lz0 = lot.z - hz - 0.35, lz1 = lot.z + hz + 0.35, ly = top + 0.6;
+    p.box(lx0, top, lz0, lx1, ly, lz1, trim, BLACK, false);
+    p.poly([[lx0, ly, lz1], [lx1, ly, lz1], [lx1, ly, lz0], [lx0, ly, lz0]], roof); // ledge roof
     const shrink = 0.7 + rnd() * 0.1;
     thx = Math.max(lot.bayW, Math.round((hx * shrink * 2) / lot.bayW) * lot.bayW / 2);
     thz = Math.max(lot.bayW, Math.round((hz * shrink * 2) / lot.bayW) * lot.bayW / 2);
-    p.box(lot.x - hx, top + 0.6, lot.z - hz, lot.x + hx, top + 0.6, lot.z + hz, roof, BLACK, true); // ledge roof
     top = facade(lot.x - thx, lot.z - thz, lot.x + thx, lot.z + thz, top + 0.6, floors - towerSplit, 7);
   }
 

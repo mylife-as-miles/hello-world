@@ -330,7 +330,8 @@ export function CameraRig({ mode, selectedResidentId }: { mode: RigMode; selecte
       d.until = now + 5; d.lastPush = now; d.cutPending = false;
       return;
     }
-    if (event.kind !== 'raid' && now - d.lastCut < 3.5) return;
+    // coalesce bursts: one transition per window (raids may pre-empt after 1 s, others after 3.5 s)
+    if (now - d.lastCut < (event.kind === 'raid' ? 1 : 3.5)) return;
     const isPortal = event.kind === 'raid' || event.kind === 'join';
     d.kind = isPortal ? 'portal' : 'actor';
     d.actorId = event.actorId;

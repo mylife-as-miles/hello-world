@@ -86,9 +86,15 @@ export function EventBanner({ store }: { store: SceneStore }) {
   const lastRaid = useRef({ t: 0 });
   useEffect(() => {
     const timers = new Set<ReturnType<typeof setTimeout>>();
+    let windowStart = 0, inWindow = 0;
     const off = store.onEvent(({ event }) => {
+      const now = Date.now();
+      if (now - windowStart > 1000) { windowStart = now; inWindow = 0; }
+      // bursts: accept at most 2 toasts per second (raids always pass), drop the rest
+      if (inWindow >= 2 && event.kind !== 'raid') return;
       const t = toastFor(event, lastRaid.current);
       if (!t) return;
+      inWindow++;
       setToasts(prev => [...prev.filter(x => x.id !== t.id), t].slice(-2));
       const timer = setTimeout(() => { timers.delete(timer); setToasts(prev => prev.filter(x => x.id !== t.id)); }, LIFETIME_MS);
       timers.add(timer);

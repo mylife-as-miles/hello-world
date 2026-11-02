@@ -11,7 +11,7 @@ import * as THREE from 'three';
 import type { WorldSceneProps } from '@hello-world/contracts';
 import { SceneStore } from '../core/sceneStore';
 import { SceneStoreContext } from '../core/SceneContext';
-import { ResidentsLayer, type ResidentsLayerProps } from '../interactions/ResidentsLayer';
+import { ResidentsLayer } from '../interactions/ResidentsLayer';
 import { ResidentInspector } from '../interactions/ResidentInspector';
 import { getPoi } from '../world/layout';
 import { createKit, type SceneKit } from './kit';
@@ -164,9 +164,6 @@ const WorldContent = memo(function WorldContent({
   const sky = useMemo(() => createSkyUniforms(), []);
   const cloudTint = useMemo(() => new THREE.Color('#ffffff'), []);
   useEventReactions(kit, store);
-  // `overlay` is an optional ResidentsLayer prop (added by the interactions module); passed through untyped
-  // so this file compiles whether or not that prop exists yet.
-  const overlayProps = useMemo(() => (transparent ? ({ overlay: true } as unknown as Partial<ResidentsLayerProps>) : undefined), [transparent]);
   return (
     <>
       <Atmosphere transparent={transparent} quality={quality} sky={sky} cloudTint={cloudTint} />
@@ -188,7 +185,7 @@ const WorldContent = memo(function WorldContent({
       <Bursts quality={quality} />
       <ResidentsLayer
         selectedResidentId={selectedResidentId} onResidentSelect={onResidentSelect} quality={quality}
-        viewerResidentId={viewerResidentId} {...overlayProps}
+        viewerResidentId={viewerResidentId} overlay={transparent}
       />
       <CameraRig mode={rigMode} selectedResidentId={selectedResidentId} />
       {quality === 'high' && !transparent && <PostFX />}
@@ -214,33 +211,44 @@ function OverlaySeating() {
 
 const JOIN_COLORS = ['#b98cff', '#6ff3ff', '#ffffff', '#ffd6ff'];
 const RAID_COLORS = ['#b98cff', '#ff6fd8', '#6ff3ff', '#ffffff', '#ffd166'];
+const GIFT_COLORS = ['#ffd166', '#ff8fab', '#ffffff'];
 
 function useEventReactions(kit: SceneKit, store: SceneStore) {
   useEffect(() => {
     const portal = getPoi('portal')?.position ?? { x: 0, z: -24 };
+    const v = new THREE.Vector3();
+    let lastConfetti = -1e9;
     const at = (actorId: string, y: number) => {
       const r = store.getResident(actorId);
-      return r ? new THREE.Vector3(r.location.x, y, r.location.z) : new THREE.Vector3(0, y, 0);
+      return r ? v.set(r.location.x, y, r.location.z) : v.set(0, y, 0);
+    };
+    const confetti = (actorId: string, y: number, n: number) => {
+      // bursts of confetti events share one shower (≤ 1 per 600 ms)
+      const now = kit.env.t;
+      if (now - lastConfetti < 0.6) return;
+      lastConfetti = now;
+      kit.fx.emitConfetti(at(actorId, y), n);
     };
     return store.onEvent(({ event }) => {
       switch (event.kind) {
         case 'raid':
+          if (kit.env.t - kit.fx.raidAt < 1) break; // coalesce raid bursts
           kit.fx.raidAt = kit.env.t;
-          kit.fx.emitSparkles(new THREE.Vector3(portal.x, 2.6, portal.z + 0.8), 260, RAID_COLORS, 1.8);
-          kit.fx.emitConfetti(new THREE.Vector3(portal.x, 5.5, portal.z + 3), 420);
-          kit.fx.emitConfetti(new THREE.Vector3(0, 6.5, 0), 300);
+          kit.fx.emitSparkles(v.set(portal.x, 2.6, portal.z + 0.8), 260, RAID_COLORS, 1.8);
+          kit.fx.emitConfetti(v.set(portal.x, 5.5, portal.z + 3), 420);
+          kit.fx.emitConfetti(v.set(0, 6.5, 0), 300);
           break;
         case 'join':
-          kit.fx.emitSparkles(new THREE.Vector3(portal.x, 1.6, portal.z + 2.2), 90, JOIN_COLORS, 0.9);
+          kit.fx.emitSparkles(v.set(portal.x, 1.6, portal.z + 2.2), 90, JOIN_COLORS, 0.9);
           break;
         case 'confetti':
-          kit.fx.emitConfetti(at(event.actorId, 6), 380);
+          confetti(event.actorId, 6, 380);
           break;
         case 'social':
-          if (event.payload?.action === 'celebrate') kit.fx.emitConfetti(at(event.actorId, 5.5), 260);
+          if (event.payload?.action === 'celebrate') confetti(event.actorId, 5.5, 260);
           break;
         case 'gift':
-          kit.fx.emitSparkles(at(event.actorId, 1.6), 50, ['#ffd166', '#ff8fab', '#ffffff'], 0.6);
+          kit.fx.emitSparkles(at(event.actorId, 1.6), 50, GIFT_COLORS, 0.6);
           break;
         default:
           break;

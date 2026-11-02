@@ -24,6 +24,8 @@ Without authorized Twitch credentials, the application explicitly runs in **Demo
 pnpm typecheck
 pnpm test
 pnpm build
+# With the app running, exercise real browser acceptance:
+pnpm test:browser
 # Serve the production build and API together:
 WEB_ORIGIN=http://localhost:3001 pnpm start
 ```
@@ -88,6 +90,6 @@ This slice does not claim distributed scaling, cloud-hosted durability, or simul
 
 [Integration contract v1](docs/INTEGRATION_CONTRACT.md) defines ownership and exact imports. Only Codex integrates into `main`; Claude's engine arrives through `claude/world-engine`.
 
-[Browser and integration QA](docs/QA.md) records real checks and evidence. [Independent critique](docs/CRITIQUE.md) records weighted scores and remaining problems. Live Twitch and OBS application tests require their respective external applications/permissions; browser-source rendering is tested in Chromium.
+[Browser and integration QA](docs/QA.md) records real checks and evidence. `pnpm test:browser` uses system Chromium when available; otherwise run `pnpm exec playwright install chromium` first. Set `QA_BROWSER_PATH` for a different executable, and `QA_DIRECTOR_KEY` when testing a key-protected server. [Independent critique](docs/CRITIQUE.md) records weighted scores and remaining problems. Live Twitch and OBS application tests require their respective external applications/permissions; browser-source rendering is tested in Chromium.
 
 Build and browser acceptance results are recorded after the complete engine has been integrated. Initial source scaffolding is not a claim of a verified finished product.

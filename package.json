@@ -8,7 +8,8 @@
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r --if-present test",
-    "start": "pnpm --filter @hello-world/server start"
+    "start": "pnpm --filter @hello-world/server start",
+    "test:browser": "node tests/browser-smoke.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

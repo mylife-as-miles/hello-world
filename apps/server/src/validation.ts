@@ -78,8 +78,66 @@ export function parseClientMessage(input: unknown): ClientMessage {
   return clientMessageSchema.parse(input);
 }
 
+// Stored engine history is data, not a client command. The engine may add bounded
+// contract-compatible metadata (destination, sentiment, reaction, etc.). Do not
+// reuse this schema for browser or authenticated Twitch ingress.
+const persistedIdentifier = z.string().trim().min(1).max(128);
+const persistedString = z.string().max(500);
+const persistedValue = z.union([
+  persistedString,
+  z.number().finite().min(-1_000_000_000).max(1_000_000_000),
+  z.boolean(),
+  z.array(z.string().max(200)).max(16),
+  appearanceSchema,
+]);
+const persistedPayloadSchema = z
+  .object({
+    appearance: appearanceSchema.optional(),
+    personality: z.array(z.string().max(80)).max(16).optional(),
+    weather: z.enum(["sunny", "rain", "snow", "sunset"]).optional(),
+    amount: z
+      .number()
+      .finite()
+      .min(-1_000_000_000)
+      .max(1_000_000_000)
+      .optional(),
+    action: z
+      .enum(["greet", "compliment", "befriend", "celebrate", "update-avatar"])
+      .optional(),
+    color: z.string().max(80).optional(),
+  })
+  .catchall(persistedValue)
+  .superRefine((payload, context) => {
+    const keys = Object.keys(payload);
+    if (
+      keys.length > 24 ||
+      keys.some(
+        (key) =>
+          !/^[a-zA-Z][a-zA-Z0-9_-]{0,39}$/.test(key) ||
+          ["constructor", "prototype"].includes(key),
+      )
+    )
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Stored event metadata has invalid or excessive keys",
+      });
+  });
+export const persistedEventSchema = z
+  .object({
+    id: persistedIdentifier,
+    kind: z.enum(EVENT_KINDS),
+    source: z.enum(["twitch", "viewer", "demo", "simulation"]),
+    actorId: persistedIdentifier,
+    actorDisplayName: z.string().trim().min(1).max(64),
+    targetId: persistedIdentifier.optional(),
+    timestamp: z.number().finite().nonnegative(),
+    text: persistedString.optional(),
+    payload: persistedPayloadSchema.optional(),
+  })
+  .strict();
+
 const residentSchema = z.object({
-  id: identifier,
+  id: persistedIdentifier,
   displayName: z.string().min(1).max(64),
   appearance: appearanceSchema,
   personality: z.array(z.string().max(80)).max(10),
@@ -100,13 +158,13 @@ const residentSchema = z.object({
 });
 export const snapshotSchema = z.object({
   schemaVersion: z.literal(1),
-  worldId: identifier,
+  worldId: persistedIdentifier,
   residents: z.array(residentSchema).max(50),
   relationships: z
     .array(
       z.object({
-        residentA: identifier,
-        residentB: identifier,
+        residentA: persistedIdentifier,
+        residentB: persistedIdentifier,
         friendship: z.number().finite(),
         lastInteractionAt: z.number().finite(),
         memories: z.array(z.string().max(1000)).max(100),
@@ -114,7 +172,7 @@ export const snapshotSchema = z.object({
     )
     .max(2500),
   weather: z.enum(["sunny", "rain", "snow", "sunset"]),
-  eventHistory: z.array(eventSchema).max(100),
+  eventHistory: z.array(persistedEventSchema).max(100),
   simulationTime: z.number().finite().nonnegative(),
 });
 export function parseSnapshot(input: unknown): WorldSnapshot {

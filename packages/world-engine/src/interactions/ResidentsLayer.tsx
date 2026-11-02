@@ -63,7 +63,7 @@ const NAMEPLATE_WORLD_H = 0.26;
 const NAMEPLATE_MAX_VISIBLE = 8;
 /** quality 'low' draw-call budget: fewer labels, real shadows only for the nearest few (others get blob discs). */
 const NAMEPLATE_MAX_VISIBLE_LOW = 6;
-const SHADOW_CASTERS_LOW = 4;
+const SHADOW_CASTERS_LOW = 3;
 const BLOB_CAPACITY = 64;
 /** Raid visitors (ids `raid:<group>:<k>`) within this radius of their group centroid collapse into one chip. */
 const RAID_CLUSTER_RADIUS = 7;

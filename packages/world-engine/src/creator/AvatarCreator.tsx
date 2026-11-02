@@ -546,17 +546,17 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
             <Section id="hair" domId={secId('hair')} title="Hair" sub={support.hair ? `${HAIR_STYLES.length} styles · any colour` : 'Fixed by this body'}>
               {support.hair ? (
                 <>
-              <div className="hwc-grid" role="group" aria-label="Hairstyle">
-                  {HAIR_STYLES.map(h => (
-                    <button key={h.id} type="button" className={cls('hwc-tile', appearance.hairStyle === h.id && 'is-on')} aria-pressed={appearance.hairStyle === h.id}
-                      aria-label={`Hairstyle ${h.label}`} data-testid={`hair-${h.id}`} onClick={() => edit(a => ({ ...a, hairStyle: h.id }))}>
-                      <Bust hair={h.id} hairColor={appearance.hairColor} skin={appearance.skinTone} outfit="rgba(255,255,255,.14)" eye={appearance.face.eyeColor} size={50} />
-                      {h.label}
-                    </button>
-                  ))}
-                </div>
-                <div className="hwc-label">Hair colour</div>
-                <Swatches label="Hair colour" colors={HAIR_COLORS} value={appearance.hairColor} testIdPrefix="hair-color" onChange={c => edit(a => ({ ...a, hairColor: c }))} />
+                  <div className="hwc-grid" role="group" aria-label="Hairstyle">
+                    {HAIR_STYLES.map(h => (
+                      <button key={h.id} type="button" className={cls('hwc-tile', appearance.hairStyle === h.id && 'is-on')} aria-pressed={appearance.hairStyle === h.id}
+                        aria-label={`Hairstyle ${h.label}`} data-testid={`hair-${h.id}`} onClick={() => edit(a => ({ ...a, hairStyle: h.id }))}>
+                        <Bust hair={h.id} hairColor={appearance.hairColor} skin={appearance.skinTone} outfit="rgba(255,255,255,.14)" eye={appearance.face.eyeColor} size={50} />
+                        {h.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="hwc-label">Hair colour</div>
+                  <Swatches label="Hair colour" colors={HAIR_COLORS} value={appearance.hairColor} testIdPrefix="hair-color" onChange={c => edit(a => ({ ...a, hairColor: c }))} />
                 </>
               ) : <Note>{baseName} is {fixedWhy}; its hair is part of the model. Hairstyles and hair colours apply to Townie bodies.</Note>}
             </Section>
@@ -564,33 +564,33 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
             <Section id="outfit" domId={secId('outfit')} title="Outfit" sub={support.outfitPieces ? 'Mix pieces, then pick a colour' : support.outfitColor ? 'Pick a colour' : 'Fixed by this body'}>
               {support.outfitPieces ? (
                 <>
-              <div className="hwc-label" style={{ marginTop: 0 }}>Top</div>
-                <div className="hwc-chips" role="group" aria-label="Top">
-                  {TOPS.map(t => (
-                    <button key={t.id} type="button" className={cls('hwc-chip', appearance.outfit.top === t.id && 'is-on')} aria-pressed={appearance.outfit.top === t.id}
-                      data-testid={`top-${t.id}`} onClick={() => setOutfit({ top: t.id })}><i style={{ '--dot': appearance.outfit.color } as CSSProperties} />{t.label}</button>
-                  ))}
-                </div>
-                <div className="hwc-label">Bottom</div>
-                <div className="hwc-chips" role="group" aria-label="Bottom">
-                  {BOTTOMS.map(b => (
-                    <button key={b.id} type="button" className={cls('hwc-chip', appearance.outfit.bottom === b.id && 'is-on')} aria-pressed={appearance.outfit.bottom === b.id}
-                      data-testid={`bottom-${b.id}`} onClick={() => setOutfit({ bottom: b.id })}><i style={{ '--dot': bottomColor(b.id) } as CSSProperties} />{b.label}</button>
-                  ))}
-                </div>
-                <div className="hwc-label">Shoes</div>
-                <div className="hwc-chips" role="group" aria-label="Shoes">
-                  {SHOES.map(s => (
-                    <button key={s.id} type="button" className={cls('hwc-chip', appearance.outfit.shoes === s.id && 'is-on')} aria-pressed={appearance.outfit.shoes === s.id}
-                      data-testid={`shoes-${s.id}`} onClick={() => setOutfit({ shoes: s.id })}><i style={{ '--dot': shoeColor(s.id) } as CSSProperties} />{s.label}</button>
-                  ))}
-                </div>
+                  <div className="hwc-label" style={{ marginTop: 0 }}>Top</div>
+                  <div className="hwc-chips" role="group" aria-label="Top">
+                    {TOPS.map(t => (
+                      <button key={t.id} type="button" className={cls('hwc-chip', appearance.outfit.top === t.id && 'is-on')} aria-pressed={appearance.outfit.top === t.id}
+                        data-testid={`top-${t.id}`} onClick={() => setOutfit({ top: t.id })}><i style={{ '--dot': appearance.outfit.color } as CSSProperties} />{t.label}</button>
+                    ))}
+                  </div>
+                  <div className="hwc-label">Bottom</div>
+                  <div className="hwc-chips" role="group" aria-label="Bottom">
+                    {BOTTOMS.map(b => (
+                      <button key={b.id} type="button" className={cls('hwc-chip', appearance.outfit.bottom === b.id && 'is-on')} aria-pressed={appearance.outfit.bottom === b.id}
+                        data-testid={`bottom-${b.id}`} onClick={() => setOutfit({ bottom: b.id })}><i style={{ '--dot': bottomColor(b.id) } as CSSProperties} />{b.label}</button>
+                    ))}
+                  </div>
+                  <div className="hwc-label">Shoes</div>
+                  <div className="hwc-chips" role="group" aria-label="Shoes">
+                    {SHOES.map(s => (
+                      <button key={s.id} type="button" className={cls('hwc-chip', appearance.outfit.shoes === s.id && 'is-on')} aria-pressed={appearance.outfit.shoes === s.id}
+                        data-testid={`shoes-${s.id}`} onClick={() => setOutfit({ shoes: s.id })}><i style={{ '--dot': shoeColor(s.id) } as CSSProperties} />{s.label}</button>
+                    ))}
+                  </div>
                 </>
               ) : <Note>{baseName} wears its own outfit pieces — tops, bottoms and shoes apply to Townie bodies.</Note>}
               {support.outfitColor ? (
                 <>
-              <div className="hwc-label">Outfit colour <small>tints your top</small></div>
-                <Swatches label="Outfit colour" colors={OUTFIT_COLORS} value={appearance.outfit.color} testIdPrefix="outfit-color" onChange={c => setOutfit({ color: c })} />
+                  <div className="hwc-label">Outfit colour <small>tints your top</small></div>
+                  <Swatches label="Outfit colour" colors={OUTFIT_COLORS} value={appearance.outfit.color} testIdPrefix="outfit-color" onChange={c => setOutfit({ color: c })} />
                 </>
               ) : <Note>{baseName}'s outfit colours are fixed.</Note>}
             </Section>

@@ -4,6 +4,8 @@
  * exchange every ~6–12 s, friendship milestones, and newcomer welcomes.
  */
 import type { PoiDef } from '../world/layout';
+import { hashString } from '../avatars/catalog';
+import { mix32 } from './rng';
 import { cancelEncounter, clearAction, gesture, goThen, interrupt, startAction } from './actions';
 import { complimentThing, GIFT_ITEMS, lines, pickTopic, placeVars, requestExtraLine, withArticle } from './dialogue';
 import { meetingPoint, WALK_SPEED } from './movement';
@@ -170,6 +172,17 @@ export function updateEncounters(w: World): void {
   }
 }
 
+/** Cheap deterministic per-pair noise (no string hashing in the O(n²) loop). */
+function pairNoise(w: World, a: Agent, b: Agent): number {
+  return mix32(Math.imul(idHash(a), 31) ^ idHash(b) ^ Math.imul(w.tick + 1, 0x9e3779b1)) / 4294967296;
+}
+const HASHES = new Map<string, number>();
+function idHash(a: Agent): number {
+  let h = HASHES.get(a.id);
+  if (h === undefined) { h = hashString(a.id); if (HASHES.size > 5000) HASHES.clear(); HASHES.set(a.id, h); }
+  return h;
+}
+
 /** Town-wide social director: at most one new autonomous exchange every ~6–12 s. */
 export function directSocial(w: World): void {
   if (w.simTime < w.nextSocialAt) return;
@@ -186,7 +199,7 @@ export function directSocial(w: World): void {
       const seeking = a.action?.seekingId === b.id || b.action?.seekingId === a.id;
       let s = (urgency(a.needs.social) * a.temperament.sociability + urgency(b.needs.social) * b.temperament.sociability) * 0.5
         + ((f ?? 45) - 45) / 100 * 0.4 + (seeking ? 0.6 : 0) + (f === undefined ? 0.1 : 0) - d * 0.04
-        + w.rng.float('pair', `${a.id}|${b.id}`) * 0.15;
+        + pairNoise(w, a, b) * 0.15;
       if (a.temperament.shyness > 0.5 && b.temperament.shyness > 0.5 && !seeking) s *= 0.5;
       if (!best || s > best.score) best = { a, b, score: s };
     }

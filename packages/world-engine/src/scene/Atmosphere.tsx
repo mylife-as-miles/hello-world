@@ -91,7 +91,8 @@ export function Atmosphere({ transparent, quality, sky, cloudTint }: AtmosphereP
   }, [scene, tmp]);
 
   useFrame((state, rawDt) => {
-    const dt = Math.min(rawDt, 0.25);
+    // Exponential smoothing is stable for any step; cap only absurd gaps (tab switches).
+    const dt = Math.min(rawDt, 2);
     const env = kit.env;
     env.t = state.clock.elapsedTime;
     kit.uniforms.uTime.value = env.t;

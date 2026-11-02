@@ -40,16 +40,16 @@ function eyeballGeometry(eyeHex: string): THREE.BufferGeometry {
     g.rotateX(Math.PI / 2); // poles on ±Z so iris rings are clean
     g.deleteAttribute('uv');
     const iris = new THREE.Color(eyeHex);
-    const irisDark = iris.clone().multiplyScalar(0.45);
-    const irisLight = iris.clone().lerp(new THREE.Color(1, 1, 1), 0.25);
+    const irisDark = iris.clone().multiplyScalar(0.35);
+    const irisLight = iris.clone().multiplyScalar(2.2).lerp(new THREE.Color(1, 1, 1), 0.03);
     const sclera = new THREE.Color(1.25, 1.22, 1.18); const scleraEdge = new THREE.Color(1.0, 0.92, 0.9);
     const pupil = new THREE.Color('#120d0c');
     const tmp = new THREE.Color();
     return withColor(g, (_i, x, y, z) => {
       const r = Math.hypot(x, y); // distance from the view axis
       if (z > 0 && r < 0.3) return [pupil.r, pupil.g, pupil.b];
-      if (z > 0 && r < 0.66) {
-        const t = (r - 0.3) / 0.36;
+      if (z > 0 && r < 0.7) {
+        const t = (r - 0.3) / 0.4;
         tmp.copy(irisLight).lerp(iris, t < 0.5 ? t * 2 : 1).lerp(irisDark, t > 0.7 ? (t - 0.7) / 0.3 : 0);
         if (y > 0) tmp.multiplyScalar(0.82 + 0.18 * (1 - y)); // shadow under the lid
         return [tmp.r, tmp.g, tmp.b];
@@ -79,7 +79,7 @@ function mouthShapes(): Array<(u: number) => [number, number, number]> {
   const sq = (u: number) => Math.sqrt(Math.max(0, 1 - u * u));
   return [
     (u) => { const c = 0.12 * u * u - 0.02; const h = 0.06 * sq(u) + 0.012; return [c + h, c - h, 1]; },           // 0 neutral
-    (u) => { const U = 0.2 * u * u + 0.06; return [U, U - 0.62 * Math.pow(sq(u), 0.9) - 0.01, 1.14]; },               // 1 smile (open D)
+    (u) => { const U = 0.22 * u * u + 0.08; return [U, U - 0.75 * Math.pow(sq(u), 0.85) - 0.01, 1.18]; },               // 1 smile (open D)
     (u) => { const c = -0.2 * u * u + 0.06; const h = 0.05 * sq(u) + 0.012; return [c + h, c - h, 0.92]; },          // 2 frown
     (u) => { const c = -0.06 * u * u; const h = 0.16 * sq(u) + 0.01; return [c + h * 0.8, c - h, 0.84]; },          // 3 grr
     (u) => { const h = 0.4 * sq(u); return [h * 0.9, -h, 0.5]; },                                                     // 4 surprised O
@@ -88,11 +88,11 @@ function mouthShapes(): Array<(u: number) => [number, number, number]> {
   ];
 }
 
-const MOUTH_EL = -0.5;
+const MOUTH_EL = -0.45;
 function mouthGeometry(mouthScale: number, teeth: boolean): THREE.BufferGeometry {
   const key = `mouth:${teeth}:${mouthScale.toFixed(2)}`;
   return cached(key, () => {
-    const W = 0.024 * mouthScale;
+    const W = 0.027 * mouthScale;
     const NU = 22, NV = 6;
     const shapes = mouthShapes();
     const build = (shape: (u: number) => [number, number, number]): number[] => {
@@ -227,7 +227,7 @@ export class TownieFace {
       this.brows.push({ o, side, rest: o.position.clone() });
     }
     // nose
-    const np = headPoint(0, -0.29, -0.006);
+    const np = headPoint(0, -0.27, -0.006);
     const nose = new THREE.Mesh(unitSphere(16, 12), m.skin);
     const ns = p.noseScale;
     nose.position.set(np[0], np[1], np[2]);
@@ -270,7 +270,7 @@ export class TownieFace {
     const blink = Math.max(W.blink, auto);
     let close = 0.55 * W.relaxed + 0.2 * W.sad + 0.22 * W.angry + 0.12 * W.happy - 0.35 * W.surprised;
     close = clamp(close + blink * (1 - close), -0.4, 1);
-    const upper = close >= 0 ? lerp(-0.6, 0.2, close) : lerp(-0.6, -0.95, -close);
+    const upper = close >= 0 ? lerp(-0.5, 0.2, close) : lerp(-0.5, -0.95, -close);
     const lower = lerp(0.85, 0.32, clamp(W.happy * 0.85 + W.angry * 0.25 + blink * 0.25, 0, 1));
     for (const u of this.upperLids) u.rotation.x = upper;
     for (const l of this.lowerLids) l.rotation.x = lower;

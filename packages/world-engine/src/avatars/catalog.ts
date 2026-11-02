@@ -8,7 +8,7 @@ import type { AvatarAppearance } from '@hello-world/contracts';
 
 export interface CatalogEntry { id: string; label: string }
 export interface BaseModelEntry extends CatalogEntry {
-  kind: 'procedural' | 'vrm';
+  kind: 'procedural' | 'vrm' | 'realistic';
   /** For VRM entries: asset file name inside src/avatars/assets (resolved by the loader). */
   file?: string;
   /** Short credit/licence line shown in the creator for third-party assets. */

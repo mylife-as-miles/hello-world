@@ -4,6 +4,12 @@
 
 This is an independent vertical slice of a persistent virtual society. All residents, interactions, demonstration events, Twitch actions, and OBS sessions use the same world runtime. No source or assets are borrowed from the owner's other projects.
 
+## Online world
+
+**[Open HELLO WORLD](https://hello-world-miles-society.myles4miles.chatgpt.site)** · [Director Studio](https://hello-world-miles-society.myles4miles.chatgpt.site/director) · [OBS browser source](https://hello-world-miles-society.myles4miles.chatgpt.site/overlay?camera=neighborhood)
+
+The Site is owner-private and requires ChatGPT sign-in. OBS uses a separate browser context and also needs authenticated access; operation inside native OBS is unverified. The hosted world uses D1 and server-side Workers, without a local Node server. It remains **Demo Mode** until the Twitch app ID/secret are configured privately and the broadcaster authorizes. [Hosted Twitch callbacks, permissions and setup](docs/HOSTED_TWITCH.md).
+
 ## Run locally
 
 Requires Node.js 22+ and pnpm 10.28+.
@@ -46,7 +52,7 @@ The browser identity and Twitch account identity are separate in this slice. Lin
 
 See [Twitch configuration and permissions](docs/TWITCH.md) and [verified integration research](docs/RESEARCH.md).
 
-The server uses Twurple with authenticated IRC for chat commands and EventSub WebSockets for subscriptions, approved reward redemptions, and incoming raids. Broadcaster authorization and the correct scopes are required; available capabilities and failures are reported honestly. Access tokens, refresh tokens, and client secrets remain on the server.
+The local Node server uses Twurple with authenticated IRC for chat commands and EventSub WebSockets for subscriptions, approved reward redemptions, and incoming raids. Broadcaster authorization and the correct scopes are required; available capabilities and failures are reported honestly. Access tokens, refresh tokens, and client secrets remain on the server.
 
 Commands: `!join`, `!wave`, `!dance`, `!hello`, `!gift username`.
 
@@ -84,7 +90,7 @@ flowchart LR
 
 The Node process owns the simulation. Multiple browsers receive the same authoritative state. The server saves snapshots atomically to its `.data` directory (by default the repository-root `.data` directory); the signing key and Twitch token file live there too. Keep this directory private, writable, and backed up. IndexedDB stores a read-only reconnect cache; it never overrides the server after a reset. Do not commit `.env` or `.data`.
 
-This slice does not claim distributed scaling, cloud-hosted durability, or simulation while the server is stopped. A future Colyseus room can own the same runtime without changing normalized events or the scene interface. See [transport notes](docs/TRANSPORT.md).
+The Node adapter does not claim distributed scaling or simulation while its process is stopped. The hosted Sites adapter persists shared state in D1 and advances simulation during active requests. A future Colyseus room can own the same runtime without changing normalized events or the scene interface. See [transport notes](docs/TRANSPORT.md).
 
 ## Integration and verification
 

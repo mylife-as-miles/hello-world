@@ -1,0 +1,64 @@
+{
+  "checkedAt": "2026-11-02T21:45:00Z",
+  "runtimeGitHubCommit": "16b7f21d22e332dc3b9699e02990479257b3dadc",
+  "siteSourceCommit": "8f585570cbd6c080b2f101f325e4fda6bdf619ae",
+  "main": {
+    "id": "appgdep_6ae903e26b2881919eaf3881571a28f1",
+    "project_id": "appgprj_6ae8fd7157cc819192278eef3774227d",
+    "title": "HELLO WORLD",
+    "version_id": "appgprj_6ae8fd7157cc819192278eef3774227d~appgver_b012f991efa08191853beca425fcc10e",
+    "type": "publish",
+    "status": "succeeded",
+    "url": "https://hello-world-miles-society.myles4miles.chatgpt.site",
+    "has_mcp": false,
+    "screenshot_asset_pointer": null,
+    "provider_deployment_id": "site---6ae8fd7157cc819192278eef3774227d",
+    "failure_message": null,
+    "env_set_revision": 2,
+    "updated_at": "2026-11-02T21:43:16.495795+00:00"
+  },
+  "relay": {
+    "id": "appgdep_6ae903937aa881919d0d0dc698c6ef43",
+    "project_id": "appgprj_6ae902b843348191afeed647ef701164",
+    "title": "HELLO WORLD Twitch EventSub",
+    "version_id": "appgprj_6ae902b843348191afeed647ef701164~appgver_e485ce9a52188191b834af340aed1cc3",
+    "type": "publish",
+    "status": "succeeded",
+    "url": "https://hello-world-miles-events.myles4miles.chatgpt.site",
+    "has_mcp": false,
+    "screenshot_asset_pointer": null,
+    "provider_deployment_id": "site---6ae902b843348191afeed647ef701164",
+    "failure_message": null,
+    "env_set_revision": 1,
+    "updated_at": "2026-11-02T21:41:52.664988+00:00"
+  },
+  "d1Tables": [
+    "twitch_accounts",
+    "twitch_oauth_states",
+    "twitch_webhook_messages",
+    "world_sessions",
+    "worlds"
+  ],
+  "httpChecks": {
+    "privateRoot": 200,
+    "privateOverlay": 200,
+    "staticFavicon": 200,
+    "serviceAccessWithoutVisitorIdentity": 401,
+    "relayRoot": 404,
+    "unsignedWebhook": 403,
+    "signedSyntheticChallenge": {
+      "status": 200,
+      "exactText": true
+    },
+    "duplicateSyntheticChallenge": {
+      "status": 200,
+      "exactText": true
+    },
+    "tamperedSyntheticBody": 403
+  },
+  "verificationLimits": [
+    "Synthetic protocol check is not a real Twitch event or enabled Twitch subscription.",
+    "No Twitch client credentials/broadcaster grant were available.",
+    "No signed-in hosted browser acceptance or native OBS check was completed."
+  ]
+}

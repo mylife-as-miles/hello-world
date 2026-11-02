@@ -35,3 +35,10 @@ https://hello-world-miles-society.myles4miles.chatgpt.site
 The hosted adapter runs the same engine with a provisioned D1 database and HTTP polling. No local Node process is required. Server OAuth and webhook support use encrypted D1 token storage, owner-bound single-use state, app-token EventSub subscriptions, signature verification, durable delivery receipts, approval checks and rate limits. An API-only public relay preserves the private world audience. Twitch app ID/secret and a real broadcaster grant remain unavailable; Demo Mode is accurate.
 
 Hosted checks: all workspace TypeScript, 80 existing tests, 22 SQLite-backed shared-world assertions, 58 mocked-Twitch OAuth/webhook assertions and 31 relay security assertions pass. Native production D1 tables and protected API rejection were verified. These checks do not establish a live broadcaster grant, real Twitch delivery or a signed-in hosted browser acceptance pass. See [hosted Twitch setup](HOSTED_TWITCH.md) for exact callbacks.
+
+The hosted Twitch release was successfully published at 21:43 UTC (GitHub runtime source `16b7f21`, Sites source `8f585570cbd6c080b2f101f325e4fda6bdf619ae`). The public relay is deployed at `https://hello-world-miles-events.myles4miles.chatgpt.site/api/twitch/eventsub`. Production protocol checks returned exact plaintext for a signed synthetic challenge and its retry (200), rejected a tampered body (403), and confirmed `/overlay` serves the app (200). These are real hosted HTTP/D1 checks, not real Twitch subscription delivery. [Native deployment evidence](evidence/sites-deployment.json).
+
+Exact Twitch OAuth callback:
+`https://hello-world-miles-society.myles4miles.chatgpt.site/api/twitch/callback`
+
+The generated webhook and encryption secrets are configured server-side. `TWITCH_CLIENT_ID` and `TWITCH_CLIENT_SECRET` still require private configuration and broadcaster consent. All owner APIs retain private Sites identity checks. The public relay exposes no Director APIs.

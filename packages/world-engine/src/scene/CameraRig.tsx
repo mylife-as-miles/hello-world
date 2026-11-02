@@ -43,13 +43,14 @@ const OCCLUDERS: Occluder[] = (() => {
 })();
 
 /** Is the segment camera(a) → target(b) blocked by any occluder (2D footprint + height)? Allocation-free. */
-let EXTRA: ReadonlyArray<{ x: number; z: number; r: number; h: number }> = [];
+let EXTRA: ReadonlyArray<{ x: number; z: number; r: number; h: number; minY?: number }> = [];
 
 function blocked(ax: number, ay: number, az: number, bx: number, by: number, bz: number): boolean {
   for (let i = 0; i < EXTRA.length; i++) {
     const o = EXTRA[i]!;
     // the camera itself must keep clear of props (no canopy / post filling the lens)
-    if (ay < o.h + 0.6 && Math.hypot(ax - o.x, az - o.z) < o.r + 2.2) return true;
+    const lo = o.minY ?? 0;
+    if (ay < o.h + 0.6 && ay > lo - 0.6 && Math.hypot(ax - o.x, az - o.z) < o.r + 2.2) return true;
     const dx = bx - ax, dz = bz - az;
     const fx = ax - o.x, fz = az - o.z;
     const A = dx * dx + dz * dz, B = 2 * (fx * dx + fz * dz), C = fx * fx + fz * fz - o.r * o.r;
@@ -58,7 +59,8 @@ function blocked(ax: number, ay: number, az: number, bx: number, by: number, bz:
     const sq = Math.sqrt(disc);
     const t0 = Math.max(0, (-B - sq) / (2 * A)), t1 = Math.min(1, (-B + sq) / (2 * A));
     if (t0 > t1 || t1 >= 0.97) continue; // ignore props right at the subject
-    if (Math.min(ay + (by - ay) * t0, ay + (by - ay) * t1) < o.h) return true;
+    const ya = ay + (by - ay) * t0, yb = ay + (by - ay) * t1;
+    if (Math.min(ya, yb) < o.h && Math.max(ya, yb) > lo) return true;
   }
   for (let i = 0; i < OCCLUDERS.length; i++) {
     const o = OCCLUDERS[i]!;
@@ -622,7 +624,7 @@ export function CameraRig({ mode, selectedResidentId, transparent = false, quali
     }
     // See-through cone (WebGL): dissolve props between the camera and the subject in close shots.
     let cutWant = 0;
-    if (directed && d.kind === 'portal') { s.cut.set(PORTAL_POS.x, 1.7, PORTAL_POS.z + 2.8); cutWant = 1; s.cutR0 = 0.5; s.cutR1 = d.raid ? 2.2 : 1.6; }
+    if (directed && d.kind === 'portal') { s.cut.set(PORTAL_POS.x, 1.7, PORTAL_POS.z + 2.8); cutWant = 1; s.cutR0 = 0.4; s.cutR1 = 1.3; }
     else if (directed && d.until > 0) { s.cut.set(s.actor.pos.x, 1.25, s.actor.pos.z); cutWant = 1; s.cutR0 = 0.35; s.cutR1 = 0.95; }
     else if (!directed && mode === 'follow' && selectedResidentId && s.follow.init) { s.cut.set(s.follow.pos.x, 1.25, s.follow.pos.z); cutWant = 1; s.cutR0 = 0.35; s.cutR1 = 0.95; }
     else if (!directed && (mode === 'street' || (mode === 'cinematic' && t - s.estAt >= 8)) && s.clusterInit) { s.cut.set(s.clusterS.x, 1.15, s.clusterS.z); cutWant = 1; s.cutR0 = 0.3; s.cutR1 = mode === 'street' ? 0.85 : 1.1; }

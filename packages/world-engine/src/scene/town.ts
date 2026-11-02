@@ -40,7 +40,7 @@ export interface TownGeometry {
   chimneys: THREE.Vector3[];
   signs: SignDef[];
   /** Camera occluders (trees, lamp posts, planters) as vertical cylinders. */
-  occluders: Array<{ x: number; z: number; r: number; h: number }>;
+  occluders: Array<{ x: number; z: number; r: number; h: number; minY?: number }>;
 }
 
 export const STAGE_POLE_HEIGHT = 3.45;
@@ -132,7 +132,7 @@ interface Ctx {
   solid: Batch; detail: Batch; far: Batch; flat: Batch; glass: Batch; bulbs: Batch; seats: Batch;
   P: Prims; r: () => number; space: Space; q: number;
   lamps: THREE.Vector3[]; chimneys: THREE.Vector3[]; signs: SignDef[];
-  occ?: Array<{ x: number; z: number; r: number; h: number }>;
+  occ?: Array<{ x: number; z: number; r: number; h: number; minY?: number }>;
   low?: boolean;
 }
 
@@ -518,6 +518,7 @@ function buildTerrace(c: Ctx) {
     c.seats.add(c.P.cyl(10), '#3d3a36', mtx(tx, 0.03, tz, 0, 0.3, 0.05, 0.3));
     c.solid.add(c.P.cyl(6), '#efe7da', mtx(tx, 1.55, tz, 0, 0.035, 1.6, 0.035));
     const col = umbrellas[(i / 2) % 2]!;
+    c.occ?.push({ x: tx, z: tz, r: 1.5, h: 2.8, minY: 2.0 }); // umbrella canopy: shots may pass underneath
     c.solid.add(c.P.cone(8), col, mtx(tx, 2.48, tz, Math.PI / 8, 1.45, 0.5, 1.45), true);
     c.solid.add(c.P.cone(8), '#fff7ea', mtx(tx, 2.25, tz, Math.PI / 8, 1.46, 0.04, 1.46), true);
     c.solid.add(c.P.sphere(8, 6), '#efe7da', mtx(tx, 2.78, tz, 0, 0.07, 0.07, 0.07));

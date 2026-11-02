@@ -116,7 +116,7 @@ export interface FxApi {
 }
 
 /** Vertical cylinders the camera director avoids (lamp posts, trees, planters…), published by Town. */
-export interface CameraOccluder { x: number; z: number; r: number; h: number }
+export interface CameraOccluder { x: number; z: number; r: number; h: number; /** bottom of the blocking band (canopies) */ minY?: number }
 
 export interface SceneKit {
   env: EnvState;

@@ -71,6 +71,33 @@ Actors that are not yet residents are auto-joined (so an active chatter becomes 
 (e.g. `walking to Sunbeam Café`, `chatting with Nova`, `dancing on the Dance Stage`). UIs can show it verbatim;
 renderers map the verb to an animation and treat unknown strings as idle.
 
+## Characters
+
+| Base family | Ids | What the creator can change | Source / licence |
+| --- | --- | --- | --- |
+| Procedural "Townie" | `townie-classic/sporty/soft/tall/petite` | everything: body preset, height/build, skin, eyes, eye/nose/mouth size, 12 hair styles + colour, 8 tops / 7 bottoms / 5 shoes + colour, 11 accessories, expressions | original code |
+| VRM guest skins | `vrm-polybot/astrodisco/coffee/chill` | height, head accessories, blink/visemes | CC0, 100Avatars by Polygonal Mind (`src/avatars/assets/CREDITS.md`) |
+| Photoreal humans | `mh-elena/marco/amara/kenji` | height, outfit tint, head accessories | CARLA Simulator CC BY 4.0 **+ Epic MetaHuman licence** (no datasets / AI training) via Valdrada (`src/avatars/realistic/assets/NOTICE.md`) |
+| Realistic humans | `rb-sofia/daniel/claire/james` | height, head accessories | Microsoft Rocketbox, MIT |
+
+All bases share the canonical `HumanoidRig` (T-pose, +Z forward), so every procedural animation (idle, walk, run, talk, sit, sleep, dance ×3, celebrate, gestures) plays on every body. `getAppearanceSupport(baseModelId)` tells UIs which controls apply.
+
+## Environment modules
+
+| Module | What | Cost |
+| --- | --- | --- |
+| `src/scene/town.ts` + components | plaza, fountain, stage, café, arcade, park, homes, lamps, portal, weather, day/night | static town merged into ~8 draw calls |
+| `src/scene/landscape` | terrain ring around the flat town from super-terrain's CPU height-field recipe (MIT), lake, rocks, forest layout | 3 draw calls |
+| `src/scene/foliage` | 5 tree species baked offline with super-terrain's tree generator, instanced near/mid/impostor LOD | ~11–30 draw calls |
+| `src/scene/district` | procedural downtown skyline with streets, lamps, night windows and a HELLO WORLD sign | 2–3 draw calls |
+
+## Future engine modules
+
+- **WebGPU renderer path** (super-terrain's native terrain/roads/lighting, TSL materials): requires porting the town's GLSL `onBeforeCompile`/`ShaderMaterial` effects and postprocessing to TSL; keep WebGL as the OBS-safe default with detected backend.
+- **Facial rigs for photoreal bodies** (MPFB2/MakeHuman offline pipeline with shape keys, or ARKit-style blendshapes).
+- **Raid crowds** (instanced extras beyond the 8 simulated visitors) and **server-side dialogue provider** (`registerDialogueProvider`).
+- **Multiplayer scale-out** (Colyseus room owning the same runtime) and **navmesh** (recast-navigation-js) for free-roaming avatars.
+
 ## Dev harness & scripts
 
 ```bash

@@ -16,7 +16,9 @@ const pinned = params.get('pose');
 const CYCLE = ['idle', 'walk', 'wave', 'sit', 'dance'] as const;
 const hud = document.getElementById('hud')!;
 
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+// ?alpha: alpha-enabled canvas over a magenta page (like the creator's transparent canvas) to catch alpha write-through
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: params.has('alpha') });
+if (params.has('alpha')) document.body.style.background = '#ff00ff';
 renderer.setPixelRatio(Math.min(1.5, devicePixelRatio));
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;

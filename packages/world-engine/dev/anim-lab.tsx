@@ -24,10 +24,11 @@ const view = params.get('view') ?? 'front';
 const cols = Number(params.get('cols') ?? 6);
 
 type Item = { label: string; family: AnimationFamily; gesture?: GestureName };
-const ITEMS: Item[] = [
-  ...ANIMATION_FAMILIES.map(f => ({ label: f, family: f })),
-  ...GESTURE_NAMES.map(g => ({ label: `gesture: ${g}`, family: 'idle' as AnimationFamily, gesture: g })),
-].filter(i => !only || only.includes(i.label) || (i.gesture && only.includes(i.gesture)));
+const ALL_ITEMS: Item[] = [
+  ...ANIMATION_FAMILIES.map((f): Item => ({ label: f, family: f })),
+  ...GESTURE_NAMES.map((g): Item => ({ label: `gesture: ${g}`, family: 'idle', gesture: g })),
+];
+const ITEMS = ALL_ITEMS.filter(i => !only || only.includes(i.label) || (i.gesture && only.includes(i.gesture)));
 
 function LabRig({ item, index, x, z }: { item: Item; index: number; x: number; z: number }) {
   const rig = useMemo<HumanoidRig>(() => createAvatarRig(appearanceFromSeed(`lab-${index}`)), [index]);

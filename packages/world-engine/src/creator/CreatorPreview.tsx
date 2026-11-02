@@ -13,7 +13,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { ContactShadows, Environment, Lightformer, OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import type { AvatarAppearance } from '@hello-world/contracts';
-import { loadAvatarRig, type ExpressionName, type HumanoidRig } from '../avatars';
+import { createAvatarRig, loadAvatarRig, type ExpressionName, type HumanoidRig } from '../avatars';
 import { AvatarAnimator, type GestureName } from '../interactions/animation/AvatarAnimator';
 import type { AnimationFamily } from '../world/activities';
 
@@ -52,7 +52,7 @@ function presetGoal(preset: CameraPreset, h: number, fovDeg: number, width: numb
   const tan = Math.tan(THREE.MathUtils.degToRad(fovDeg) / 2);
   const s = h / 1.75;
   const spec = preset === 'face'
-    ? { span: 0.42 * s, center: h * 0.915, phi: 1.5, theta: 0.06, width: 0.42 }
+    ? { span: 0.5 * s, center: h * 0.91, phi: 1.5, theta: 0.06, width: 0.5 }
     : preset === 'upper'
       ? { span: 0.98 * s, center: h * 0.72, phi: 1.47, theta: 0.14, width: 0.95 }
       : { span: h * 1.06 + 0.16, center: h * 0.5, phi: 1.44, theta: 0.22, width: 1.3 };
@@ -118,7 +118,8 @@ function Studio(props: CreatorPreviewProps) {
     const first = !rigRef.current;
     const showLoading = window.setTimeout(() => loadingEl?.current?.classList.add('is-on'), first ? 0 : 220);
     const timer = window.setTimeout(() => {
-      void loadAvatarRig(appearanceRef.current, { lod: 'high' }).then(rig => {
+      const requested = appearanceRef.current;
+      void loadAvatarRig(requested, { lod: 'high' }).catch(() => createAvatarRig(requested, { lod: 'high' })).then(rig => {
         if (cancelled || !holder.current) { rig.dispose(); return; }
         window.clearTimeout(showLoading);
         loadingEl?.current?.classList.remove('is-on');
@@ -234,11 +235,13 @@ function Studio(props: CreatorPreviewProps) {
 
   return (
     <>
-      <hemisphereLight args={['#e9e4ff', '#2a2238', 0.55]} />
+      <hemisphereLight args={['#e9e4ff', '#2a2238', 0.32]} />
       <directionalLight position={[2.6, 4.2, 3.4]} intensity={2.3} color="#fff1e2" />
       <directionalLight position={[-3.2, 2.2, 2.4]} intensity={0.75} color="#cfd9ff" />
       <directionalLight position={[-0.8, 3.2, -4]} intensity={2.4} color={accentColor} />
       <directionalLight position={[1.8, 1.4, -3]} intensity={1.1} color="#ffd2e6" />
+      {/* soft frontal "beauty" fill so faces never fall into shadow */}
+      <directionalLight position={[0.6, 1.1, 4.5]} intensity={0.65} color="#fff6ee" />
       <Environment resolution={128} frames={1} environmentIntensity={0.7}>
         <Lightformer form="rect" intensity={2.2} color="#ffffff" position={[0, 5, 2]} rotation-x={Math.PI / 2} scale={[6, 3, 1]} />
         <Lightformer form="rect" intensity={1.4} color="#ffe8d6" position={[4, 1.5, 2]} rotation-y={-Math.PI / 2.4} scale={[2.5, 4, 1]} />
@@ -251,7 +254,7 @@ function Studio(props: CreatorPreviewProps) {
         {/* pedestal */}
         <mesh position-y={-0.045} receiveShadow>
           <cylinderGeometry args={[1.12, 1.18, 0.09, 72]} />
-          <meshPhysicalMaterial color="#1d1a2e" roughness={0.42} metalness={0.2} clearcoat={0.55} clearcoatRoughness={0.3} envMapIntensity={0.55} />
+          <meshStandardMaterial color="#17142a" roughness={0.88} metalness={0} envMapIntensity={0.35} />
         </mesh>
         <mesh rotation-x={-Math.PI / 2} position-y={0.0015}>
           <ringGeometry args={[1.085, 1.11, 128]} />
@@ -265,7 +268,7 @@ function Studio(props: CreatorPreviewProps) {
       {glow && (
         <mesh rotation-x={-Math.PI / 2} position-y={0.002} renderOrder={1}>
           <planeGeometry args={[2.6, 2.6]} />
-          <meshBasicMaterial map={glow} color={accent} transparent opacity={0.14} depthWrite={false} blending={THREE.AdditiveBlending} toneMapped={false} />
+          <meshBasicMaterial map={glow} color={accent} transparent opacity={0.1} depthWrite={false} blending={THREE.AdditiveBlending} toneMapped={false} />
         </mesh>
       )}
       <mesh rotation-x={-Math.PI / 2} position-y={-0.09}>

@@ -37,7 +37,7 @@ const SECTIONS = [
   { id: 'hair', label: 'Hair', icon: 'hair' },
   { id: 'outfit', label: 'Outfit', icon: 'outfit' },
   { id: 'extras', label: 'Extras', icon: 'extras' },
-  { id: 'personality', label: 'Personality', icon: 'personality' },
+  { id: 'personality', label: 'Traits', icon: 'personality' },
 ] as const;
 type SectionId = typeof SECTIONS[number]['id'];
 
@@ -191,11 +191,18 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
   const toggleTrait = (id: string) => { traitsFromPreset.current = false; setPersonality(list => toggleCapped(list, id, MAX_TRAITS)); };
   const toggleAccessory = (id: string) => edit(a => ({ ...a, accessories: toggleCapped(a.accessories, id, MAX_ACCESSORIES) }));
 
+  const [saved, setSaved] = useState(false);
+  const savedTimer = useRef(0);
+  useEffect(() => () => window.clearTimeout(savedTimer.current), []);
   const save = () => {
     const a = normalizeAppearance(appearance);
     const traits = sanitizeTraits(personality);
     onSave(a);
     onSaveCharacter?.({ appearance: a, personality: traits, displayName });
+    // Visible confirmation for hosts that keep the creator open after saving.
+    setSaved(true);
+    window.clearTimeout(savedTimer.current);
+    savedTimer.current = window.setTimeout(() => setSaved(false), 1600);
   };
 
   // ---- preview commands
@@ -463,8 +470,8 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
             {onCancel && (
               <button type="button" className="hwc-btn" onClick={onCancel} data-testid="creator-cancel">Cancel</button>
             )}
-            <button type="button" className="hwc-btn hwc-btn-primary" onClick={save} data-testid="creator-save">
-              <Icon name="check" size={16} />Save Character
+            <button type="button" className="hwc-btn hwc-btn-primary" onClick={save} data-testid="creator-save" aria-live="polite">
+              <Icon name="check" size={16} />{saved ? 'Saved!' : 'Save Character'}
             </button>
           </footer>
         </aside>

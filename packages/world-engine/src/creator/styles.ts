@@ -181,7 +181,7 @@ export const CREATOR_CSS = /* css */ `
   .hwc-panel::before { content: ''; position: absolute; top: 7px; left: 50%; width: 38px; height: 4px; margin-left: -19px; border-radius: 4px; background: rgba(255,255,255,.22); }
   .hwc-head { padding: 18px 16px 8px; }
   .hwc-head-name { font-size: 17px; }
-  .hwc-nav { padding: 2px 10px 10px; }
+  .hwc-nav { padding: 2px 8px 10px; grid-auto-columns: minmax(48px, 1fr); }
   .hwc-sec { padding: 16px 16px 4px; }
   .hwc-stage-top { top: 12px; left: 12px; right: 12px; }
   .hwc-title { font-size: 16px; }
@@ -191,6 +191,7 @@ export const CREATOR_CSS = /* css */ `
   .hwc-iconbtn { width: 34px; height: 34px; }
   .hwc-dock { bottom: 30px; gap: 6px; left: 0; right: 0; transform: none; width: auto; max-width: none; flex-direction: row; align-items: center; overflow-x: auto; scrollbar-width: none; padding: 0 12px; }
   .hwc-dock::-webkit-scrollbar { display: none; }
+  .hwc-dock { -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 12px, #000 calc(100% - 28px), transparent 100%); mask-image: linear-gradient(90deg, transparent 0, #000 12px, #000 calc(100% - 28px), transparent 100%); }
   .hwc-dock-row { flex: none; padding: 4px; border-radius: 14px; overflow: visible; max-width: none; }
   .hwc-pill { padding: 6px 9px; font-size: 11.5px; }
   .hwc-dock-label { display: none; }

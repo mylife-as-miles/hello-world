@@ -37,6 +37,13 @@ export class Batch {
     g.setAttribute('color', new THREE.BufferAttribute(c, 3));
     this.parts.push(g);
   }
+  /** Add an already vertex-coloured geometry (keeps its colours). */
+  addColored(src: THREE.BufferGeometry, matrix: THREE.Matrix4): void {
+    const g = src.index ? src.toNonIndexed() : src.clone();
+    for (const name of Object.keys(g.attributes)) if (name !== 'position' && name !== 'normal' && name !== 'color') g.deleteAttribute(name);
+    g.applyMatrix4(matrix);
+    this.parts.push(g);
+  }
   get size(): number { return this.parts.length; }
   build(): THREE.BufferGeometry {
     if (!this.parts.length) return new THREE.BufferGeometry();

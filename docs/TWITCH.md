@@ -15,15 +15,27 @@ The authorization-code flow uses 256-bit random, single-use, ten-minute `state` 
 
 For headless provisioning, server-only `TWITCH_ACCESS_TOKEN` and `TWITCH_REFRESH_TOKEN` may be supplied instead. Use a user token issued to this application and broadcaster. A client-credentials/app access token cannot receive EventSub WebSocket events. Refreshed token data is saved privately in `.data/twitch-token.json`; that current token takes precedence over stale environment token values. The server validates token identity, app ID and actual scopes at startup, and validates maintained sessions hourly. Twurple refreshes tokens; validation or refresh failure stops the Twitch connection and reports it as disconnected.
 
+## Connection readiness checked in this environment
+
+At the 2026-11-02 connection pass, a presence-only check found no configured app ID, client secret, access token, refresh token, broadcaster identity, or saved token file. The example redirect URI was present. The running application correctly reported `mode: demo` and `oauthConfigured: false`. An authenticated Connect request returned HTTP 503 with setup instructions; an unissued callback state returned HTTP 403. These checks did not attempt a fabricated OAuth grant or subscription.
+
+A real connection requires the streamer's own registered Twitch application and normal broadcaster consent. Configure the values privately in the server `.env`; do not paste secrets or tokens into chat. Register the callback for the exact app instance you open: default development `http://localhost:5173/api/twitch/callback`, built server `http://localhost:3001/api/twitch/callback`, or the equivalent HTTPS URL on your host. An isolated QA instance on port 5181 must use its own `http://localhost:5181/api/twitch/callback`, rather than returning authorization to another running server. Restart after changing server configuration, unlock Director Studio, select Connect Twitch, and complete Twitch's consent screen. Initial access/refresh tokens are not necessary when using this flow.
+
+`oauthConfigured` checks credentials are present and the callback is a valid HTTPS URL (or HTTP on a loopback hostname), has path `/api/twitch/callback`, and contains no query, fragment or user-info. It does not prove the URL is registered in Twitch. The exact URL must still match the developer-console registration. The adapter validates a new OAuth grant against configured application/broadcaster identity before stopping an existing connection or replacing its saved token; an accidental login to another account leaves saved credentials intact.
+
+The host must allow outbound HTTPS to Twitch OAuth/Helix and WSS to Twitch EventSub (and the IRC transport used by Twurple chat). In this managed cloud, official OAuth discovery through the supplied HTTP proxy succeeded, but a direct Node EventSub WSS handshake probe timed out after five seconds. That is an observed transport limitation requiring host/proxy diagnosis before live use; it is not a verified authenticated subscription. No TLS checks or network policies were bypassed. An ordinary host with working outbound Twitch connectivity is the straightforward deployment target. Proxy-specific Twurple transport adaptation remains unverified here.
+
+Mocked authorization tests cover mismatched app/account grants preserving existing authorization, callback configuration validation and credential-free Demo Mode. They are regression tests, not evidence of real Twitch delivery.
+
 ## Requested permissions
 
-| Feature | Exact authorization | Implementation |
-| --- | --- | --- |
-| IRC command/chat reception | `chat:read` | Twurple `ChatClient` |
-| Greetings/rejection replies | `chat:edit` | Bounded bot replies |
-| New subscriptions, resubs, subscription gifts | `channel:read:subscriptions` | EventSub `channel.subscribe`, `.subscription.message`, `.subscription.gift` |
-| Custom Channel Points rewards | `channel:read:redemptions` (existing `channel:manage:redemptions` also accepted) | EventSub `channel.channel_points_custom_reward_redemption.add` |
-| Incoming raids | No event-specific scope; authenticated user transport required | EventSub `channel.raid` with receiving broadcaster ID |
+| Feature                                       | Exact authorization                                                              | Implementation                                                              |
+| --------------------------------------------- | -------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| IRC command/chat reception                    | `chat:read`                                                                      | Twurple `ChatClient`                                                        |
+| Greetings/rejection replies                   | `chat:edit`                                                                      | Bounded bot replies                                                         |
+| New subscriptions, resubs, subscription gifts | `channel:read:subscriptions`                                                     | EventSub `channel.subscribe`, `.subscription.message`, `.subscription.gift` |
+| Custom Channel Points rewards                 | `channel:read:redemptions` (existing `channel:manage:redemptions` also accepted) | EventSub `channel.channel_points_custom_reward_redemption.add`              |
+| Incoming raids                                | No event-specific scope; authenticated user transport required                   | EventSub `channel.raid` with receiving broadcaster ID                       |
 
 The IRC scopes are deliberate. The separate modern EventSub `channel.chat.message` event uses `user:read:chat`; it is not implemented here. The app never claims chat reception without `chat:read`, and only sends replies with `chat:edit`. It skips unsupported EventSub features and reports missing scopes. Live mode begins only when chat has joined or an EventSub subscription has actually succeeded. Failed, revoked and disconnected subscriptions update reported capabilities. Socket initialization alone does not count as a live subscription.
 

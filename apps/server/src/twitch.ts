@@ -131,6 +131,7 @@ export class TwitchAdapter {
   private replies = new SlidingLimit(8, 30_000);
   private replyUsers = new SlidingLimit(1, 5_000);
   private started = false;
+  private authorizationValidated = false;
   readonly clientId: string;
   readonly clientSecret: string;
   readonly redirectUri: string;
@@ -148,7 +149,23 @@ export class TwitchAdapter {
     this.rewards = parseRewardActions(env.TWITCH_REWARD_ACTIONS);
   }
   get oauthConfigured() {
-    return Boolean(this.clientId && this.clientSecret && this.redirectUri);
+    if (!this.clientId || !this.clientSecret || !this.redirectUri) return false;
+    try {
+      const uri = new URL(this.redirectUri);
+      const localHttp =
+        uri.protocol === "http:" &&
+        ["localhost", "127.0.0.1", "[::1]"].includes(uri.hostname);
+      return (
+        (uri.protocol === "https:" || localHttp) &&
+        uri.pathname === "/api/twitch/callback" &&
+        !uri.search &&
+        !uri.hash &&
+        !uri.username &&
+        !uri.password
+      );
+    } catch {
+      return false;
+    }
   }
   private status() {
     const live = this.chatReady || this.eventsubReady;
@@ -187,16 +204,32 @@ export class TwitchAdapter {
       code,
       this.redirectUri,
     );
+    // Validate the new grant before stopping a healthy connection or replacing
+    // saved credentials. An accidental login to the wrong Twitch account must
+    // not destroy the streamer's existing authorization.
+    const info = await getTokenInfo(token.accessToken, this.clientId);
+    if (
+      info.clientId !== this.clientId ||
+      !info.userId ||
+      (this.env.TWITCH_BROADCASTER_ID &&
+        info.userId !== this.env.TWITCH_BROADCASTER_ID) ||
+      (this.env.TWITCH_BROADCASTER_NAME &&
+        info.userName?.toLowerCase() !==
+          this.env.TWITCH_BROADCASTER_NAME.toLowerCase())
+    )
+      throw new Error(
+        "Authorize the configured broadcaster account using this Twitch application",
+      );
     await this.stop();
-    this.persist(token);
-    await this.tokenWrite;
     await this.start(token);
     if (!this.capabilities.authorization?.startsWith("authorized "))
       throw new Error("Broadcaster authorization was not accepted");
+    await this.tokenWrite;
   }
   async start(providedToken?: AccessToken): Promise<void> {
     if (this.started) return;
     this.started = true;
+    this.authorizationValidated = false;
     this.capabilities = {};
     if (!this.clientId || !this.clientSecret) {
       this.status();
@@ -235,7 +268,10 @@ export class TwitchAdapter {
         clientId: this.clientId,
         clientSecret: this.clientSecret,
       });
-      this.auth.onRefresh((_id, refreshed) => this.persist(refreshed));
+      this.auth.onRefresh((_id, refreshed) => {
+        this.token = refreshed;
+        if (this.authorizationValidated) this.persist(refreshed);
+      });
       this.auth.onRefreshFailure(() => {
         this.capabilities.authorization = "refresh failed; reconnect required";
         void this.failClosed();
@@ -258,7 +294,6 @@ export class TwitchAdapter {
         throw new Error(
           "Token must belong to the configured app and broadcaster",
         );
-      this.persist(this.token);
       const scopes = new Set(info.scopes);
       const api = new ApiClient({ authProvider: this.auth });
       const broadcaster = await api.users.getUserById(userId);
@@ -269,6 +304,8 @@ export class TwitchAdapter {
           broadcaster.name.toLowerCase()
       )
         throw new Error("Broadcaster login does not match authorized account");
+      this.authorizationValidated = true;
+      this.persist(this.token);
       this.capabilities.authorization = `authorized ${broadcaster.name}`;
       if (scopes.has("chat:read")) {
         this.capabilities.chat = "connecting";
@@ -511,6 +548,7 @@ export class TwitchAdapter {
   async stop() {
     if (this.validationTimer) clearInterval(this.validationTimer);
     this.validationTimer = undefined;
+    this.authorizationValidated = false;
     this.chat?.quit();
     this.listener?.stop();
     this.chat = undefined;

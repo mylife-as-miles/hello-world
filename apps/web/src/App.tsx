@@ -505,7 +505,7 @@ export default function App() {
     );
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell game-interface page-${page}`}>
       <aside className="rail" aria-label="Primary navigation">
         <button
           className="brand-mark"

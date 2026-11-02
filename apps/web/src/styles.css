@@ -1,3 +1,5 @@
+@import url("https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700;800;900&display=swap");
+
 @import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;450;500;550;600;650;700&family=Manrope:wght@400;500;600;650;700;750;800&display=swap");
 
 :root {
@@ -4590,5 +4592,2118 @@ html.is-overlay #root {
     font-size: 12px;
     max-width: none;
     margin-top: 15px;
+  }
+}
+
+/* HELLO WORLD game interface: a live scene with a restrained foreground HUD. */
+.game-interface {
+  --bg: #080c12;
+  --surface: #10171c;
+  --surface-raised: #172128;
+  --border: rgba(217, 234, 236, 0.15);
+  --muted: #a3b2b9;
+  --text: #f0f4f1;
+  --lime: #d2f54b;
+  --lime-ink: #17200b;
+  color: var(--text);
+  background: #080c12;
+  min-height: 100dvh;
+  --game-display: "Barlow Condensed", "Arial Narrow", sans-serif;
+}
+.game-interface h1,
+.game-interface h2,
+.game-interface h3,
+.game-interface .wordmark,
+.game-interface .button,
+.game-interface .rail-button,
+.game-interface .control-label,
+.game-interface .eyebrow,
+.game-interface .breadcrumb,
+.game-interface .panel-tabs button {
+  font-family: var(--game-display);
+  text-transform: uppercase;
+}
+.game-interface .app-body {
+  background: transparent;
+}
+.game-interface .topbar {
+  background: linear-gradient(180deg, #070b10eb, #070b1055);
+  border-bottom: 1px solid #d3e4e81a;
+}
+.game-interface .wordmark {
+  font-size: 32px;
+  letter-spacing: 0.8px;
+  line-height: 1;
+  font-weight: 800;
+}
+.game-interface .wordmark-period {
+  color: var(--lime);
+}
+.game-interface .topbar-center {
+  display: none;
+}
+.game-interface .connection-pill {
+  border: 1px solid #d3e4e831;
+  background: #0b1217b8;
+  border-radius: 0;
+  padding: 10px 13px;
+  color: #d3dfdf;
+  font-size: 11px;
+  letter-spacing: 0.3px;
+}
+.game-interface .connection-pill.connected .status-dot {
+  background: var(--lime);
+}
+.game-interface .button {
+  border-radius: 0;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  padding: 13px 20px;
+  clip-path: polygon(
+    0 0,
+    calc(100% - 10px) 0,
+    100% 10px,
+    100% 100%,
+    10px 100%,
+    0 calc(100% - 10px)
+  );
+}
+.game-interface .button.primary {
+  background: linear-gradient(120deg, #e4ff6a, #bce43c);
+  color: #152009;
+  box-shadow: none;
+}
+.game-interface .button.primary:hover:not(:disabled) {
+  background: #e2ff61;
+  box-shadow: 0 0 30px #cfff3e22;
+}
+.game-interface .button.secondary {
+  background: #142028cc;
+  border-color: #acbec14a;
+  color: #d7e5e3;
+}
+.game-interface .button.secondary:hover:not(:disabled) {
+  background: #243640;
+  border-color: #d2f54b99;
+}
+.game-interface .button.text-button {
+  font-size: 15px;
+  letter-spacing: 0.8px;
+  padding: 9px 0;
+  clip-path: none;
+  color: #d5e1db;
+}
+.game-interface .button.small {
+  font-size: 14px;
+  padding: 10px 15px;
+}
+.game-interface .page-heading h1 {
+  font-size: 62px;
+  line-height: 0.98;
+  letter-spacing: 0.6px;
+  font-weight: 700;
+  text-shadow: 0 3px 25px #0008;
+}
+.game-interface .page-heading p {
+  font-size: 13px;
+  color: #becbc9;
+  line-height: 1.7;
+  text-shadow: 0 1px 8px #000;
+}
+.game-interface .breadcrumb {
+  font-size: 12px;
+  letter-spacing: 1.6px;
+  font-weight: 600;
+  color: #c8d9b2;
+  margin-bottom: 13px;
+}
+.game-interface .breadcrumb-dot {
+  width: 3px;
+  height: 9px;
+  border-radius: 0;
+  background: var(--lime);
+}
+.game-interface .version-label {
+  font-size: 9px;
+  padding: 4px 6px;
+  color: #adbdc3;
+  border-color: #b8c8ca40;
+  border-radius: 0;
+  letter-spacing: 0.9px;
+}
+.game-interface .panel,
+.game-interface .welcome-card,
+.game-interface .interaction-card,
+.game-interface .host-strip {
+  border: 1px solid #c4d5dc29;
+  border-radius: 0;
+  background: linear-gradient(125deg, #101920f2, #0b1218eb);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 14px 40px #0002;
+}
+.game-interface .panel,
+.game-interface .welcome-card {
+  clip-path: polygon(
+    0 0,
+    calc(100% - 14px) 0,
+    100% 14px,
+    100% 100%,
+    14px 100%,
+    0 calc(100% - 14px)
+  );
+}
+.game-interface .welcome-card {
+  border-top-color: #d2f54b80;
+}
+.game-interface .welcome-card:before,
+.game-interface .welcome-card:after {
+  display: none;
+}
+.game-interface .welcome-card h2 {
+  font-family: var(--game-display);
+  font-size: 39px;
+  line-height: 0.98;
+  letter-spacing: 0.7px;
+  font-weight: 600;
+  color: #f2f5ef;
+}
+.game-interface .welcome-card p {
+  font-size: 12px;
+  line-height: 1.8;
+  color: #a7b8bd;
+}
+.game-interface .welcome-card .button {
+  font-size: 16px;
+  letter-spacing: 1px;
+  padding: 13px 15px;
+}
+.game-interface .welcome-card .saved-note {
+  color: #99adb5;
+  font-size: 10px;
+  line-height: 1.6;
+}
+.game-interface .live-label,
+.game-interface .eyebrow,
+.game-interface .control-label {
+  color: #aec48d;
+}
+.game-interface .live-label.quiet {
+  font-family: var(--game-display);
+  letter-spacing: 1.5px;
+  font-size: 11px;
+}
+.game-interface .sparkle-icon {
+  color: var(--lime);
+}
+.game-interface .panel-tabs {
+  border-color: #a7bbc333;
+  gap: 23px;
+}
+.game-interface .panel-tabs button {
+  font-size: 16px;
+  letter-spacing: 1px;
+  color: #879da7;
+  font-weight: 500;
+}
+.game-interface .panel-tabs button.active {
+  color: #f0f4ea;
+}
+.game-interface .panel-tabs button.active:after {
+  background: var(--lime);
+  height: 2px;
+}
+.game-interface .panel-tabs button span {
+  border-radius: 0;
+  background: #293a33;
+  color: #d8e6bb;
+  font-family: "DM Sans", sans-serif;
+  font-size: 9px;
+}
+.game-interface .resident-row {
+  border-radius: 0;
+  gap: 10px;
+  border-bottom: 1px solid #d3e4e80c;
+}
+.game-interface .resident-row:hover,
+.game-interface .resident-row.selected {
+  background: #d4f64d0e;
+}
+.game-interface .resident-row.selected {
+  box-shadow: inset 2px 0 0 var(--lime);
+}
+.game-interface .resident-info strong {
+  color: #e4ecea;
+  font-size: 13px;
+  font-weight: 500;
+}
+.game-interface .resident-info > span {
+  color: #8ea5ae;
+  font-size: 11px;
+}
+.game-interface .resident-info strong small {
+  border-radius: 0;
+  background: #c8eb4914;
+  color: #cbe86a;
+  border-color: #bbdc4e59;
+}
+.game-interface .resident-presence {
+  background: var(--lime);
+}
+.game-interface .resident-row > svg {
+  color: #839b9f;
+}
+.game-interface .avatar-badge {
+  border-radius: 2px;
+  border-color: #d0e2e327;
+  background: color-mix(in srgb, var(--avatar-color, #849c7e) 27%, #14202a);
+}
+.game-interface .detail-heading h3 {
+  font-size: 26px;
+  line-height: 1;
+  letter-spacing: 0.6px;
+  color: #eff5ee;
+}
+.game-interface .detail-heading > div > span {
+  color: #8da8b0;
+  font-size: 11px;
+}
+.game-interface .detail-flower {
+  color: var(--lime);
+}
+.game-interface .personality-tags span {
+  border-radius: 0;
+  background: #27382a66;
+  border-color: #c7e47140;
+  color: #bdcfab;
+  font-size: 10px;
+}
+.game-interface .need-meter > div {
+  color: #b1c2c7;
+  font-size: 11px;
+}
+.game-interface .need-meter > div strong {
+  font-family: var(--game-display);
+  font-size: 15px;
+  letter-spacing: 0.7px;
+  color: #e9f4e4;
+}
+.game-interface .meter-track {
+  border-radius: 0;
+  background: #d5e4e219;
+  height: 3px;
+}
+.game-interface .meter-track > span {
+  border-radius: 0;
+  background: var(--lime);
+}
+.game-interface .need-meter.social .meter-track > span {
+  background: #b6d7da;
+}
+.game-interface .need-meter.fun .meter-track > span {
+  background: #aaa7eb;
+}
+.game-interface .friend-count,
+.game-interface .relationship-empty {
+  color: #94aab0;
+  border-color: #afc5ce29;
+  font-size: 11px;
+}
+.game-interface .relationship-heading > span {
+  font-family: var(--game-display);
+  font-size: 12px;
+  letter-spacing: 1.4px;
+  color: #adbfaa;
+}
+.game-interface .relationship-row {
+  border-radius: 0;
+}
+.game-interface .relationship-row:hover:not(:disabled) {
+  background: #d3f54b0b;
+}
+.game-interface .relationship-person strong {
+  color: #dae6e4;
+}
+.game-interface .relationship-person small {
+  color: #8ca6ad;
+}
+.game-interface .relationship-memory {
+  color: #9db0b3;
+}
+.game-interface .studio-link-icon,
+.game-interface .metric-icon,
+.game-interface .neighborhood-symbol,
+.game-interface .studio-status {
+  border-radius: 0;
+  border-color: #cadfe136;
+  background: #101d23b8;
+  color: #c3d1cd;
+}
+.game-interface .studio-link strong {
+  color: #dae6df;
+}
+.game-interface .studio-link small {
+  color: #94afb4;
+}
+.game-interface .studio-link > svg {
+  color: var(--lime);
+}
+.game-interface .empty-state > svg {
+  color: #90a581;
+}
+.game-interface .empty-state p {
+  color: #c9d9d3;
+}
+.game-interface .empty-state > span {
+  color: #94a8ae;
+}
+.game-interface .scene-card {
+  border-radius: 0;
+  border-color: #b8d7d02b;
+  background: #0c141b;
+}
+.game-interface .scene-card:after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    #06101955 0%,
+    transparent 32%,
+    transparent 62%,
+    #050b12a8 100%
+  );
+  box-shadow: inset 0 0 200px #0003;
+}
+.game-interface .scene-top,
+.game-interface .scene-bottom {
+  z-index: 4;
+}
+.game-interface .world-title-badge,
+.game-interface .weather-badge,
+.game-interface .camera-control,
+.game-interface .scene-icon {
+  border-radius: 0;
+  border-color: #bacbd23d;
+  background: #0b151cbe;
+  backdrop-filter: blur(12px);
+  color: #dce8e2;
+}
+.game-interface .world-title-badge {
+  letter-spacing: 1.2px;
+  font-size: 10px;
+}
+.game-interface .scene-mode {
+  font-size: 8px;
+  color: #bfcea4;
+}
+.game-interface .weather-badge {
+  font-size: 11px;
+}
+.game-interface .camera-control select {
+  font-size: 11px;
+  letter-spacing: 0.1px;
+}
+.game-interface .scene-icon:hover {
+  background: #26392c;
+}
+.game-interface .scene-tip {
+  color: #d4e2e1;
+  font-size: 10px;
+  letter-spacing: 0.2px;
+}
+.game-interface .landing-intro {
+  background: linear-gradient(
+    90deg,
+    #060d14e6 0%,
+    #07101985 37%,
+    transparent 72%
+  );
+  z-index: 2;
+}
+.game-interface .landing-intro h2 {
+  font-family: var(--game-display);
+  font-size: 84px;
+  line-height: 0.91;
+  font-weight: 600;
+  letter-spacing: 0.8px;
+  color: #f4f6ee;
+  text-transform: uppercase;
+  text-shadow: 0 3px 35px #0005;
+}
+.game-interface .landing-intro p {
+  color: #c1cfcf;
+  font-size: 14px;
+  line-height: 1.8;
+  max-width: 350px;
+}
+.game-interface .landing-intro .live-label {
+  font-family: var(--game-display);
+  font-size: 13px;
+  letter-spacing: 2px;
+  color: #c8deab;
+}
+.game-interface .enter-button {
+  font-family: var(--game-display);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 1.7px;
+  min-width: 240px;
+  justify-content: space-between;
+  padding: 15px 21px;
+  margin-top: 30px;
+}
+.game-interface .intro-caption {
+  font-size: 11px;
+  letter-spacing: 0.1px;
+  color: #a7b9bb;
+  margin-top: 13px;
+}
+.game-interface .connection-banner {
+  border-radius: 0;
+  background: #09141ee6;
+  border-color: #c5db993d;
+  color: #cad6cb;
+  font-size: 11px;
+}
+.game-interface .interaction-card {
+  border-top-color: #d2f54b99;
+}
+.game-interface .interaction-card .section-title h3 {
+  font-size: 25px;
+  line-height: 1.1;
+  letter-spacing: 0.5px;
+  font-weight: 500;
+  color: #ebf2e8;
+}
+.game-interface .gesture-button {
+  border-radius: 0;
+  background: #17252c;
+  border-color: #b7ccd333;
+  color: #d6e2dc;
+  flex-direction: row;
+  gap: 9px;
+}
+.game-interface .gesture-button:hover:not(:disabled) {
+  background: #2f4031;
+  border-color: #c7e86588;
+  color: #edffcf;
+}
+.game-interface .gesture-button span {
+  font-family: var(--game-display);
+  font-size: 16px;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+}
+.game-interface .gesture-button svg {
+  color: #d2e6b0;
+  width: 19px;
+}
+.game-interface .target-row label {
+  color: #a0b5ba;
+}
+.game-interface .target-row select {
+  background: #14242b;
+  border-color: #a4c2ca47;
+  border-radius: 0;
+  color: #d3e1db;
+  font-size: 11px;
+}
+.game-interface .chat-form {
+  border-radius: 0;
+  background: #09151d;
+  border-color: #b0c6cf3d;
+}
+.game-interface .chat-form input {
+  color: #dae5df;
+  font-size: 12px;
+}
+.game-interface .chat-form > svg {
+  color: #a3bcb0;
+}
+.game-interface .chat-form input::placeholder {
+  color: #8199a3;
+}
+.game-interface .chat-form button {
+  border-radius: 0;
+  background: #c5e94a;
+  color: #1e2b10;
+  border: 0;
+}
+.game-interface .control-caption {
+  color: #839da7;
+  font-size: 10px;
+}
+.game-interface .join-prompt p {
+  color: #adbec1;
+  font-size: 12px;
+}
+.game-interface .control-section {
+  border-color: #b9ccd324;
+}
+.game-interface .control-label {
+  font-size: 12px;
+  letter-spacing: 1.2px;
+  color: #b7c7ba;
+  font-weight: 500;
+}
+.game-interface .weather-option {
+  border-radius: 0;
+  background: #16232b;
+  border-color: #a7c1ca2b;
+  color: #b1c8cb;
+  font-size: 11px;
+}
+.game-interface .weather-option.selected {
+  background: #314227;
+  border-color: #cdec6299;
+  color: #e4f3c9;
+}
+.game-interface .weather-option:hover:not(:disabled) {
+  background: #2b3b2d;
+}
+.game-interface .selected-dot {
+  background: var(--lime);
+  border-radius: 0;
+}
+.game-interface .moment-icon {
+  border-radius: 0;
+  background: #242a2a;
+  border-color: #c3c3b42b;
+}
+.game-interface .moment-icon.purple {
+  background: #272637;
+  border-color: #b9a5d13d;
+}
+.game-interface .moment-button strong {
+  color: #d9e5df;
+  font-size: 12px;
+}
+.game-interface .moment-button small {
+  color: #8da7ad;
+  font-size: 10px;
+}
+.game-interface .setting-row strong,
+.game-interface .setting-input-row label {
+  color: #c8d9d5;
+  font-size: 12px;
+}
+.game-interface .setting-row p,
+.game-interface .setting-input-row label > span {
+  color: #8aa3ac;
+  font-size: 11px;
+}
+.game-interface .setting-input-row input {
+  border-radius: 0;
+  background: #102029;
+  border-color: #8faab847;
+  color: #d8e6df;
+}
+.game-interface .toggle {
+  border-radius: 0;
+  background: #25343c;
+  border-color: #8ca5aa66;
+}
+.game-interface .toggle > span {
+  border-radius: 0;
+  background: #a4b6b5;
+}
+.game-interface .toggle.on {
+  background: #cced4c;
+  border-color: #cced4c;
+}
+.game-interface .toggle.on > span {
+  background: #263513;
+}
+.game-interface .pause-button,
+.game-interface .invite-neighbor {
+  border-radius: 0;
+  background: #17282d;
+  border-color: #aec3c436;
+  color: #c1d4ca;
+}
+.game-interface .pause-button:hover:not(:disabled),
+.game-interface .invite-neighbor:hover:not(:disabled) {
+  background: #30422e;
+}
+.game-interface .director-summary strong {
+  color: #e3eadc;
+}
+.game-interface .director-summary > div > div > span {
+  color: #8ba6ad;
+}
+.game-interface .studio-lock p {
+  color: #a4bbc0;
+}
+.game-interface .counter {
+  border-radius: 0;
+  background: #2b3c29;
+  color: #cee88e;
+  border-color: #c0d8614a;
+}
+.game-interface .event-icon {
+  border-radius: 0;
+  background: #1d322c;
+  border-color: #a8c89c42;
+  color: #c2ddab;
+}
+.game-interface .event-icon.gift,
+.game-interface .event-icon.social {
+  background: #352c25;
+  border-color: #c6aa753b;
+}
+.game-interface .event-icon.confetti,
+.game-interface .event-icon.raid {
+  background: #2d2a3b;
+  border-color: #b4a6d13b;
+}
+.game-interface .event-row p {
+  color: #9fb4b7;
+}
+.game-interface .event-row strong {
+  color: #dae7dc;
+}
+.game-interface .event-meta {
+  color: #879da4;
+}
+.game-interface .event-text {
+  color: #b0c9c8;
+}
+.game-interface .host-strip {
+  border-left: 2px solid #cbe956;
+  padding: 12px 15px;
+}
+.game-interface .host-strip-icon {
+  border-radius: 0;
+  background: #1c2d2b;
+  border-color: #b6cfad3d;
+  color: #bfd7ad;
+}
+.game-interface .host-strip strong {
+  font-family: var(--game-display);
+  font-size: 18px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: #e6edde;
+}
+.game-interface .host-strip small {
+  color: #88a3ac;
+  font-size: 10px;
+}
+.game-interface .host-strip-action {
+  color: #c4d8ae;
+  font-size: 11px;
+}
+.game-interface .host-strip:hover {
+  background: #1c2d2deb;
+  border-color: #cae36b88;
+}
+.game-interface .site-footer {
+  color: #92a7ac;
+  border-color: #bfd1d31c;
+}
+.game-interface .site-footer > div {
+  color: #9ab2b5;
+}
+.game-interface .site-footer .footer-dot {
+  color: var(--lime);
+}
+.game-interface .modal {
+  background: linear-gradient(135deg, #111c23, #0a141c);
+  border-color: #bfd1dc3b;
+  border-radius: 0;
+  box-shadow: 0 30px 120px #000a;
+}
+.game-interface .modal-header {
+  border-bottom: 1px solid #c0d5db29;
+  padding-bottom: 21px;
+  margin-bottom: 24px;
+}
+.game-interface .modal-header h2 {
+  font-family: var(--game-display);
+  font-size: 38px;
+  line-height: 1;
+  letter-spacing: 0.7px;
+  color: #edf4e7;
+}
+.game-interface .modal-header p {
+  color: #9db5bb;
+  font-size: 12px;
+}
+.game-interface .modal-header .eyebrow {
+  font-family: var(--game-display);
+  font-size: 11px;
+  letter-spacing: 1.4px;
+  color: #c3d5a4;
+}
+.game-interface .name-form > label {
+  font-family: var(--game-display);
+  text-transform: uppercase;
+  font-size: 17px;
+  letter-spacing: 0.8px;
+  color: #cfddd4;
+}
+.game-interface .name-form > input {
+  border-radius: 0;
+  background: #07141c;
+  border-color: #b7d4dc4a;
+  color: #e6efdf;
+  font-size: 15px;
+}
+.game-interface .name-form > p {
+  color: #89a4ae;
+}
+.game-interface .icon-button {
+  border-radius: 0;
+  color: #9fb6bb;
+}
+.game-interface .icon-button:hover {
+  background: #293e31;
+  color: var(--lime);
+}
+.game-interface .copy-field,
+.game-interface .copy-field button,
+.game-interface .obs-settings select,
+.game-interface .obs-preview,
+.game-interface .integration-status {
+  border-radius: 0;
+  border-color: #b4cfd23d;
+  background: #11232b;
+}
+.game-interface .obs-preview strong,
+.game-interface .integration-status strong {
+  color: #dce8db;
+}
+.game-interface .obs-preview p,
+.game-interface .integration-status p,
+.game-interface .integration-explanation p,
+.game-interface .help-note {
+  color: #9ab5bc;
+}
+.game-interface .integration-explanation h3 {
+  font-size: 22px;
+  letter-spacing: 0.6px;
+}
+.game-interface .command-list code {
+  border-radius: 0;
+  background: #21362c;
+  border-color: #b4ce8244;
+  color: #c4dca8;
+}
+.game-interface .text-link {
+  color: #c4e18e;
+}
+.game-interface .obs-settings label,
+.game-interface .copy-field input {
+  color: #c4d7cc;
+}
+.game-interface .reset-confirm > p {
+  color: #baccc6;
+}
+.game-interface .toast {
+  border-radius: 0;
+  background: #142b29f2;
+  border-color: #c5e57177;
+  backdrop-filter: blur(15px);
+  color: #e0ead9;
+  font-size: 12px;
+}
+.game-interface .toast.error {
+  background: #33251ef2;
+  border-color: #d4a77c80;
+  color: #e6cdb6;
+}
+
+@media (min-width: 1051px) {
+  .game-interface {
+    height: 100dvh;
+    overflow: hidden;
+    isolation: isolate;
+  }
+  .game-interface .app-body {
+    margin: 0;
+    height: 100dvh;
+  }
+  .game-interface .topbar {
+    position: fixed;
+    inset: 0 0 auto;
+    height: 84px;
+    padding: 0 40px;
+    z-index: 25;
+    pointer-events: none;
+  }
+  .game-interface .topbar > * {
+    pointer-events: auto;
+  }
+  .game-interface .topbar-actions {
+    margin-left: auto;
+    gap: 14px;
+  }
+  .game-interface .rail {
+    position: fixed;
+    inset: 0 auto auto 255px;
+    height: 84px;
+    width: auto;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    flex-direction: row;
+    align-items: center;
+    gap: 0;
+    z-index: 35;
+  }
+  .game-interface .brand-mark,
+  .game-interface .rail-rule {
+    display: none;
+  }
+  .game-interface .rail nav {
+    flex-direction: row;
+    gap: 7px;
+    width: auto;
+  }
+  .game-interface .rail-button {
+    width: 105px;
+    height: 38px;
+    flex-direction: row;
+    padding: 9px 10px;
+    gap: 8px;
+    border-radius: 0;
+    background: #0d171e88;
+    color: #aabec1;
+    clip-path: polygon(
+      0 0,
+      calc(100% - 8px) 0,
+      100% 8px,
+      100% 100%,
+      8px 100%,
+      0 calc(100% - 8px)
+    );
+  }
+  .game-interface .rail nav .rail-button:last-child {
+    width: 140px;
+  }
+  .game-interface .rail-button span {
+    font-size: 13px;
+    letter-spacing: 0.8px;
+    line-height: 1;
+  }
+  .game-interface .rail-button > svg {
+    width: 15px;
+    height: 15px;
+  }
+  .game-interface .rail-button.active {
+    background: #d1f54b18;
+    color: var(--lime);
+    box-shadow: inset 0 -1px 0 #d1f54b99;
+  }
+  .game-interface .rail-button.active:before {
+    display: none;
+  }
+  .game-interface .rail-button:hover {
+    background: #cbe8481f;
+    color: #e4edcd;
+  }
+  .game-interface .rail-bottom {
+    margin: 0 0 0 7px;
+    flex-direction: row;
+    gap: 9px;
+  }
+  .game-interface .rail-bottom .rail-button {
+    width: 81px;
+  }
+  .game-interface .rail-profile {
+    border-radius: 0;
+    width: 32px;
+    height: 32px;
+    background: #15252b;
+    border-color: #c0d6ca4a;
+    font-family: var(--game-display);
+    font-size: 14px;
+    color: #cfdfa8;
+    clip-path: polygon(
+      0 0,
+      calc(100% - 6px) 0,
+      100% 6px,
+      100% 100%,
+      6px 100%,
+      0 calc(100% - 6px)
+    );
+  }
+  .game-interface .page-content {
+    padding: 112px 40px 0;
+    max-width: none;
+    margin: 0;
+    height: 100dvh;
+  }
+  .game-interface .page-heading {
+    position: relative;
+    z-index: 4;
+    margin: 0;
+    max-width: calc(100% - 370px);
+    height: auto;
+    align-items: flex-end;
+    pointer-events: none;
+  }
+  .game-interface .page-heading > * {
+    pointer-events: auto;
+  }
+  .game-interface .page-heading h1 {
+    font-size: 57px;
+  }
+  .game-interface .page-heading p {
+    max-width: 590px;
+    margin-top: 12px;
+  }
+  .game-interface .heading-actions {
+    display: none;
+  }
+  .game-interface .world-layout {
+    display: block;
+    margin: 0;
+    gap: 0;
+  }
+  .game-interface .world-column {
+    width: auto;
+    max-width: none;
+  }
+  .game-interface .scene-card {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100dvh;
+    margin: 0;
+    z-index: 0;
+    border: 0;
+    isolation: isolate;
+    overflow: hidden;
+  }
+  .game-interface .scene-card:fullscreen {
+    z-index: 100;
+  }
+  .game-interface .scene-top {
+    position: fixed;
+    inset: 105px 40px auto auto;
+    display: flex;
+    gap: 9px;
+    align-items: flex-end;
+    flex-direction: column;
+    z-index: 5;
+  }
+  .game-interface .scene-bottom {
+    position: fixed;
+    inset: auto auto 24px 40px;
+    display: flex;
+    gap: 18px;
+    z-index: 5;
+  }
+  .game-interface .scene-controls {
+    gap: 12px;
+  }
+  .game-interface .scene-tip {
+    font-size: 10px;
+  }
+  .game-interface .connection-banner {
+    top: 103px;
+    max-width: 440px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 6;
+  }
+  .game-interface .landing-intro {
+    padding: 0 50% 95px 6vw;
+    justify-content: center;
+    align-items: flex-start;
+    inset: 0;
+  }
+  .game-interface .landing-intro h2 {
+    font-size: clamp(66px, 6.2vw, 108px);
+    margin-top: 21px;
+    white-space: nowrap;
+  }
+  .game-interface .landing-intro p {
+    margin-top: 24px;
+    max-width: 370px;
+  }
+  .game-interface .landing-intro .enter-button {
+    margin-top: 32px;
+    min-width: 265px;
+  }
+  .game-interface.page-home .page-heading h1,
+  .game-interface.page-home .page-heading p {
+    display: none;
+  }
+  .game-interface.page-home .page-heading {
+    max-width: 60%;
+    pointer-events: none;
+  }
+  .game-interface.page-home .world-footer,
+  .game-interface.page-home .host-strip,
+  .game-interface.page-home .promise-row {
+    display: none;
+  }
+  .game-interface .community-column {
+    position: fixed;
+    top: 194px;
+    right: 40px;
+    bottom: 75px;
+    width: 300px;
+    z-index: 6;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    overflow: auto;
+    padding-right: 3px;
+    scrollbar-width: thin;
+    scrollbar-color: #b4d35366 #0d172366;
+    overscroll-behavior: contain;
+  }
+  .game-interface .community-column > section,
+  .game-interface .community-column > .studio-link {
+    flex-shrink: 0;
+    width: 100%;
+  }
+  .game-interface .community-column .welcome-card {
+    padding: 22px;
+  }
+  .game-interface .community-column .panel {
+    padding: 20px;
+  }
+  .game-interface .community-column .community-panel {
+    padding-bottom: 11px;
+  }
+  .game-interface .community-column .panel-tabs {
+    margin: 0 -20px;
+    padding: 0 20px;
+  }
+  .game-interface .community-column .residents-list {
+    max-height: 395px;
+    overflow: auto;
+    scrollbar-width: thin;
+    scrollbar-color: #9dbd5966 transparent;
+  }
+  .game-interface.page-world .resident-detail {
+    order: 0;
+  }
+  .game-interface.page-world .community-panel {
+    order: 1;
+  }
+  .game-interface.page-world .welcome-card {
+    order: 2;
+  }
+  .game-interface.page-world .studio-link {
+    order: 3;
+  }
+  .game-interface.page-world .world-footer {
+    position: fixed;
+    z-index: 4;
+    left: 40px;
+    top: 252px;
+    margin: 0;
+    pointer-events: none;
+  }
+  .game-interface.page-world .world-footer-name h3 {
+    font-family: var(--game-display);
+    font-size: 24px;
+    font-weight: 500;
+    letter-spacing: 0.5px;
+    color: #e5eee1;
+  }
+  .game-interface.page-world .world-footer-name p {
+    font-size: 11px;
+    color: #a1b6ba;
+  }
+  .game-interface.page-world .world-footer-stats {
+    display: none;
+  }
+  .game-interface.page-world .host-strip {
+    position: fixed;
+    z-index: 4;
+    left: 40px;
+    top: 324px;
+    width: 320px;
+    margin: 0;
+    padding: 11px 12px;
+  }
+  .game-interface.page-world .host-strip-action {
+    font-size: 10px;
+    max-width: 75px;
+    white-space: normal;
+    line-height: 1.7;
+  }
+  .game-interface.page-world .host-strip strong {
+    font-size: 17px;
+  }
+  .game-interface.page-world .host-strip small {
+    font-size: 10px;
+  }
+  .game-interface.page-world .interaction-card {
+    position: fixed;
+    left: 40px;
+    right: 370px;
+    bottom: 77px;
+    z-index: 6;
+    padding: 17px 20px;
+    clip-path: polygon(
+      0 0,
+      calc(100% - 14px) 0,
+      100% 14px,
+      100% 100%,
+      14px 100%,
+      0 calc(100% - 14px)
+    );
+  }
+  .game-interface.page-world .interaction-card .section-title {
+    max-width: calc(100% - 200px);
+    min-height: 28px;
+  }
+  .game-interface.page-world .interaction-card .section-title h3 {
+    font-size: 24px;
+    line-height: 1.15;
+  }
+  .game-interface.page-world .interaction-card .eyebrow {
+    display: none;
+  }
+  .game-interface.page-world .interaction-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .game-interface.page-world .gesture-button {
+    flex: 1;
+    padding: 10px 7px;
+    gap: 8px;
+    min-height: 41px;
+  }
+  .game-interface.page-world .gesture-button span {
+    font-size: 15px;
+    letter-spacing: 0.6px;
+  }
+  .game-interface.page-world .target-row {
+    position: absolute;
+    top: 17px;
+    right: 20px;
+    margin: 0;
+    gap: 0;
+    display: block;
+  }
+  .game-interface.page-world .target-row label {
+    display: none;
+  }
+  .game-interface.page-world .target-row select {
+    width: 174px;
+    max-width: 174px;
+    padding: 8px 10px;
+    font-size: 11px;
+  }
+  .game-interface.page-world .chat-form {
+    margin-top: 12px;
+    padding: 5px 7px 5px 11px;
+  }
+  .game-interface.page-world .chat-form input {
+    padding: 5px 0;
+    font-size: 12px;
+  }
+  .game-interface.page-world .chat-form button {
+    width: 27px;
+    height: 27px;
+  }
+  .game-interface.page-world .control-caption {
+    margin-top: 8px;
+    font-size: 10px;
+    line-height: 1.5;
+  }
+  .game-interface.page-world .join-prompt {
+    padding-top: 12px;
+    display: flex;
+    flex-direction: row;
+    gap: 25px;
+    align-items: center;
+  }
+  .game-interface.page-world .join-prompt p {
+    max-width: none;
+    font-size: 12px;
+    line-height: 1.8;
+  }
+  .game-interface.page-world .join-prompt .button {
+    font-size: 17px;
+    letter-spacing: 0.7px;
+    padding: 12px 17px;
+  }
+  .game-interface.page-director .community-column {
+    top: 125px;
+    width: 355px;
+  }
+  .game-interface.page-director .page-heading {
+    max-width: calc(100% - 410px);
+  }
+  .game-interface.page-director .director-summary {
+    position: fixed;
+    left: 40px;
+    top: 259px;
+    z-index: 4;
+    display: flex;
+    gap: 23px;
+    max-width: 610px;
+    background: #09161bb8;
+    border: 1px solid #b5c9cc29;
+    padding: 15px 18px;
+    clip-path: polygon(
+      0 0,
+      calc(100% - 10px) 0,
+      100% 10px,
+      100% 100%,
+      10px 100%,
+      0 calc(100% - 10px)
+    );
+  }
+  .game-interface.page-director .director-summary > div {
+    display: flex !important;
+    gap: 9px;
+    align-items: center;
+  }
+  .game-interface.page-director .director-summary strong {
+    font-size: 12px;
+  }
+  .game-interface.page-director .director-summary > div > div > span {
+    font-size: 10px;
+    max-width: 135px;
+    line-height: 1.6;
+  }
+  .game-interface.page-director .activity-log {
+    position: fixed;
+    left: 40px;
+    bottom: 78px;
+    width: 350px;
+    max-height: 300px;
+    overflow: auto;
+    z-index: 5;
+    scrollbar-width: thin;
+    scrollbar-color: #b4d35355 transparent;
+  }
+  .game-interface .site-footer {
+    position: fixed;
+    inset: auto 40px 25px auto;
+    z-index: 5;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    gap: 0;
+  }
+  .game-interface .site-footer > span {
+    display: none;
+  }
+  .game-interface .site-footer > div {
+    font-size: 10px;
+    letter-spacing: 0.5px;
+    line-height: 1.6;
+    color: #bdd0ca;
+    text-shadow: 0 2px 5px #000;
+    max-width: 490px;
+  }
+  .game-interface .toast {
+    left: 50%;
+    bottom: 25px;
+    z-index: 150;
+    max-width: 600px;
+    box-shadow: 0 10px 45px #0009;
+  }
+}
+@media (min-width: 1051px) and (max-width: 1250px) {
+  .game-interface .rail {
+    left: 230px;
+  }
+  .game-interface .rail nav {
+    gap: 4px;
+  }
+  .game-interface .rail-button {
+    width: 85px;
+    padding: 8px;
+    gap: 6px;
+  }
+  .game-interface .rail nav .rail-button:last-child {
+    width: 117px;
+  }
+  .game-interface .rail-button span {
+    font-size: 12px;
+    letter-spacing: 0.4px;
+  }
+  .game-interface .rail-bottom {
+    gap: 6px;
+    margin-left: 4px;
+  }
+  .game-interface .rail-bottom .rail-button {
+    width: 68px;
+  }
+  .game-interface .rail-profile {
+    display: none;
+  }
+  .game-interface .topbar {
+    padding: 0 30px;
+  }
+  .game-interface .topbar-actions .header-join {
+    display: none;
+  }
+  .game-interface .community-column {
+    right: 30px;
+    width: 280px;
+  }
+  .game-interface .scene-top {
+    right: 30px;
+  }
+  .game-interface .page-content {
+    padding-left: 30px;
+    padding-right: 30px;
+  }
+  .game-interface .page-heading h1 {
+    font-size: 50px;
+  }
+  .game-interface.page-world .interaction-card {
+    left: 30px;
+    right: 335px;
+  }
+  .game-interface.page-world .world-footer,
+  .game-interface.page-world .host-strip,
+  .game-interface.page-director .director-summary,
+  .game-interface.page-director .activity-log {
+    left: 30px;
+  }
+  .game-interface.page-world .host-strip {
+    width: 285px;
+  }
+  .game-interface .landing-intro {
+    padding-left: 5vw;
+  }
+  .game-interface .landing-intro h2 {
+    font-size: 76px;
+  }
+  .game-interface .landing-intro p {
+    max-width: 280px;
+  }
+  .game-interface.page-director .community-column {
+    width: 325px;
+  }
+  .game-interface.page-director .director-summary {
+    max-width: 600px;
+    gap: 17px;
+    padding: 13px;
+  }
+  .game-interface.page-director .director-summary > div:last-child {
+    display: none !important;
+  }
+  .game-interface .site-footer {
+    right: 30px;
+  }
+  .game-interface .scene-bottom {
+    left: 30px;
+  }
+  .game-interface .scene-tip {
+    display: none;
+  }
+}
+@media (max-width: 1050px) {
+  .game-interface {
+    background: #080f16;
+    min-height: 100dvh;
+  }
+  .game-interface .page-content {
+    padding-top: 28px;
+  }
+  .game-interface .rail {
+    background: #08121df2;
+    border-color: #b6c9cf29;
+  }
+  .game-interface .rail-button {
+    border-radius: 0;
+    color: #8da4ac;
+  }
+  .game-interface .rail-button.active {
+    background: #d1f54b14;
+    color: var(--lime);
+    box-shadow: inset 0 -1px 0 #cbea4a77;
+  }
+  .game-interface .rail-button.active:before {
+    background: var(--lime);
+  }
+  .game-interface .rail-profile {
+    border-radius: 0;
+    background: #1c2d31;
+    border-color: #c2d77f4a;
+    color: #d2e9a1;
+  }
+  .game-interface .brand-mark span {
+    background: var(--lime);
+  }
+  .game-interface .page-heading h1 {
+    font-size: 48px;
+    letter-spacing: 0.5px;
+  }
+  .game-interface .page-heading p {
+    font-size: 13px;
+    line-height: 1.8;
+  }
+  .game-interface .scene-card {
+    height: 610px;
+    border: 0;
+    isolation: isolate;
+  }
+  .game-interface .landing-intro {
+    padding: 0 25px 90px;
+    justify-content: flex-end;
+    background:
+      linear-gradient(90deg, #061019d9, transparent),
+      linear-gradient(0deg, #061019bb, transparent 80%);
+  }
+  .game-interface .landing-intro h2 {
+    font-size: 65px;
+    line-height: 0.93;
+    letter-spacing: 0.4px;
+  }
+  .game-interface .landing-intro p {
+    font-size: 13px;
+    max-width: 260px;
+    line-height: 1.8;
+    margin-top: 21px;
+  }
+  .game-interface .landing-intro .live-label {
+    font-size: 11px;
+    letter-spacing: 1.3px;
+    max-width: 250px;
+    line-height: 1.7;
+  }
+  .game-interface .enter-button {
+    font-size: 21px;
+    min-width: 224px;
+    padding: 14px 18px;
+  }
+  .game-interface .intro-caption {
+    font-size: 10px;
+    max-width: 270px;
+    line-height: 1.8;
+  }
+  .game-interface .welcome-card h2 {
+    font-size: 36px;
+    letter-spacing: 0.3px;
+  }
+  .game-interface .detail-heading h3 {
+    font-size: 26px;
+  }
+  .game-interface .world-footer-name h3 {
+    font-family: var(--game-display);
+    font-size: 24px;
+    letter-spacing: 0.6px;
+    font-weight: 500;
+  }
+  .game-interface .world-footer-name p {
+    font-size: 12px;
+    color: #9cb3bb;
+  }
+  .game-interface .small-tag {
+    font-family: "DM Sans", sans-serif;
+    font-size: 8px !important;
+    color: #d4e599;
+    border-radius: 0;
+    border-color: #d3e69c4a;
+  }
+  .game-interface .promise-row {
+    border-color: #c0d4da26;
+  }
+  .game-interface .promise-row h3 {
+    font-size: 23px;
+    letter-spacing: 0.5px;
+  }
+  .game-interface .promise-row p {
+    font-size: 12px;
+    color: #91aab3;
+  }
+  .game-interface .promise-row > div > span {
+    color: #c7e692;
+    font-size: 11px;
+  }
+  .game-interface .gesture-button {
+    padding: 14px 9px;
+    gap: 9px;
+  }
+  .game-interface .gesture-button span {
+    font-size: 17px;
+  }
+  .game-interface .interaction-card .section-title h3 {
+    font-size: 29px;
+    line-height: 1.1;
+  }
+  .game-interface .interaction-card .eyebrow {
+    font-size: 10px;
+    line-height: 1.6;
+    letter-spacing: 1.1px;
+  }
+  .game-interface .interaction-card .target-row label {
+    font-size: 12px;
+  }
+  .game-interface .site-footer > span {
+    font-family: var(--game-display);
+    font-size: 15px;
+    letter-spacing: 0.6px;
+  }
+  .game-interface .site-footer > span > span:last-child {
+    font-family: "DM Sans", sans-serif;
+    font-size: 10px;
+    letter-spacing: 0;
+  }
+  .game-interface .director-panel > .section-title h3,
+  .game-interface .approval-panel .section-title h3,
+  .game-interface .activity-log .section-title h3 {
+    font-size: 26px;
+    line-height: 1.1;
+    letter-spacing: 0.6px;
+  }
+  .game-interface .control-label {
+    font-size: 14px;
+    letter-spacing: 1.4px;
+  }
+  .game-interface .resident-info strong {
+    font-size: 14px;
+  }
+  .game-interface .resident-info > span {
+    font-size: 12px;
+  }
+  .game-interface .resident-detail .personality-tags span {
+    font-size: 11px;
+  }
+  .game-interface .need-meter > div {
+    font-size: 12px;
+  }
+  .game-interface .friend-count,
+  .game-interface .relationship-empty {
+    font-size: 12px;
+  }
+}
+@media (max-width: 850px) {
+  .game-interface .topbar {
+    height: 75px;
+    padding: 0 23px;
+    position: relative;
+    z-index: 20;
+    background: #09121bf0;
+  }
+  .game-interface .wordmark {
+    font-size: 30px;
+  }
+  .game-interface .rail {
+    position: fixed;
+    z-index: 40;
+    border-top: 1px solid #bed2d92b;
+    background: #07111cf5;
+    height: 72px;
+    padding: 6px 16px;
+  }
+  .game-interface .rail-button {
+    height: 55px;
+    clip-path: polygon(
+      0 0,
+      calc(100% - 7px) 0,
+      100% 7px,
+      100% 100%,
+      7px 100%,
+      0 calc(100% - 7px)
+    );
+  }
+  .game-interface .rail-button span {
+    font-size: 11px;
+    letter-spacing: 0.6px;
+    line-height: 1;
+  }
+  .game-interface .page-content {
+    padding-bottom: 105px;
+  }
+  .game-interface .scene-card {
+    height: 610px;
+  }
+  .game-interface .world-layout {
+    grid-template-columns: minmax(0, 1fr) 275px;
+  }
+}
+@media (max-width: 700px) {
+  .game-interface .topbar {
+    padding: 0 20px;
+    height: 74px;
+  }
+  .game-interface .topbar-actions .connection-pill {
+    font-size: 11px;
+    padding: 9px;
+  }
+  .game-interface .page-content {
+    padding: 26px 20px 110px;
+  }
+  .game-interface .page-heading {
+    margin-bottom: 22px;
+    gap: 15px;
+  }
+  .game-interface .page-heading h1 {
+    font-size: 50px;
+    letter-spacing: 0.4px;
+    line-height: 0.95;
+  }
+  .game-interface .page-heading p {
+    font-size: 13px;
+    max-width: 330px;
+    margin-top: 12px;
+  }
+  .game-interface .breadcrumb {
+    font-size: 11px;
+    letter-spacing: 1.3px;
+    line-height: 1.6;
+    margin-bottom: 13px;
+  }
+  .game-interface .version-label {
+    font-size: 8px;
+    letter-spacing: 0.8px;
+  }
+  .game-interface .world-layout {
+    display: block;
+  }
+  .game-interface .scene-card {
+    width: calc(100% + 40px);
+    margin: 0 -20px;
+    height: calc(100svh - 170px);
+    min-height: 550px;
+    max-height: 850px;
+    border: 0;
+    overflow: hidden;
+    position: relative;
+  }
+  .game-interface.page-home .page-heading h1,
+  .game-interface.page-home .page-heading p {
+    display: none;
+  }
+  .game-interface.page-home .page-heading {
+    margin-bottom: 10px;
+  }
+  .game-interface .scene-top {
+    inset: 14px 17px auto;
+  }
+  .game-interface .scene-bottom {
+    inset: auto 17px 18px;
+  }
+  .game-interface .camera-control {
+    padding: 10px;
+  }
+  .game-interface .camera-control select {
+    font-size: 11px;
+  }
+  .game-interface .world-title-badge {
+    font-size: 8px;
+    padding: 8px;
+  }
+  .game-interface .weather-badge {
+    font-size: 10px;
+  }
+  .game-interface .scene-mode {
+    display: none;
+  }
+  .game-interface .landing-intro {
+    padding: 0 24px 98px;
+    justify-content: flex-end;
+    background:
+      linear-gradient(90deg, #071018dc, transparent 95%),
+      linear-gradient(0deg, #061018dd, transparent 85%);
+  }
+  .game-interface .landing-intro h2 {
+    font-size: 68px;
+    line-height: 0.91;
+    letter-spacing: 0.4px;
+    max-width: 340px;
+    margin-top: 20px;
+  }
+  .game-interface .landing-intro p {
+    font-size: 13px;
+    max-width: 280px;
+    line-height: 1.8;
+    margin-top: 22px;
+  }
+  .game-interface .landing-intro .live-label {
+    font-size: 11px;
+    letter-spacing: 1.4px;
+    max-width: 290px;
+    line-height: 1.7;
+  }
+  .game-interface .enter-button {
+    font-size: 21px;
+    min-width: 240px;
+    padding: 14px 19px;
+    margin-top: 25px;
+  }
+  .game-interface .intro-caption {
+    font-size: 10px;
+    max-width: 285px;
+    line-height: 1.8;
+  }
+  .game-interface .connection-banner {
+    top: 64px;
+    max-width: calc(100% - 35px);
+    font-size: 11px;
+    padding: 10px 12px;
+  }
+  .game-interface .community-column {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    margin-top: 24px;
+  }
+  .game-interface .panel,
+  .game-interface .welcome-card,
+  .game-interface .interaction-card {
+    padding: 23px;
+  }
+  .game-interface .welcome-card h2 {
+    font-size: 42px;
+    line-height: 0.98;
+    letter-spacing: 0.5px;
+  }
+  .game-interface .welcome-card p {
+    font-size: 13px;
+  }
+  .game-interface .welcome-card .button {
+    font-size: 19px;
+    padding: 14px 17px;
+  }
+  .game-interface .welcome-card .live-label.quiet {
+    font-size: 11px;
+    letter-spacing: 1.3px;
+  }
+  .game-interface .welcome-card .saved-note {
+    font-size: 11px;
+  }
+  .game-interface .sparkle-icon > svg {
+    width: 22px;
+    height: 22px;
+  }
+  .game-interface .panel-tabs {
+    margin: 0 -23px;
+    padding: 0 23px;
+    gap: 30px;
+  }
+  .game-interface .panel-tabs button {
+    font-size: 18px;
+    letter-spacing: 1px;
+  }
+  .game-interface .panel-tabs button span {
+    font-size: 10px;
+  }
+  .game-interface .resident-row {
+    padding-top: 14px;
+    padding-bottom: 14px;
+    gap: 12px;
+  }
+  .game-interface .resident-info strong {
+    font-size: 14px;
+  }
+  .game-interface .resident-info > span {
+    font-size: 12px;
+  }
+  .game-interface .resident-detail .detail-heading h3 {
+    font-size: 30px;
+  }
+  .game-interface .resident-detail .detail-heading > div > span {
+    font-size: 12px;
+  }
+  .game-interface .personality-tags span {
+    font-size: 11px;
+  }
+  .game-interface .world-footer {
+    margin: 23px 0;
+  }
+  .game-interface .world-footer-name h3 {
+    font-size: 26px;
+    line-height: 1.1;
+  }
+  .game-interface .world-footer-name p {
+    font-size: 12px;
+    line-height: 1.8;
+  }
+  .game-interface .small-tag {
+    font-size: 8px !important;
+  }
+  .game-interface .host-strip {
+    margin-bottom: 24px;
+    padding: 13px 15px;
+  }
+  .game-interface .host-strip strong {
+    font-size: 20px;
+  }
+  .game-interface .host-strip small {
+    font-size: 11px;
+  }
+  .game-interface .host-strip-action {
+    font-size: 11px;
+  }
+  .game-interface .promise-row {
+    padding-top: 23px;
+    gap: 23px;
+  }
+  .game-interface .promise-row > div {
+    padding-left: 29px;
+  }
+  .game-interface .promise-row h3 {
+    font-size: 26px;
+  }
+  .game-interface .promise-row p {
+    font-size: 12px;
+    line-height: 1.9;
+  }
+  .game-interface .promise-row > div > span {
+    font-size: 11px;
+    top: 5px;
+  }
+  .game-interface .interaction-card {
+    margin-top: 23px;
+    border-top: 2px solid #d4f45499;
+  }
+  .game-interface .interaction-card .section-title h3 {
+    font-size: 32px;
+    line-height: 1.05;
+    letter-spacing: 0.4px;
+  }
+  .game-interface .interaction-card .eyebrow {
+    font-size: 10px;
+    line-height: 1.7;
+    letter-spacing: 1px;
+  }
+  .game-interface .interaction-actions {
+    grid-template-columns: 1fr 1fr;
+    gap: 9px;
+    margin-top: 21px;
+  }
+  .game-interface .gesture-button {
+    padding: 15px 8px;
+    gap: 9px;
+  }
+  .game-interface .gesture-button span {
+    font-size: 17px;
+    letter-spacing: 0.4px;
+    line-height: 1.1;
+  }
+  .game-interface .gesture-button svg {
+    width: 20px;
+  }
+  .game-interface .target-row {
+    margin: 20px 0;
+    gap: 10px;
+  }
+  .game-interface .target-row label {
+    font-size: 12px;
+  }
+  .game-interface .target-row select {
+    font-size: 12px;
+    padding: 11px;
+  }
+  .game-interface .chat-form input {
+    font-size: 12px;
+  }
+  .game-interface .control-caption {
+    font-size: 11px;
+    line-height: 1.8;
+  }
+  .game-interface .director-summary {
+    padding: 22px 0;
+  }
+  .game-interface .director-summary strong {
+    font-size: 12px;
+  }
+  .game-interface .director-summary > div > div > span {
+    font-size: 10px;
+  }
+  .game-interface .control-label {
+    font-size: 14px;
+    line-height: 1.7;
+    letter-spacing: 1.1px;
+  }
+  .game-interface .director-panel > .section-title h3,
+  .game-interface .approval-panel .section-title h3 {
+    font-size: 29px;
+    line-height: 1;
+  }
+  .game-interface .moment-button strong,
+  .game-interface .setting-row strong,
+  .game-interface .setting-input-row label {
+    font-size: 13px;
+  }
+  .game-interface .moment-button small,
+  .game-interface .setting-row p,
+  .game-interface .setting-input-row label > span {
+    font-size: 11px;
+  }
+  .game-interface .weather-option {
+    font-size: 12px;
+  }
+  .game-interface .invite-neighbor,
+  .game-interface .pause-button {
+    font-size: 12px;
+  }
+  .game-interface .activity-log {
+    margin-top: 12px;
+  }
+  .game-interface .activity-log .section-title h3 {
+    font-size: 26px;
+  }
+  .game-interface .event-row p,
+  .game-interface .compact-events .event-row p {
+    font-size: 13px;
+  }
+  .game-interface .event-meta,
+  .game-interface .compact-events .event-meta {
+    font-size: 10px;
+  }
+  .game-interface .site-footer {
+    margin-top: 28px;
+    line-height: 1.8;
+  }
+  .game-interface .site-footer > div {
+    font-size: 10px;
+    line-height: 1.9;
+    max-width: 190px;
+  }
+  .game-interface .site-footer > span {
+    font-size: 17px;
+  }
+  .game-interface .modal {
+    padding: 23px;
+    max-height: calc(100dvh - 30px);
+  }
+  .game-interface .modal-wide {
+    padding: 17px;
+  }
+  .game-interface .modal-header h2 {
+    font-size: 33px;
+    line-height: 1;
+  }
+  .game-interface .modal-header .eyebrow {
+    font-size: 10px;
+  }
+  .game-interface .modal-header p {
+    font-size: 12px;
+    line-height: 1.9;
+  }
+  .game-interface .modal-header {
+    padding-bottom: 20px;
+    margin-bottom: 23px;
+  }
+  .game-interface .name-form > label {
+    font-size: 18px;
+  }
+  .game-interface .name-form > input {
+    font-size: 15px;
+  }
+  .game-interface .name-form > p {
+    font-size: 11px;
+  }
+  .game-interface .name-form > .button {
+    font-size: 19px;
+  }
+  .game-interface .toast {
+    font-size: 12px;
+    bottom: 91px;
+    padding: 13px;
+    line-height: 1.7;
+  }
+}
+@media (max-width: 380px) {
+  .game-interface .topbar {
+    padding: 0 16px;
+  }
+  .game-interface .wordmark {
+    font-size: 27px;
+  }
+  .game-interface .topbar-actions .connection-pill {
+    font-size: 10px;
+    padding: 8px;
+  }
+  .game-interface .page-content {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+  .game-interface .scene-card {
+    width: calc(100% + 32px);
+    margin-left: -16px;
+    margin-right: -16px;
+  }
+  .game-interface .landing-intro {
+    padding-left: 21px;
+    padding-right: 21px;
+  }
+  .game-interface .landing-intro h2 {
+    font-size: 59px;
+  }
+  .game-interface .page-heading h1 {
+    font-size: 44px;
+  }
+  .game-interface .landing-intro p {
+    font-size: 13px;
+    max-width: 270px;
+  }
+  .game-interface .enter-button {
+    min-width: 226px;
+    font-size: 21px;
+  }
+  .game-interface .gesture-button span {
+    font-size: 15px;
+  }
+  .game-interface .panel-tabs {
+    gap: 25px;
+  }
+  .game-interface .rail-button span {
+    font-size: 10px;
+  }
+  .game-interface .rail nav {
+    gap: 8px;
+  }
+  .game-interface .rail-bottom {
+    margin-left: 8px;
+    gap: 8px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .game-interface *,
+  .game-interface *:before,
+  .game-interface *:after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+/* The embedded creator uses absolute panels; give its 100% root a real host height. */
+.game-interface .creator-content {
+  height: min(70vh, 700px);
+  min-height: 500px;
+  position: relative;
+  width: 100%;
+}
+@media (max-width: 700px) {
+  .game-interface .creator-content {
+    height: 75dvh;
+    min-height: 480px;
+  }
+}
+.game-interface.page-home .page-heading h1 {
+  display: block;
+  font-family: var(--game-display);
+  font-size: 24px;
+  line-height: 1.15;
+  letter-spacing: 1.2px;
+  color: #c3d2c4;
+  font-weight: 500;
+  text-shadow: 0 2px 15px #0008;
+}
+@media (max-width: 700px) {
+  .game-interface.page-home .page-heading h1 {
+    display: block;
+    font-size: 24px;
+    line-height: 1.15;
+    letter-spacing: 1px;
+    margin-bottom: 8px;
+  }
+  .game-interface.page-home .page-heading {
+    margin-bottom: 10px;
   }
 }

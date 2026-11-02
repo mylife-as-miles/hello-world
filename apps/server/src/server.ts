@@ -136,7 +136,7 @@ export async function createWorldServer(
         if (!twitch.oauthConfigured)
           return json(res, 503, {
             error:
-              "Configure TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET and TWITCH_REDIRECT_URI on the server first",
+              "Configure TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET and a registered TWITCH_REDIRECT_URI ending /api/twitch/callback (HTTPS, or HTTP localhost) on the server first",
           });
         for (const [state, value] of states)
           if (Date.now() - value.createdAt > 10 * 60_000) states.delete(state);

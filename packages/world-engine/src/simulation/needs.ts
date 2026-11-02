@@ -8,7 +8,7 @@ import type { WorldClock } from '../world/time';
 import { clamp, type Agent, type Needs } from './state';
 
 /** Points lost per simulation second (1 s = 1 game minute). */
-export const BASE_DECAY: Readonly<Needs> = { energy: 0.045, social: 0.08, fun: 0.07 };
+export const BASE_DECAY: Readonly<Needs> = { energy: 0.045, social: 0.09, fun: 0.085 };
 
 export const clampNeed = (v: number) => clamp(v, 0, 100);
 

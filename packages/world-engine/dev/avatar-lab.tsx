@@ -64,6 +64,11 @@ function layout(): { items: Item[]; cam: [number, number, number]; target: [numb
     const items = EXPR.map((e, i) => ({ a: A({ ...CAST[i % CAST.length]!, baseModelId: 'townie-classic', body: { height: 0.5, build: 0.5 }, accessories: [] }), x: (i - 4) * 0.36, expr: e, base: 'idle' as AnimationFamily }));
     return { items, cam: [0, 1.5, 2.6], target: [0, 1.45, 0], fov: 30 };
   }
+  if (view === 'mouth') {
+    const ex: ExpressionName[] = ['neutral', 'happy', 'aa', 'oh', 'angry'];
+    const items = ex.map((e, i) => ({ a: A({ ...CAST[i]!, baseModelId: 'townie-classic', body: { height: 0.5, build: 0.5 }, accessories: [] }), x: (i - 2) * 0.3, expr: e, base: 'idle' as AnimationFamily }));
+    return { items, cam: [0, 1.48, 1.55], target: [0, 1.45, 0], fov: 30 };
+  }
   if (view === 'hair') {
     const items = HAIR_STYLES.map((h, i) => ({ a: A({ hairStyle: h.id, hairColor: ['#3b2417', '#d9a441', '#c2412d', '#1c1410', '#6b4226', '#e36aa6'][i % 6]!, outfit: { color: '#4aa3df' } }), x: (i - 5.5) * 0.45, ry: i % 2 ? 0.6 : -0.6 }));
     return { items, cam: [0, 1.45, 4.6], target: [0, 1.35, 0], fov: 32 };

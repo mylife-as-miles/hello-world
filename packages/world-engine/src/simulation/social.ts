@@ -12,7 +12,7 @@ import { atPlace, homeFor, nearestPoi, spotAround } from './places';
 import { addMemory, adjustFriendship, friendshipOf, getRel, pairKey, reactsPositively } from './relationships';
 import { cleanText, dist, emit, schedule, type Agent, type Encounter, type EncounterKind, type PlannedLine, type World } from './state';
 
-const CHAT_EFFECTS = { energy: 0, social: 1.6, fun: 0.3 };
+const CHAT_EFFECTS = { energy: 0, social: 1.1, fun: 0.15 };
 
 export function socialAvailable(w: World, a: Agent): boolean {
   if (a.leaving || w.simTime < a.socialReadyAt) return false;
@@ -180,7 +180,7 @@ export function directSocial(w: World): void {
     for (let j = i + 1; j < list.length; j++) {
       const b = list[j]!;
       const d = dist(a, b);
-      if (d > 7) continue;
+      if (d > 7 || (a.group && a.group === b.group)) continue;
       if (seated(a) && seated(b) && d > 2.6) continue;
       const f = friendshipOf(w, a.id, b.id);
       const seeking = a.action?.seekingId === b.id || b.action?.seekingId === a.id;

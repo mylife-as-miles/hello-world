@@ -62,79 +62,82 @@ const OPENERS: Record<WorldClock['period'], Bank> = {
   ],
 };
 const OPENERS_BY_TRAIT: Partial<Record<string, Bank>> = {
-  grumpy: ['Oh. It is you, {name}.', '{name}. Do not make it weird.', 'Hmph. Hello, {name}.', '{name}. I suppose you want to chat.'],
-  shy: ['Oh! Um, hi {name}...', 'H-hey {name}. Nice to see you.', 'Hi {name}... I was hoping I would see you.'],
-  playful: ['{name}! Tag, you are it!', 'Psst, {name}. Wanna hear a secret? Kidding. Hi!', '{name}! Bet you cannot guess what I just saw.'],
-  chaotic: ['{name}! I have SO much to tell you. Most of it is true.', '{name}!! Did you see that pigeon? Iconic.', '{name}, quick: cats or capes? Wrong. Both.'],
-  romantic: ['{name}, you are glowing today!', 'Hello, {name}. This place suits you.'],
+  grumpy: ['Oh. It’s you, {name}.', '{name}. Don’t make it weird.', 'Hmph. Hello, {name}.', '{name}. I suppose you want to chat.'],
+  shy: ['Oh! Um, hi {name}...', 'H-hey {name}. Nice to see you.', 'Hi {name}... I was hoping I’d see you.'],
+  playful: ['{name}! Tag, you’re it!', 'Psst, {name}. Wanna hear a secret? Kidding. Hi!', '{name}! Bet you can’t guess what I just saw.'],
+  chaotic: ['{name}! I’ve SO much to tell you. Most of it’s true.', '{name}!! Did you see that pigeon? Iconic.', '{name}, quick: cats or capes? Wrong. Both.'],
+  romantic: ['{name}, you’re glowing today!', 'Hello, {name}. This place suits you.'],
   bookish: ['Hello, {name}. I just finished a chapter, perfect timing.', '{name}! I was reading about you. Kidding. Hi!'],
   foodie: ['{name}! Have you tried the new pastries yet?', '{name}, I smell waffles. Do you smell waffles?'],
   competitive: ['{name}. Rematch at the arcade later?', '{name}! Ready to lose at Star Blaster again?'],
-  energetic: ['{name}! Race you to the fountain!', '{name}! Is today not amazing?!'],
+  energetic: ['{name}! Race you to the fountain!', '{name}! Isn’t today amazing?!'],
   kind: ['{name}! I hope your day has been lovely.', 'Hi {name}! You look like you could use a friend.'],
   curious: ['{name}! Did you know the fountain hums at night?', '{name}, ever wonder where the portal goes?'],
   friendly: ['{name}! Always great to see you!', 'Hey hey, {name}!'],
   creative: ['{name}! I just had the best idea for a dance move.', '{name}, the light here is gorgeous today.'],
-  lazy: ['Oh hey {name}. Do not mind me, just conserving energy.', '{name}... is it nap o\'clock yet?'],
+  lazy: ['Oh hey {name}. Don’t mind me, just conserving energy.', '{name}... is it nap o’clock yet?'],
   'night-owl': ['The night is young, {name}!', '{name}! Finally, someone who gets it. Night is the best.'],
 };
 
 const INTROS: Bank = [
-  'Hi! I am {me}. I do not think we have met!', 'Hello there! {me}, nice to meet you.', 'Hey, are you new around here? I am {me}!',
-  'Hi! {me}. I live over at {home}.', 'Oh, a new face! I am {me}.',
+  'Hi! I’m {me}. I don’t think we have met!', 'Hello there! {me}, nice to meet you.', 'Hey, are you new around here? I’m {me}!',
+  'Hi! {me}. I live over at {home}.', 'Oh, a new face! I’m {me}.',
 ];
 const INTROS_BY_TRAIT: Partial<Record<string, Bank>> = {
-  grumpy: ['...I am {me}. You are new.', 'Name is {me}. Do not wear it out.'],
-  shy: ['Um, hi... I am {me}. Nice to meet you.'],
-  playful: ['Hi hi! I am {me}, local legend. Allegedly.'],
+  grumpy: ['...I’m {me}. You’re new.', 'Name’s {me}. Don’t wear it out.'],
+  shy: ['Um, hi... I’m {me}. Nice to meet you.'],
+  playful: ['Hi hi! I’m {me}, local legend. Allegedly.'],
 };
-const INTRO_REPLIES_POS: Bank = [
-  '{name}! Lovely to meet you. I am {me}.', 'Hi {name}! I am {me}. We are going to be friends, I can tell.',
-  'Oh hey! {me}. Welcome to my favorite-neighbors list, {name}.', 'Nice to meet you, {name}! I am {me}.',
+const VISITOR_INTROS: Bank = [
+  'Hi! I came through the portal with the {channel} raid!', 'Hello! Visiting from {channel}. This town is adorable!', 'Hey! Raid party member, reporting for fun!',
 ];
-const INTRO_REPLIES_NEG: Bank = ['Mm. {me}. Hi, I guess.', '{me}. Nice to... yeah.', 'I am {me}. I am also busy.'];
+const INTRO_REPLIES_POS: Bank = [
+  '{name}! Lovely to meet you. I’m {me}.', 'Hi {name}! I’m {me}. We’re going to be friends, I can tell.',
+  'Oh hey! {me}. Welcome to my favorite-neighbors list, {name}.', 'Nice to meet you, {name}! I’m {me}.',
+];
+const INTRO_REPLIES_NEG: Bank = ['Mm. {me}. Hi, I guess.', '{me}. Nice to... yeah.', 'I’m {me}. I’m also busy.'];
 
 const RESPONSES_POS: Bank = [
-  'Hey {name}! Great to see you!', 'Oh, hi {name}! You just made my day.', '{name}! I was hoping I would run into you.',
+  'Hey {name}! Great to see you!', 'Oh, hi {name}! You just made my day.', '{name}! I was hoping I’d run into you.',
   'Ha, hi {name}! Always a pleasure.', 'Hiya {name}! Pull up a cobblestone.', 'Hey you! How is it going, {name}?',
 ];
 const RESPONSES_POS_BY_TRAIT: Partial<Record<string, Bank>> = {
   grumpy: ['Hmph. Fine. Hi, {name}.', '...Okay, that was nice. Hi.', 'You again. ...Good.'],
-  shy: ['Oh! H-hi {name}. That is really nice of you.', 'Hi {name}... you are kind of my favorite.'],
+  shy: ['Oh! H-hi {name}. That’s really nice of you.', 'Hi {name}... you’re kind of my favorite.'],
   playful: ['{name}!! *finger guns*', 'Tag back! Ha, hi {name}!', '{name}! Took you long enough!'],
   chaotic: ['{name}! I was JUST thinking about you. And soup.', 'AAAH {name}! Hi!'],
-  kind: ['{name}! It is so good to see you.', 'Hi {name}! Want half of my cookie?'],
+  kind: ['{name}! It’s so good to see you.', 'Hi {name}! Want half of my cookie?'],
   'night-owl': ['Hey {name}! The fun starts after dark, you know.'],
 };
 const RESPONSES_NEG: Bank = [
-  'Not now, {name}.', 'Ugh, I am not in the mood, {name}.', 'Can a person not sulk in peace?', 'Mm. Sure. Whatever.',
-  '{name}, I have had a day. Later?',
+  'Not now, {name}.', 'Ugh, I’m not in the mood, {name}.', 'Can’t a person sulk in peace?', 'Mm. Sure. Whatever.',
+  '{name}, I’ve had a day. Later?',
 ];
-const RESPONSES_TIRED: Bank = ['Sorry {name}, I am running on fumes.', '*yawns* Oh, hi {name}...', 'Five more minutes, {name}...'];
+const RESPONSES_TIRED: Bank = ['Sorry {name}, I’m running on fumes.', '*yawns* Oh, hi {name}...', 'Five more minutes, {name}...'];
 
 interface TopicDef { id: string; label: string; lines: Bank; replies: Bank; joke?: boolean }
 
 const WEATHER_TOPICS: Record<Weather, TopicDef> = {
   rain: { id: 'rain', label: 'the rain', lines: ['This rain! My socks are soup.', 'Rain means cocoa weather. No arguments.', 'I love how the plaza sparkles in the rain.'], replies: ['Cocoa sounds perfect.', 'Puddle-jumping later?', 'Ha! Same, honestly.'] },
-  snow: { id: 'snow', label: 'the snow', lines: ['Snowball fight at the plaza later?', 'Everything looks like frosting!', 'I caught a snowflake on my tongue. Tastes like winter.'], replies: ['You are on!', 'It is so pretty.', 'Brrr, but worth it.'] },
+  snow: { id: 'snow', label: 'the snow', lines: ['Snowball fight at the plaza later?', 'Everything looks like frosting!', 'I caught a snowflake on my tongue. Tastes like winter.'], replies: ['You’re on!', 'It’s so pretty.', 'Brrr, but worth it.'] },
   sunset: { id: 'sunset', label: 'the sunset', lines: ['Look at that sky. Pure orange sherbet.', 'Sunsets here hit different.', 'The fountain turns gold at sunset, did you notice?'], replies: ['Wow. Yeah.', 'I could watch this forever.', 'Golden hour, golden friends.'] },
-  sunny: { id: 'sunny', label: 'the sunshine', lines: ['This sunshine is unreal.', 'Not a single cloud today!', 'Perfect weather for doing absolutely nothing.'], replies: ['Peak vibes.', 'I am soaking it all in.', 'Agreed. Ten out of ten.'] },
+  sunny: { id: 'sunny', label: 'the sunshine', lines: ['This sunshine is unreal.', 'Not a single cloud today!', 'Perfect weather for doing absolutely nothing.'], replies: ['Peak vibes.', 'I’m soaking it all in.', 'Agreed. Ten out of ten.'] },
 };
 const TIME_TOPICS: Record<WorldClock['period'], TopicDef> = {
-  morning: { id: 'morning', label: 'mornings', lines: ['Mornings are better with company.', 'I have already had two lattes. Maybe three.', 'The birds were singing my song this morning.'], replies: ['Truly.', 'Three? Respect.', 'Which song?!'] },
+  morning: { id: 'morning', label: 'mornings', lines: ['Mornings are better with company.', 'I’ve already had two lattes. Maybe three.', 'The birds were singing my song this morning.'], replies: ['Truly.', 'Three? Respect.', 'Which song?!'] },
   afternoon: { id: 'afternoon', label: 'the afternoon', lines: ['Afternoons were made for snacks.', 'Is it just me, or is today flying by?'], replies: ['Snacks are a lifestyle.', 'Time flies in this town.'] },
   evening: { id: 'evening', label: 'the evening', lines: ['The lamps make everything feel cozy.', 'Evenings here feel like a movie.'], replies: ['So cozy.', 'Roll credits!'] },
-  night: { id: 'night', label: 'the stars', lines: ['Have you seen how bright the stars are?', 'The town sounds different at night. Softer.', 'I think the moon is following me.'], replies: ['It is my favorite time.', 'Let us stay out a little longer.', 'It does that.'] },
+  night: { id: 'night', label: 'the stars', lines: ['Have you seen how bright the stars are?', 'The town sounds different at night. Softer.', 'I think the moon is following me.'], replies: ['It’s my favorite time.', 'Let’s stay out a little longer.', 'It does that.'] },
 };
 const PLACE_TOPICS: Partial<Record<PoiDef['kind'], TopicDef>> = {
-  cafe: { id: 'cafe', label: 'pastries', lines: ['The {drink} here is dangerously good.', 'I have rated every pastry here. Cinnamon bun: eleven out of ten.'], replies: ['Do not let me order another one.', 'Strong agree.'] },
+  cafe: { id: 'cafe', label: 'pastries', lines: ['The {drink} here is dangerously good.', 'I’ve rated every pastry here. Cinnamon bun: eleven out of ten.'], replies: ['Don’t let me order another one.', 'Strong agree.'] },
   'cafe-seat': undefined,
-  arcade: { id: 'arcade', label: 'high scores', lines: ['I am one level away from the high score.', 'The claw machine owes me three plushies.'], replies: ['You have got this!', 'That machine is rigged. I am sure of it.'] },
+  arcade: { id: 'arcade', label: 'high scores', lines: ['I’m one level away from the high score.', 'The claw machine owes me three plushies.'], replies: ['You have got this!', 'That machine is rigged. I’m sure of it.'] },
   park: { id: 'park', label: 'the ducks', lines: ['The ducks in the pond have opinions today.', 'Willow Park is the best place to think.'], replies: ['They always do.', 'It really is.'] },
-  stage: { id: 'stage', label: 'the music', lines: ['That beat is stuck in my head.', 'Who is performing tonight?'], replies: ['Same! Bop bop.', 'Hopefully us!'] },
-  garden: { id: 'garden', label: 'the garden', lines: ['The tomatoes are finally coming in!', 'I planted sunflowers. They are taller than me now.'], replies: ['Save me one!', 'Garden goals.'] },
-  fountain: { id: 'fountain', label: 'wishes', lines: ['I made a wish at the fountain. Cannot tell you what.', 'Every coin in that fountain is a tiny dream.'], replies: ['Ooh, mysterious.', 'That is beautiful.'] },
-  plaza: { id: 'plaza', label: 'town gossip', lines: ['The plaza is buzzing today.', 'I love people-watching here.'], replies: ['Best spot in town.', 'Same, it is like free TV.'] },
+  stage: { id: 'stage', label: 'the music', lines: ['That beat is stuck in my head.', 'Who’s performing tonight?'], replies: ['Same! Bop bop.', 'Hopefully us!'] },
+  garden: { id: 'garden', label: 'the garden', lines: ['The tomatoes are finally coming in!', 'I planted sunflowers. They’re taller than me now.'], replies: ['Save me one!', 'Garden goals.'] },
+  fountain: { id: 'fountain', label: 'wishes', lines: ['I made a wish at the fountain. Can’t tell you what.', 'Every coin in that fountain is a tiny dream.'], replies: ['Ooh, mysterious.', 'That’s beautiful.'] },
+  plaza: { id: 'plaza', label: 'town gossip', lines: ['The plaza is buzzing today.', 'I love people-watching here.'], replies: ['Best spot in town.', 'Same, it’s like free TV.'] },
   portal: { id: 'portal', label: 'the portal', lines: ['I swear the portal winked at me.', 'Every time it glows, someone new shows up.'], replies: ['Spooky.', 'I love meeting new people.'] },
   playground: { id: 'playground', label: 'the swings', lines: ['The swings are criminally underrated.', 'I went down the slide twice. No regrets.'], replies: ['Swing gang!', 'Only twice?'] },
   bench: { id: 'bench', label: 'benches', lines: ['This bench has seen things.', 'Best seat in the house, honestly.'], replies: ['Ha! True.', 'Front row seats.'] },
@@ -142,29 +145,29 @@ const PLACE_TOPICS: Partial<Record<PoiDef['kind'], TopicDef>> = {
 };
 const NEED_TOPICS = {
   energy: { id: 'tired', label: 'naps', lines: ['I could nap for a week.', 'Is it too early for a nap? Asking for me.'], replies: ['Bench nap. Do it.', 'Never too early.'] } as TopicDef,
-  fun: { id: 'bored', label: 'boredom', lines: ['I need something fun to do. Ideas?', 'I am so bored I counted the cobblestones. 812.'], replies: ['Arcade. Now.', 'Dance stage? Dance stage.'], joke: true } as TopicDef,
-  social: { id: 'lonely', label: 'missing people', lines: ['Honestly, I missed talking to people.', 'It is nice to just chat, you know?'], replies: ['Me too. Let us do this more.', 'Anytime.'] } as TopicDef,
+  fun: { id: 'bored', label: 'boredom', lines: ['I need something fun to do. Ideas?', 'I’m so bored I counted the cobblestones. 812.'], replies: ['Arcade. Now.', 'Dance stage? Dance stage.'], joke: true } as TopicDef,
+  social: { id: 'lonely', label: 'missing people', lines: ['Honestly, I missed talking to people.', 'It’s nice to just chat, you know?'], replies: ['Me too. Let’s do this more.', 'Anytime.'] } as TopicDef,
 };
 const TRAIT_TOPICS: Partial<Record<string, TopicDef>> = {
-  bookish: { id: 'books', label: 'books', lines: ['I am reading about a lighthouse keeper. Riveting stuff.', 'Books are just snacks for your brain.'], replies: ['Lend it to me after?', 'Very wise.'] },
-  foodie: { id: 'food', label: 'food', lines: ['I have decided pancakes count as a personality.', 'The secret ingredient at the café is love. And butter.'], replies: ['Valid.', 'Mostly butter.'], joke: true },
-  competitive: { id: 'rivalry', label: 'the arcade rivalry', lines: ['Bet I can beat your arcade score.', 'I have been practicing my high-score face.'], replies: ['Bring it on!', 'We will see about that.'] },
-  creative: { id: 'art', label: 'dance moves', lines: ['I am working on a new dance move. It is called The Fountain.', 'I want to paint the plaza at sunset.'], replies: ['Show me!', 'That would be gorgeous.'] },
-  playful: { id: 'games', label: 'games', lines: ['Let us start a conga line. Right now.', 'I hid a rubber duck somewhere in town. Good luck.'], replies: ['Count me in!', 'Oh no. Oh yes.'], joke: true },
+  bookish: { id: 'books', label: 'books', lines: ['I’m reading about a lighthouse keeper. Riveting stuff.', 'Books are just snacks for your brain.'], replies: ['Lend it to me after?', 'Very wise.'] },
+  foodie: { id: 'food', label: 'food', lines: ['I’ve decided pancakes count as a personality.', 'The secret ingredient at the café is love. And butter.'], replies: ['Valid.', 'Mostly butter.'], joke: true },
+  competitive: { id: 'rivalry', label: 'the arcade rivalry', lines: ['Bet I can beat your arcade score.', 'I’ve been practicing my high-score face.'], replies: ['Bring it on!', 'We’ll see about that.'] },
+  creative: { id: 'art', label: 'dance moves', lines: ['I’m working on a new dance move. It’s called The Fountain.', 'I want to paint the plaza at sunset.'], replies: ['Show me!', 'That would be gorgeous.'] },
+  playful: { id: 'games', label: 'games', lines: ['Let’s start a conga line. Right now.', 'I hid a rubber duck somewhere in town. Good luck.'], replies: ['Count me in!', 'Oh no. Oh yes.'], joke: true },
   curious: { id: 'mysteries', label: 'town mysteries', lines: ['Ever notice the portal glows brighter when people arrive?', 'I mapped every shortcut in town. There are four.'], replies: ['Now that you mention it...', 'Show me sometime!'] },
-  'night-owl': { id: 'nightlife', label: 'staying up late', lines: ['Night is when this town really wakes up.', 'Sleep is a suggestion.'], replies: ['Night owls unite.', 'Legally I cannot agree. But yes.'], joke: true },
-  kind: { id: 'kindness', label: 'cookies', lines: ['If you ever need anything, just shout.', 'I left cookies on the bench for whoever needs one.'], replies: ['You are the best.', 'That is so sweet.'] },
+  'night-owl': { id: 'nightlife', label: 'staying up late', lines: ['Night is when this town really wakes up.', 'Sleep is a suggestion.'], replies: ['Night owls unite.', 'Legally, I can’t agree. But yes.'], joke: true },
+  kind: { id: 'kindness', label: 'cookies', lines: ['If you ever need anything, just shout.', 'I left cookies on the bench for whoever needs one.'], replies: ['You’re the best.', 'That’s so sweet.'] },
   chaotic: { id: 'chaos', label: 'dancing ducks', lines: ['I tried to teach the ducks to dance. Results: mixed.', 'What if the fountain was soup? Just asking.'], replies: ['...Mixed how?', 'Please do not.'], joke: true },
   romantic: { id: 'romance', label: 'the stars', lines: ['Do you think the stars are jealous of the lamps?', 'Love is in the air. Also pollen.'], replies: ['Smooth.', 'Achoo! I mean, aww.'], joke: true },
-  energetic: { id: 'energy', label: 'jogging', lines: ['I have done three laps of the plaza already!', 'Want to go for a jog? Or a sprint? Or both?'], replies: ['How?!', 'Maybe after a nap.'] },
+  energetic: { id: 'energy', label: 'jogging', lines: ['I’ve done three laps of the plaza already!', 'Want to go for a jog? Or a sprint? Or both?'], replies: ['How?!', 'Maybe after a nap.'] },
   lazy: { id: 'lazy', label: 'comfy benches', lines: ['I found the comfiest bench in town. Not telling.', 'Walking is just falling, but slower.'], replies: ['Tell meee.', 'Deep.'], joke: true },
-  grumpy: { id: 'grumbles', label: 'the pigeons', lines: ['The pigeons are plotting something.', 'Too much noise today. Too much... cheer.'], replies: ['You love it secretly.', 'They are definitely plotting.'], joke: true },
-  shy: { id: 'poems', label: 'poetry', lines: ['I wrote a little poem today. Maybe I will share it someday.', 'Crowds are a lot. This is nice, though.'], replies: ['I would love to hear it.', 'This is nice.'] },
-  friendly: { id: 'neighbors', label: 'the neighbors', lines: ['I think I have met everyone in town now. Twice.', 'This neighborhood has the best people.'], replies: ['You are the town welcome committee.', 'Including you!'] },
+  grumpy: { id: 'grumbles', label: 'the pigeons', lines: ['The pigeons are plotting something.', 'Too much noise today. Too much... cheer.'], replies: ['You love it secretly.', 'They’re definitely plotting.'], joke: true },
+  shy: { id: 'poems', label: 'poetry', lines: ['I wrote a little poem today. Maybe I’ll share it someday.', 'Crowds are a lot. This is nice, though.'], replies: ['I’d love to hear it.', 'This is nice.'] },
+  friendly: { id: 'neighbors', label: 'the neighbors', lines: ['I think I’ve met everyone in town now. Twice.', 'This neighborhood has the best people.'], replies: ['You’re the town welcome committee.', 'Including you!'] },
 };
 const RAID_TOPIC: TopicDef = { id: 'raid', label: 'the raid', lines: ['Did you see the raiders come through the portal? So many new faces!', 'That raid from {channel} was amazing!'], replies: ['Best day ever.', 'I already made three new friends.'] };
-const CONFETTI_TOPIC: TopicDef = { id: 'confetti', label: 'the confetti', lines: ['Who keeps launching confetti? I love them.', 'There is confetti in my hair. Worth it.'], replies: ['Confetti is a lifestyle.', 'Keep it!'], joke: true };
-const NEWCOMER_TOPIC: TopicDef = { id: 'newcomer', label: 'the new neighbor', lines: ['Have you met {newcomer} yet? They just moved in.', '{newcomer} just arrived through the portal!'], replies: ['Not yet! Let us say hi.', 'The more the merrier.'] };
+const CONFETTI_TOPIC: TopicDef = { id: 'confetti', label: 'the confetti', lines: ['Who keeps launching confetti? I love them.', 'There’s confetti in my hair. Worth it.'], replies: ['Confetti is a lifestyle.', 'Keep it!'], joke: true };
+const NEWCOMER_TOPIC: TopicDef = { id: 'newcomer', label: 'the new neighbor', lines: ['Have you met {newcomer} yet? They just moved in.', '{newcomer} just arrived through the portal!'], replies: ['Not yet! Let’s say hi.', 'The more the merrier.'] };
 const DANCER_TOPIC: TopicDef = { id: 'dancer', label: 'the dance stage', lines: ['{dancer} is tearing up the stage!', 'Have you seen {dancer} dance? Wow.'], replies: ['Those moves!', 'We should join!'] };
 const MEMORY_TAILS: Bank = ['Good times.', 'Still makes me smile.', 'Classic us.', 'Never forget.', 'We should do that again.'];
 const MEMORY_REPLIES: Bank = ['How could I forget!', 'Ha! Legendary.', 'Best day.', 'You still owe me for that one.'];
@@ -182,14 +185,14 @@ const COMPLIMENTS: Bank = [
   'Is it just me, or does {name} have the best {thing} in town?', '{name}! Your {thing} is a whole mood.',
 ];
 const COMPLIMENTS_BY_TRAIT: Partial<Record<string, Bank>> = {
-  grumpy: ['{name}. Your {thing}... is acceptable. That is high praise.'],
+  grumpy: ['{name}. Your {thing}... is acceptable. That’s high praise.'],
   romantic: ['{name}, your {thing} could stop traffic. If we had traffic.', '{name}, you and that {thing}? Poetry.'],
   shy: ['Um, {name}? I really like your {thing}.'],
-  chaotic: ['{name}, if your {thing} were a sandwich, I would eat it. Compliment!'],
+  chaotic: ['{name}, if your {thing} were a sandwich, I’d eat it. Compliment!'],
 };
-const COMPLIMENT_REPLIES_POS: Bank = ['Aww, thank you, {name}!', 'Stop it, you are making me blush!', 'Thank you! I picked it out myself.', '{name}, you are too sweet.'];
+const COMPLIMENT_REPLIES_POS: Bank = ['Aww, thank you, {name}!', 'Stop it, you’re making me blush!', 'Thank you! I picked it out myself.', '{name}, you’re too sweet.'];
 const COMPLIMENT_REPLIES_POS_BY_TRAIT: Partial<Record<string, Bank>> = {
-  grumpy: ['...Thanks. I guess.', 'Hmph. Well. You are not wrong.'],
+  grumpy: ['...Thanks. I guess.', 'Hmph. Well. You’re not wrong.'],
   shy: ['O-oh! Thank you, {name}...'],
   playful: ['I know, right?! Thanks, {name}!'],
 };
@@ -198,41 +201,43 @@ const COMPLIMENT_REPLIES_NEG: Bank = ['Uh-huh. Sure.', 'Flattery will not work o
 const GIFT_LINES: Bank = ['I brought you {item}, {name}!', '{name}! I saw {item} and thought of you.', 'A little something for you, {name}: {item}!'];
 const THANKS_POS: Bank = ['{Item}? For me? {name}, you should not have!', 'Aww, {name}! I love it!', 'You remembered! Thank you, {name}!', 'This is perfect. Thank you, {name}!'];
 const THANKS_BY_TRAIT: Partial<Record<string, Bank>> = {
-  grumpy: ['Hmph. ...I will treasure it. Do not tell anyone.', 'For me? ...Thanks, {name}.'],
+  grumpy: ['Hmph. ...I’ll treasure it. Don’t tell anyone.', 'For me? ...Thanks, {name}.'],
   shy: ['Oh! Th-thank you so much, {name}...'],
   foodie: ['{Item}! You know me so well, {name}.'],
-  chaotic: ['{Item}?! I am going to name it Gerald. Thank you, {name}!'],
+  chaotic: ['{Item}?! I’m going to name it Gerald. Thank you, {name}!'],
 };
 const THANKS_WOKEN: Bank = ['Wha-? Oh! {Item}! Thank you, {name}!', '*yawn* Is that for me? Aww, {name}.'];
 
-const BEFRIEND_ASK: Bank = ['{name}, we are friends now, right? Official?', 'Friends? Friends!', 'I think you are officially my friend, {name}.'];
+const BEFRIEND_ASK: Bank = ['{name}, we’re friends now, right? Official?', 'Friends? Friends!', 'I think you’re officially my friend, {name}.'];
 const BEFRIEND_YES: Bank = ['Officially official!', 'Absolutely, {name}!', 'Took you long enough! Yes!', 'Best friends! Pinky promise, {name}.'];
-const BEFRIEND_YES_BY_TRAIT: Partial<Record<string, Bank>> = { grumpy: ['Fine. Friends. Do not make it weird.'], shy: ['R-really? Yes! Friends, {name}.'] };
-const BEFRIEND_NO: Bank = ['Let us hang out a bit more first, {name}!', 'Maybe! Ask me again after cocoa.', 'Slow down, {name}. We just met!'];
+const BEFRIEND_YES_BY_TRAIT: Partial<Record<string, Bank>> = { grumpy: ['Fine. Friends. Don’t make it weird.'], shy: ['R-really? Yes! Friends, {name}.'] };
+const BEFRIEND_NO: Bank = ['Let’s hang out a bit more first, {name}!', 'Maybe! Ask me again after cocoa.', 'Slow down, {name}. We just met!'];
 
 const WELCOMES: Bank = [
   'Welcome to the neighborhood, {name}!', 'Hey {name}! Welcome to town. The café is that way!', 'A new face! Welcome, {name}!',
-  'Welcome, {name}! You picked a great day to move in.', 'Hi {name}! Welcome! You are going to love it here.',
+  'Welcome, {name}! You picked a great day to move in.', 'Hi {name}! Welcome! You’re going to love it here.',
 ];
 const WELCOMES_BY_TRAIT: Partial<Record<string, Bank>> = {
   grumpy: ['Another one. ...Welcome, {name}.', 'Hmph. Welcome, {name}. Wipe your feet.'],
   foodie: ['Welcome, {name}! First stop: Sunbeam Café. Trust me.'],
-  playful: ['Welcome, {name}! You are it! Kidding. Welcome!'],
+  playful: ['Welcome, {name}! You’re it! Kidding. Welcome!'],
 };
-const NEWCOMER_HELLO: Bank = ['Hi everyone! I am {me}!', 'Hello, neighborhood!', 'Wow, this place is even cuter in person!', 'Hi! Just moved in. I am {me}!'];
-const REJOIN_HELLO: Bank = ['I am back, everyone!', 'Hello again, neighborhood!', 'Did you miss me?'];
+const NEWCOMER_HELLO: Bank = ['Hi everyone! I’m {me}!', 'Hello, neighborhood!', 'Wow, this place is even cuter in person!', 'Hi! Just moved in. I’m {me}!'];
+const REJOIN_HELLO: Bank = ['I’m back, everyone!', 'Hello again, neighborhood!', 'Did you miss me?'];
+const NEW_LOOK: Bank = ['New look, who dis?', 'Fresh fit! What do you think?', 'Feeling brand new today!', 'Do you like it? I just changed my whole look!', 'Mirror, mirror... nailed it.'];
+const LOOK_COMPLIMENTS: Bank = ['Ooh, {name}! Love the new look!', '{name}?! Barely recognized you. Gorgeous!', 'Okay {name}, that style is a whole upgrade.', 'New look suits you, {name}!'];
 const SNUBS: Bank = ['Hmph.', 'Not now.', '*pretends not to see*', 'Mm.'];
 
 const CHAT_REPLIES: Record<string, Bank> = {
   greeting: ['Hey {name}! Welcome back!', 'Hi {name}! Good to see you!', 'Oh hey, {name}!', 'Hiya {name}!'],
   question: ['Good question, {name}. Ask me again after cocoa.', 'Hmm, let me think about that one, {name}.', 'I asked the fountain. It said maybe.'],
   love: ['Aww, love you too, {name}!', 'Right back at you, {name}!'],
-  laugh: ['Haha, {name}, you are hilarious.', 'Ha! Good one, {name}.'],
-  hype: ['Let us gooo!', 'The hype is real, {name}!', 'Pog indeed!'],
+  laugh: ['Haha, {name}, you’re hilarious.', 'Ha! Good one, {name}.'],
+  hype: ['Let’s gooo!', 'The hype is real, {name}!', 'Pog indeed!'],
   dance: ['Did someone say dance?!', 'To the stage!'],
-  food: ['Sunbeam Café has your back, {name}.', 'Now I am hungry. Thanks, {name}.'],
+  food: ['Sunbeam Café has your back, {name}.', 'Now I’m hungry. Thanks, {name}.'],
   bye: ['Bye {name}! Come back soon!', 'Night, {name}! See you tomorrow.'],
-  generic: ['Ha, true!', 'You said it, {name}!', 'Love that energy, {name}.', 'Agreed!', 'Wise words, {name}.', 'Could not have said it better, {name}.'],
+  generic: ['Ha, true!', 'You said it, {name}!', 'Love that energy, {name}.', 'Agreed!', 'Wise words, {name}.', 'Couldn’t have said it better, {name}.'],
   grumpy: ['Hmph. If you say so, {name}.', 'Sure, {name}. Sure.'],
   negative: ['Not now, {name}.', 'Mm.', 'Can we not?'],
 };
@@ -249,19 +254,19 @@ const CHAT_PATTERNS: Array<[RegExp, string]> = [
 
 const WEATHER_LINES: Record<Weather, Bank> = {
   rain: ['Rain! Last one to the café buys cocoa!', 'Umbrellas up, everyone!', 'Ooh, rain! Puddle season!'],
-  snow: ['SNOW! Everybody outside!', 'Is that... snow? Snowball fight!', 'It is snowing! The plaza looks like a cake.'],
+  snow: ['SNOW! Everybody outside!', 'Is that... snow? Snowball fight!', 'It’s snowing! The plaza looks like a cake.'],
   sunset: ['Look at the sky! Everyone, look!', 'Golden hour! Quick, to the fountain!', 'That sunset is showing off.'],
-  sunny: ['The sun is back! Hello, sunshine!', 'Sunshine! Finally!', 'What a gorgeous day!'],
+  sunny: ['The sun’s back! Hello, sunshine!', 'Sunshine! Finally!', 'What a gorgeous day!'],
 };
 const RAID_ANNOUNCE: Bank = ['A raid! Everyone to the portal!', 'Raiders incoming! Get the confetti!', 'The portal is glowing! We have visitors!'];
 const RAID_ARRIVAL: Bank = ['Hello, neighborhood! {channel} sent us!', 'We come in peace! And with snacks!', 'Raid party has arrived!'];
 const RAID_WELCOME: Bank = ['Welcome, raiders! Make yourselves at home!', 'Welcome to HELLO WORLD, friends!', 'So many new faces! Welcome!'];
-const RAID_FAREWELL: Bank = ['Thanks for having us! Bye, neighborhood!', 'Best town ever. We will be back!', 'Raid party, out! See you soon!'];
-const CONFETTI_LINES: Bank = ['Confetti! Who is celebrating?', 'Woohoo! Party time!', 'There is confetti in my hair. Worth it.'];
-const DANCE_JOIN: Bank = ['Ooh, I love this song!', 'Dance party? Count me in!', 'Wait for me, {name}!', 'Move over, {name}, I have moves too!'];
+const RAID_FAREWELL: Bank = ['Thanks for having us! Bye, neighborhood!', 'Best town ever. We’ll be back!', 'Raid party, out! See you soon!'];
+const CONFETTI_LINES: Bank = ['Confetti! Who’s celebrating?', 'Woohoo! Party time!', 'There’s confetti in my hair. Worth it.'];
+const DANCE_JOIN: Bank = ['Ooh, I love this song!', 'Dance party? Count me in!', 'Wait for me, {name}!', 'Move over, {name}, I’ve moves too!'];
 const DANCE_GRUMBLE: Bank = ['Some of us are trying to relax here.', 'Must you dance right now, {name}?', 'Hmph. Show-off.'];
 const CELEBRATE_REPLIES: Bank = ['Woo! Go {name}!', 'Celebrate good times!', 'Yay, {name}!'];
-const BEFRIEND_MILESTONE: Bank = ['{name}, I think we are officially friends now!', 'Friends? Friends. Definitely friends, {name}.', 'You know what, {name}? You are one of my favorite people.'];
+const BEFRIEND_MILESTONE: Bank = ['{name}, I think we’re officially friends now!', 'Friends? Friends. Definitely friends, {name}.', 'You know what, {name}? You’re one of my favorite people.'];
 
 // ---------------------------------------------------------------------------
 // Builders
@@ -379,7 +384,7 @@ export const lines = {
     const period = worldClock(w.simTime).period;
     return fill(flavored(w, s, `open:${period}`, OPENERS[period], OPENERS_BY_TRAIT, 0.45), vars);
   },
-  intro(w: World, s: Agent, vars: Vars): string { return fill(flavored(w, s, 'intro', INTROS, INTROS_BY_TRAIT, 0.5), vars); },
+  intro(w: World, s: Agent, vars: Vars): string { return fill(s.visitor ? choose(w, 'intro-visitor', VISITOR_INTROS, s.id) : flavored(w, s, 'intro', INTROS, INTROS_BY_TRAIT, 0.5), vars); },
   introReply(w: World, s: Agent, positive: boolean, vars: Vars): string {
     return fill(choose(w, positive ? 'intro-pos' : 'intro-neg', positive ? INTRO_REPLIES_POS : INTRO_REPLIES_NEG, s.id), vars);
   },
@@ -406,6 +411,8 @@ export const lines = {
   newcomerHello(w: World, s: Agent, rejoin: boolean, vars: Vars): string {
     return fill(rejoin ? choose(w, 'rejoin', REJOIN_HELLO, s.id) : choose(w, 'newcomer', NEWCOMER_HELLO, s.id), vars);
   },
+  newLook(w: World, s: Agent, vars: Vars): string { return fill(choose(w, 'new-look', NEW_LOOK, s.id), vars); },
+  lookCompliment(w: World, s: Agent, vars: Vars): string { return fill(choose(w, 'look-compliment', LOOK_COMPLIMENTS, s.id), vars); },
   snub(w: World, s: Agent, vars: Vars): string { return fill(choose(w, 'snub', SNUBS, s.id), vars); },
   chatReply(w: World, s: Agent, heard: string, positive: boolean, vars: Vars): string {
     if (!positive) return fill(choose(w, 'chat-neg', CHAT_REPLIES.negative!, s.id), vars);

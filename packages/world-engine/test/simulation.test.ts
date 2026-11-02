@@ -166,6 +166,28 @@ describe('simulation: contract events', () => {
     expect(rel()).toBeTruthy();
   });
 
+  it('re-join with appearance + personality updates both, keeps needs/location/relationships and reacts visibly', () => {
+    const { rt, c, tick } = runtime();
+    tick(10);
+    const before = rt.getSnapshot();
+    const nova = before.residents.find(r => r.id === 'seed:nova')!;
+    const rels = before.relationships.filter(r => r.residentA === 'seed:nova' || r.residentB === 'seed:nova');
+    const appearance = { ...nova.appearance, hairStyle: 'braids', outfit: { ...nova.appearance.outfit, color: '#3fb39b' } };
+    rt.dispatch(ev('join', 'seed:nova', 'Nova Prime', { payload: { appearance, personality: ['shy', 'bookish'] } }, c.now()));
+    const after = rt.getSnapshot();
+    const n2 = after.residents.find(r => r.id === 'seed:nova')!;
+    expect(n2.appearance.hairStyle).toBe('braids');
+    expect(n2.appearance.outfit.color).toBe('#3fb39b');
+    expect(n2.personality).toEqual(['shy', 'bookish']);
+    expect(n2.displayName).toBe('Nova Prime');
+    expect(n2.needs).toEqual(nova.needs);
+    expect(Math.hypot(n2.location.x - nova.location.x, n2.location.z - nova.location.z)).toBeLessThan(1);
+    expect(n2.activity).toBe('admiring their new look');
+    for (const r of rels) expect(after.relationships).toContainEqual(r);
+    expect(after.eventHistory.some(e => e.source === 'simulation' && e.actorId === 'seed:nova' && e.kind === 'chat' && e.payload?.reaction === 'new-look' && !!e.text)).toBe(true);
+    expect(after.residents.length).toBe(before.residents.length);
+  });
+
   it('Nova greets PixelCat → positive reply → friendship up → memory → survives snapshot round trip', () => {
     const { rt, c } = runtime();
     const f0 = rt.getSnapshot().relationships.find(r => r.residentA === 'seed:nova' && r.residentB === 'seed:pixelcat')!;

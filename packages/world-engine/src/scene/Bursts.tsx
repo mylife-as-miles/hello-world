@@ -37,7 +37,8 @@ void main() {
   float d = length(c);
   float g = pow(max(0.0, 1.0 - d * 2.0), 1.6);
   float cross = max(0.0, 1.0 - abs(c.x) * 16.0) * max(0.0, 1.0 - abs(c.y) * 2.2) + max(0.0, 1.0 - abs(c.y) * 16.0) * max(0.0, 1.0 - abs(c.x) * 2.2);
-  gl_FragColor = vec4(vColor * (g + cross * 0.6) * vAlpha * 2.4, 1.0);
+  float I = (g + cross * 0.6) * vAlpha * 2.4;
+  gl_FragColor = vec4(vColor * max(I, 1.0), min(I, 1.0));
 }`;
 
 const CONF_VERT = /* glsl */ `

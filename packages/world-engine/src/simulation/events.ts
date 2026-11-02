@@ -63,11 +63,21 @@ function arrive(w: World, a: Agent, then?: (w: World, a: Agent) => void): void {
 export function joinResident(w: World, id: string, name: string, payload: WorldEventPayload | undefined, explicitJoin: boolean): Agent | null {
   const existing = w.agents.get(id);
   if (existing) {
+    const lookBefore = JSON.stringify(existing.appearance);
     existing.displayName = cleanText(name, 40) || existing.displayName;
     if (payload?.appearance) existing.appearance = normalizeAppearance(payload.appearance);
     if (payload?.personality?.length) { existing.personality = payload.personality.slice(0, 5); existing.temperament = temperamentFor(existing.personality); }
     existing.lastActiveAt = Math.floor(w.now);
-    if (explicitJoin && !existing.leaving) gesture(w, existing, 'waving hello', 3, { priority: 2 });
+    if (explicitJoin && !existing.leaving) {
+      if (JSON.stringify(existing.appearance) !== lookBefore) reactToNewLook(w, existing);
+      else {
+        gesture(w, existing, 'waving hello', 3, { priority: 2 });
+        if (w.simTime - existing.lastReplyAt > 30) {
+          existing.lastReplyAt = w.simTime;
+          emit(w, 'wave', existing, { text: lines.newcomerHello(w, existing, true, placeVars(w, existing, null, '')), payload: { reaction: 'hello', sentiment: 'positive' } });
+        }
+      }
+    }
     return existing;
   }
   if (!makeRoom(w, id)) return null;
@@ -82,6 +92,21 @@ export function joinResident(w: World, id: string, name: string, payload: WorldE
   w.agents.set(id, a);
   arrive(w, a);
   return a;
+}
+
+/** Visible reaction to an avatar edit: a little show-off moment, a line, and maybe a neighbour's compliment. */
+export function reactToNewLook(w: World, a: Agent): void {
+  gesture(w, a, 'admiring their new look', 3.5, { priority: 2, effects: { energy: 0, social: 0.3, fun: 1 } });
+  emit(w, 'chat', a, { text: lines.newLook(w, a, placeVars(w, a, null, '')), payload: { reaction: 'new-look', sentiment: 'positive' } });
+  const fan = nearestOther(w, a, 12, o => awake(o) && !busyWithEvent(o) && o.action?.type !== 'converse');
+  if (!fan) return;
+  schedule(w, 1.5, w2 => {
+    const A = w2.agents.get(a.id), F = w2.agents.get(fan.id);
+    if (!A || !F || !awake(F) || busyWithEvent(F)) return;
+    gesture(w2, F, `complimenting ${A.displayName}`, 3, { priority: 1 });
+    emit(w2, 'social', F, { target: A, text: lines.lookCompliment(w2, F, placeVars(w2, F, A, '')), payload: { action: 'compliment', sentiment: 'positive', reaction: 'new-look' } });
+    adjustFriendship(w2, F, A, 2);
+  });
 }
 
 function actorOf(w: World, e: WorldEvent, autoJoin: boolean): Agent | null {
@@ -405,8 +430,14 @@ function spawnVisitor(w: World, group: string, k: number, base: string): void {
 function onCustom(w: World, e: WorldEvent): void {
   const p = e.payload;
   if (p?.action === 'update-avatar') {
+    const known = w.agents.has(e.actorId);
     const a = actorOf(w, e, true);
-    if (a && p.appearance) a.appearance = normalizeAppearance(p.appearance);
+    if (a && p.appearance) {
+      const before = JSON.stringify(a.appearance);
+      a.appearance = normalizeAppearance(p.appearance);
+      if (p.personality?.length) { a.personality = p.personality.slice(0, 5); a.temperament = temperamentFor(a.personality); }
+      if (known && !a.leaving && JSON.stringify(a.appearance) !== before) reactToNewLook(w, a);
+    }
     return;
   }
   const a = actorOf(w, e, false);

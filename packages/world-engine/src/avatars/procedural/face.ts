@@ -42,7 +42,7 @@ function eyeballGeometry(eyeHex: string): THREE.BufferGeometry {
     const iris = new THREE.Color(eyeHex);
     const irisDark = iris.clone().multiplyScalar(0.45);
     const irisLight = iris.clone().lerp(new THREE.Color(1, 1, 1), 0.25);
-    const sclera = new THREE.Color('#f7f3ee'); const scleraEdge = new THREE.Color('#e8dcd6');
+    const sclera = new THREE.Color(1.25, 1.22, 1.18); const scleraEdge = new THREE.Color(1.0, 0.92, 0.9);
     const pupil = new THREE.Color('#120d0c');
     const tmp = new THREE.Color();
     return withColor(g, (_i, x, y, z) => {

@@ -44,7 +44,7 @@ void main() {
   float a = atan(p.y, p.x);
   float flick = 0.8 + 0.2 * sin(a * 8.0 + uTime * 3.0);
   float I = (0.25 + uRaid * 1.6) * band * flick;
-  gl_FragColor = vec4(vec3(0.62, 0.42, 1.0) * I, 1.0);
+  gl_FragColor = vec4(vec3(0.62, 0.42, 1.0) * max(I, 1.0), min(I, 1.0));
 }`;
 const BEAM_FRAG = /* glsl */ `
 uniform float uTime;
@@ -54,7 +54,7 @@ void main() {
   float fade = smoothstep(1.0, 0.25, vUv.y) * smoothstep(0.0, 0.04, vUv.y);
   float bands = 0.6 + 0.4 * sin(vUv.y * 40.0 - uTime * 8.0 + sin(vUv.x * 31.4) * 2.0);
   float I = uRaid * fade * bands * 1.3;
-  gl_FragColor = vec4(vec3(0.7, 0.55, 1.0) * I, 1.0);
+  gl_FragColor = vec4(vec3(0.7, 0.55, 1.0) * max(I, 1.0), min(I, 1.0));
 }`;
 const MOTE_VERT = /* glsl */ `
 attribute vec4 aSeed;
@@ -80,8 +80,8 @@ varying float vA;
 varying vec3 vC;
 void main() {
   float d = length(gl_PointCoord - 0.5);
-  float a = smoothstep(0.5, 0.0, d) * vA;
-  gl_FragColor = vec4(vC * a * 2.0, 1.0);
+  float I = smoothstep(0.5, 0.0, d) * vA * 2.0;
+  gl_FragColor = vec4(vC * max(I, 1.0), min(I, 1.0));
 }`;
 
 export function Portal({ quality }: { quality: 'low' | 'high' }) {

@@ -144,6 +144,7 @@ export function Atmosphere({ transparent, quality, sky, cloudTint }: AtmosphereP
     sunUp.y = Math.max(sunUp.y, 0.16); sunUp.normalize();
     const dayW = smooth(0.05, 0.4, day);
     tmp.key.copy(tmp.moon).lerp(sunUp, dayW).lerp(tmp.gold, sunset).normalize();
+    if (transparent) tmp.key.set(0.35, 0.88, 0.32).normalize();
     env.keyDir.copy(tmp.key);
 
     const lights = Math.min(1, Math.max(0, 1 - Math.max(day, sunset * 0.55) * 1.2 + rain * 0.35 + snow * 0.12));

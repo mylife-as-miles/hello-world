@@ -25,7 +25,7 @@ function make(color: string, finish: Finish): THREE.Material {
     case 'gem': return std({ roughness: 0.1, metalness: 0.1, emissive: c.clone().multiplyScalar(0.25) });
     case 'lens': return new THREE.MeshStandardMaterial({ color: c, roughness: 0.05, metalness: 0.1, transparent: true, opacity: 0.22, depthWrite: false });
     case 'shade': return std({ roughness: 0.06, metalness: 0.35 });
-    case 'eye': return std({ roughness: 0.18, emissive: new THREE.Color(0.16, 0.16, 0.16) });
+    case 'eye': return std({ roughness: 0.2 });
     case 'mouth': return std({ roughness: 0.65 });
     case 'teeth': return std({ roughness: 0.3, emissive: c.clone().multiplyScalar(0.1) });
     case 'dark': return std({ roughness: 0.5 });

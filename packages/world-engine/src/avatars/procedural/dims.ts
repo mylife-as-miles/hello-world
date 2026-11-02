@@ -15,7 +15,7 @@ export const PRESETS: Record<string, Preset> = {
   'townie-classic': { leg: 1, torso: 1, arm: 1, shoulder: 1, hip: 1, girth: 1, waist: 1, chest: 1, head: 1, belly: 0, neck: 1, limb: 1 },
   'townie-sporty': { leg: 1.05, torso: 1.03, arm: 1.03, shoulder: 1.17, hip: 0.95, girth: 1.04, waist: 0.9, chest: 1.12, head: 0.95, belly: 0, neck: 1.12, limb: 1.12 },
   'townie-soft': { leg: 0.93, torso: 0.98, arm: 0.95, shoulder: 0.98, hip: 1.15, girth: 1.16, waist: 1.25, chest: 1.06, head: 1.05, belly: 0.75, neck: 1.0, limb: 1.14 },
-  'townie-tall': { leg: 1.14, torso: 1.07, arm: 1.1, shoulder: 0.98, hip: 0.92, girth: 0.86, waist: 0.9, chest: 0.94, head: 0.95, belly: 0, neck: 1.18, limb: 0.86 },
+  'townie-tall': { leg: 1.13, torso: 1.07, arm: 1.07, shoulder: 1.0, hip: 0.93, girth: 0.9, waist: 0.9, chest: 0.96, head: 0.95, belly: 0, neck: 1.15, limb: 0.95 },
   'townie-petite': { leg: 0.84, torso: 0.9, arm: 0.88, shoulder: 0.88, hip: 0.97, girth: 0.93, waist: 0.95, chest: 0.94, head: 1.1, belly: 0.1, neck: 0.88, limb: 0.92 },
 };
 
@@ -76,15 +76,16 @@ export function computeDims(presetId: string, buildIn: number): Dims {
     [0.24, 0.13 * waist * tg, 0.09 * tg + belly * 0.045, 0.086 * tg, 2.4, 0.004 + belly * 0.012],
     [0.46, 0.142 * P.chest * tg, 0.098 * tg + belly * 0.03, 0.09 * tg, 2.5, 0.006 + belly * 0.008],
     [0.66, 0.152 * P.chest * Math.sqrt(sh) * tg, 0.106 * P.chest * tg, 0.094 * tg, 2.6, 0.008],
-    [0.8, 0.152 * sh * tg, 0.1 * tg, 0.094 * tg, 2.7, 0.004],
-    [0.92, 0.13 * sh * tg, 0.082 * tg, 0.084 * tg, 2.6, 0],
-    [0.99, 0.085 * Math.sqrt(sh), 0.062, 0.066, 2.2, -0.004],
+    [0.8, 0.156 * sh * tg, 0.1 * tg, 0.094 * tg, 2.8, 0.004],
+    [0.9, 0.153 * sh * tg, 0.088 * tg, 0.087 * tg, 3.0, 0],
+    [0.96, 0.126 * sh * Math.sqrt(tg), 0.071, 0.074, 2.8, -0.002],
+    [1.0, 0.08 * Math.sqrt(sh), 0.058, 0.062, 2.2, -0.005],
     [1.04, 0.05 * P.neck, 0.046, 0.048, 2.0, -0.006],
   ];
   const ua = upperArm, la = lowerArm;
   const armKeys = [
-    [0.0, 0.046 * g * L], [0.07, 0.044 * g * L], [ua * 0.6, 0.041 * g * L], [ua, 0.035 * g],
-    [ua + 0.05, 0.037 * g * L], [ua + la * 0.55, 0.032 * g], [ua + la, 0.026 * g],
+    [0.0, 0.054 * g * L], [0.05, 0.053 * g * L], [ua * 0.5, 0.046 * g * L], [ua, 0.038 * g],
+    [ua + 0.05, 0.041 * g * L], [ua + la * 0.55, 0.035 * g], [ua + la, 0.029 * g],
   ];
   const ul = upperLeg, ll = lowerLeg;
   const legKeys = [
@@ -106,7 +107,7 @@ export function computeDims(presetId: string, buildIn: number): Dims {
     bones, hips, spine, chest, upperChest, neck, head, armX, armY, upperArm, lowerArm, hand,
     hipX, hipJoint, upperLeg, lowerLeg, ankle, footLen: 0.235 * Math.sqrt(P.leg), footW: 0.088 * Math.sqrt(g),
     headScale: hs, neckR: 0.047 * P.neck * lerp(0.92, 1.15, build), torsoKeys, T, armKeys, legKeys,
-    handScale: P.arm * lerp(0.94, 1.08, build), top,
+    handScale: Math.sqrt(P.arm) * lerp(1.0, 1.12, build), top,
   };
 }
 

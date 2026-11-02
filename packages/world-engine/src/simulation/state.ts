@@ -83,6 +83,8 @@ export interface Agent {
   socialReadyAt: number;
   /** Sim time of this resident's last reply to viewer chat. */
   lastReplyAt: number;
+  /** Sim time a low-need state (lonely / tired / bored) was last shown. */
+  moodShownAt: number;
 }
 
 export type EncounterKind = 'greet' | 'chat' | 'compliment' | 'gift';
@@ -129,6 +131,8 @@ export interface WorldFacts {
   lastAmbientAt: number;
   lastChatReplyAt: number;
   lastWelcomeAt: number;
+  /** Crowd info of the latest raid (shared by its celebrate + arrival events). */
+  raidCrowd?: { visitors: number; amount: number; channel: string };
 }
 
 export interface World {

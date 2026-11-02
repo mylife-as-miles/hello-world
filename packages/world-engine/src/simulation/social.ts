@@ -14,7 +14,7 @@ import { atPlace, homeFor, nearestPoi, spotAround } from './places';
 import { addMemory, adjustFriendship, friendshipOf, getRel, pairKey, reactsPositively } from './relationships';
 import { cleanText, dist, emit, schedule, type Agent, type Encounter, type EncounterKind, type PlannedLine, type World } from './state';
 
-const CHAT_EFFECTS = { energy: 0, social: 1.1, fun: 0.15 };
+const CHAT_EFFECTS = { energy: 0, social: 2, fun: 0.15 };
 
 export function socialAvailable(w: World, a: Agent): boolean {
   if (a.leaving || w.simTime < a.socialReadyAt) return false;
@@ -132,7 +132,8 @@ function finishEncounter(w: World, enc: Encounter, A: Agent, B: Agent): void {
   for (const p of [A, B]) {
     if (p.action?.encounterId === enc.id) clearAction(w, p);
     const t = p.temperament;
-    p.socialReadyAt = w.simTime + w.rng.range(22, 40, 'social-cd', p.id) * (t.shyness > 0.5 ? 1.6 : 1);
+    if (enc.positive) bump(p, { social: 5 });
+    p.socialReadyAt = w.simTime + w.rng.range(22, 40, 'social-cd', p.id) * (t.shyness > 0.5 ? 1.6 : 1) * (p.needs.social < 30 ? 0.35 : 1);
   }
   if (enc.positive && before < 70 && after >= 70) {
     emit(w, 'social', A, { target: B, text: lines.milestone(w, A, placeVars(w, A, B, enc.placeAt)), payload: { action: 'befriend', sentiment: 'positive' } });

@@ -15,6 +15,7 @@ import type { AnimationFamily } from '../src/world/activities';
 const params = new URLSearchParams(location.search);
 const view = params.get('view') ?? 'cast';
 const lodParam = (params.get('lod') as AvatarLod) ?? 'high';
+const shadows = params.get('shadows') !== '0';
 
 type PartialApp = Omit<Partial<AvatarAppearance>, 'outfit' | 'face' | 'body'> & { outfit?: Partial<AvatarAppearance['outfit']>; face?: Partial<AvatarAppearance['face']>; body?: Partial<AvatarAppearance['body']> };
 const A = (p: PartialApp): AvatarAppearance =>
@@ -69,6 +70,11 @@ function layout(): { items: Item[]; cam: [number, number, number]; target: [numb
     const items = ex.map((e, i) => ({ a: A({ ...CAST[i]!, baseModelId: 'townie-classic', body: { height: 0.5, build: 0.5 }, accessories: [] }), x: (i - 2) * 0.3, expr: e, base: 'idle' as AnimationFamily }));
     return { items, cam: [0, 1.48, 1.55], target: [0, 1.45, 0], fov: 30 };
   }
+  if (view === 'acc') {
+    const combos: Array<[string, string[], string]> = [['afro', ['headphones'], '#1c1410'], ['afro', ['flower', 'earrings'], '#3b2417'], ['curly', ['beanie'], '#c2412d'], ['bob', ['headphones'], '#6b4226'], ['bun', ['crown'], '#d9a441'], ['long', ['cap'], '#3b2417'], ['short', ['glasses', 'scarf'], '#a8692e'], ['afro', ['crown'], '#1c1410']];
+    const items = combos.map(([h, acc, hc], i) => ({ a: A({ ...CAST[i % CAST.length]!, baseModelId: 'townie-classic', hairStyle: h, hairColor: hc, accessories: acc, body: { height: 0.5, build: 0.5 } }), x: (i - 3.5) * 0.42, ry: i % 2 ? 0.45 : -0.45 }));
+    return { items, cam: [0, 1.5, 3.1], target: [0, 1.4, 0], fov: 30 };
+  }
   if (view === 'hair') {
     const items = HAIR_STYLES.map((h, i) => ({ a: A({ hairStyle: h.id, hairColor: ['#3b2417', '#d9a441', '#c2412d', '#1c1410', '#6b4226', '#e36aa6'][i % 6]!, outfit: { color: '#4aa3df' } }), x: (i - 5.5) * 0.45, ry: i % 2 ? 0.6 : -0.6 }));
     return { items, cam: [0, 1.45, 4.6], target: [0, 1.35, 0], fov: 32 };
@@ -99,7 +105,7 @@ function Lab() {
   const L = useMemo(layout, []);
   return (
     <>
-      <Canvas shadows dpr={[1, 1.5]} camera={{ position: L.cam, fov: L.fov, near: 0.05, far: 60 }} onCreated={({ camera }) => camera.lookAt(...L.target)}>
+      <Canvas shadows={shadows} dpr={shadows ? [1, 1.5] : 1} camera={{ position: L.cam, fov: L.fov, near: 0.05, far: 60 }} onCreated={({ camera }) => camera.lookAt(...L.target)}>
         <color attach="background" args={['#e7eee8']} />
         <fog attach="fog" args={['#e7eee8', 14, 30]} />
         <hemisphereLight args={['#f4f8ff', '#9b8f7a', 0.9]} />
@@ -118,7 +124,7 @@ function Lab() {
         {L.items.map((it, i) => <Avatar key={i} item={it} seed={i * 1.7} />)}
       </Canvas>
       <div className="hud">
-        {['cast', 'presets', 'face', 'hair', 'tops', 'poses', 'vrm', 'lod'].map(v => <a key={v} href={`?view=${v}`}>{v}</a>)}
+        {['cast', 'presets', 'face', 'mouth', 'acc', 'hair', 'tops', 'poses', 'vrm', 'lod'].map(v => <a key={v} href={`?view=${v}`}>{v}</a>)}
       </div>
     </>
   );

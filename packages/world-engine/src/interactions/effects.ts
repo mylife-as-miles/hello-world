@@ -130,7 +130,8 @@ export class EmoteSystem {
     }
   }
 
-  spawn(kind: EmoteKind, x: number, y: number, z: number, count = 1, spread = 0.35): void {
+  /** `scale` enlarges the sprites (e.g. 1.35 to emphasise the viewer's own resident). */
+  spawn(kind: EmoteKind, x: number, y: number, z: number, count = 1, spread = 0.35, scale = 1): void {
     const tex = this.textures.get(kind);
     if (!tex) return;
     for (let n = 0; n < count; n++) {
@@ -145,7 +146,7 @@ export class EmoteSystem {
       p.vx = Math.cos(a) * r * 0.5; p.vz = Math.sin(a) * r * 0.5;
       p.vy = kind === 'zzz' ? 0.32 : kind === 'cloud' ? 0.12 : 0.55 + Math.random() * 0.3;
       if (kind === 'zzz') p.vx += 0.12;
-      p.size = kind === 'sparkle' ? 0.22 + Math.random() * 0.14 : kind === 'cloud' ? 0.5 : kind === 'bang' ? 0.34 : 0.27 + Math.random() * 0.08;
+      p.size = (kind === 'sparkle' ? 0.22 + Math.random() * 0.14 : kind === 'cloud' ? 0.5 : kind === 'bang' ? 0.34 : 0.27 + Math.random() * 0.08) * scale;
       p.wob = Math.random() * 6;
       s.visible = false; m.opacity = 0;
     }
@@ -249,18 +250,18 @@ export function makeNameplateTexture(name: string, accent?: string): { texture: 
   const tw = Math.ceil(measure.measureText(label).width);
   const w = tw + 34 * scale + (accent ? 14 * scale : 0), h = 38 * scale;
   const [c, g] = canvas(w, h);
-  g.fillStyle = 'rgba(14, 20, 24, 0.62)';
-  g.beginPath(); g.roundRect(2, 2, w - 4, h - 4, h / 2 - 2); g.fill();
-  g.strokeStyle = 'rgba(255,255,255,0.18)'; g.lineWidth = 2; g.stroke();
+  g.fillStyle = 'rgba(12, 16, 20, 0.88)';
+  g.beginPath(); g.roundRect(3, 3, w - 6, h - 6, h / 2 - 3); g.fill();
+  g.strokeStyle = accent ? 'rgba(94, 242, 198, 0.75)' : 'rgba(255, 255, 255, 0.3)'; g.lineWidth = 3; g.stroke();
   let x = 17 * scale;
   if (accent) {
     g.fillStyle = accent;
     g.beginPath(); g.arc(x + 4 * scale, h / 2, 5 * scale, 0, Math.PI * 2); g.fill();
     x += 14 * scale;
   }
-  g.font = `600 ${22 * scale}px system-ui, -apple-system, 'Segoe UI', sans-serif`;
+  g.font = `650 ${22 * scale}px system-ui, -apple-system, 'Segoe UI', sans-serif`;
   g.textBaseline = 'middle';
-  g.fillStyle = '#f4f7f5';
+  g.fillStyle = '#ffffff';
   g.fillText(label, x, h / 2 + 1);
   const texture = new THREE.CanvasTexture(c);
   texture.colorSpace = THREE.SRGBColorSpace;

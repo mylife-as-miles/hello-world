@@ -348,10 +348,12 @@ export function personalize(clause: string, me: string, you: string): string {
   return s;
 }
 
+/** "Day 2 09:14 · X did Y at Z — tail." or "Yesterday · 18:20 · X did Y — tail." → "X did Y at Z". */
 export function memoryClause(memory: string): string {
-  const afterStamp = memory.includes(' · ') ? memory.slice(memory.indexOf(' · ') + 3) : memory;
-  const cut = afterStamp.indexOf(' — ');
-  return (cut >= 0 ? afterStamp.slice(0, cut) : afterStamp).replace(/[.!]+$/, '').trim();
+  const cut = memory.indexOf(' — ');
+  const head = cut >= 0 ? memory.slice(0, cut) : memory;
+  const dot = head.lastIndexOf(' · ');
+  return (dot >= 0 ? head.slice(dot + 3) : head).replace(/[.!]+$/, '').trim();
 }
 
 export function memoryCallback(w: World, speaker: Agent, listener: Agent, memories: readonly string[]): string | null {

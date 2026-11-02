@@ -14,6 +14,7 @@ import {
 } from '../avatars/catalog';
 import * as AvatarApi from '../avatars';
 import { isVrmBase, type HumanoidRig } from '../avatars';
+import * as RealisticApi from '../avatars/realistic';
 import { REALISTIC_BASE_MODELS, REALISTIC_SUPPORT, isRealisticBase, type AppearanceSupport } from '../avatars/realistic';
 import type { BaseModelEntry } from '../avatars/catalog';
 import type { GestureName } from '../interactions/animation/AvatarAnimator';
@@ -78,7 +79,14 @@ export function appearanceSupportFor(baseModelId: string): AppearanceSupport {
       if (r && typeof r === 'object') return { ...FULL_SUPPORT, ...r };
     } catch { /* fall back below */ }
   }
-  if (isRealisticBase(baseModelId)) return REALISTIC_SUPPORT;
+  if (isRealisticBase(baseModelId)) {
+    // per-body support (e.g. Rocketbox bodies have fixed outfit colours) when the realistic pass exports it
+    const per = (RealisticApi as unknown as Record<string, unknown>)['realisticSupportFor'];
+    if (typeof per === 'function') {
+      try { const r = (per as (id: string) => Partial<AppearanceSupport> | null)(baseModelId); if (r && typeof r === 'object') return { ...REALISTIC_SUPPORT, ...r }; } catch { /* default below */ }
+    }
+    return REALISTIC_SUPPORT;
+  }
   if (isVrmBase(baseModelId)) return VRM_SUPPORT;
   return FULL_SUPPORT;
 }
@@ -92,6 +100,8 @@ function realisticBases(): BaseModelEntry[] {
   }
   return out;
 }
+/** Drop a trailing parenthetical ("Elena (photoreal)" → "Elena"); provenance is shown by the tag/credit. */
+const shortLabel = (label: string) => label.replace(/\s*\([^)]*\)\s*$/, '') || label;
 const realisticTag = (id: string) => (id.startsWith('rb-') ? 'Photoreal · Rocketbox (MIT)' : 'Photoreal · MetaHuman licence');
 
 function BaseCard({ m, on, onPick, tag }: { m: BaseModelEntry; on: boolean; onPick: () => void; tag?: string }) {
@@ -100,10 +110,10 @@ function BaseCard({ m, on, onPick, tag }: { m: BaseModelEntry; on: boolean; onPi
       aria-label={`Base body ${m.label}${tag ? ` (${tag})` : m.kind === 'vrm' ? ' (VRM model)' : ''}`} data-testid={`base-${m.id}`} onClick={onPick}>
       <BodyGlyph id={m.id} color={on ? '#cfc4ff' : 'rgba(236,232,250,.55)'} />
       <span>
-        <b>{m.label}{m.kind === 'vrm' && !tag && <span className="hwc-kind">VRM</span>}</b>
+        <b>{m.kind === 'procedural' ? m.label : shortLabel(m.label)}{m.kind === 'vrm' && !tag && <span className="hwc-kind">VRM</span>}</b>
         <small>{m.description}</small>
         {tag && <small className="hwc-realtag">{tag}</small>}
-        {m.credit && <small className="hwc-credit">{m.credit}</small>}
+        {m.credit && <small className="hwc-credit" title={m.credit}>{m.credit}</small>}
       </span>
     </button>
   );
@@ -225,7 +235,9 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
   const realBases = realisticBases();
   const baseEntry = BASE_MODELS.find(m => m.id === appearance.baseModelId) ?? realBases.find(m => m.id === appearance.baseModelId);
   const support = appearanceSupportFor(appearance.baseModelId);
-  const baseName = baseEntry?.label.replace(/\s*\([^)]*\)\s*$/, '') || 'This body';
+  const baseName = baseEntry ? shortLabel(baseEntry.label) : 'This body';
+  // VRM and realistic rigs scale uniformly by height; only Townies use `build`.
+  const buildApplies = support.body && !realistic && !vrm;
   const fixedWhy = realistic ? 'a photoreal body with its own authored look' : vrm ? 'a VRM avatar with its own authored look' : 'a fixed-look body';
 
   // ---- edits
@@ -456,12 +468,15 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
                 <div className="hwc-real" role="group" aria-label="Realistic humans" data-testid="realistic-group">
                   <div className="hwc-real-head">
                     <span className="hwc-real-title">Realistic humans</span>
-                    <span className="hwc-real-sub">Photoreal bodies · outfit colour, proportions &amp; accessories</span>
+                    <span className="hwc-real-sub">Photoreal bodies with authored faces, hair &amp; outfits · larger download</span>
                   </div>
                   <div className="hwc-bases">
                     {realBases.map(m => (
                       <BaseCard key={m.id} m={m} tag={realisticTag(m.id)} on={appearance.baseModelId === m.id} onPick={() => edit(a => ({ ...a, baseModelId: m.id }))} />
                     ))}
+                  </div>
+                  <div className="hwc-real-credits">
+                    {[...new Set(realBases.map(m => m.credit).filter((c): c is string => !!c))].map(c => <small key={c}>{c}</small>)}
                   </div>
                 </div>
               )}
@@ -469,7 +484,9 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
               {support.body ? (
                 <>
                   <Slider label="Height" value={appearance.body.height} ends={['Shorter', 'Taller']} testId="slider-height" onChange={v => setBody({ height: v })} />
-                  <Slider label="Build" value={appearance.body.build} ends={['Slim', 'Sturdy']} testId="slider-build" onChange={v => setBody({ build: v })} />
+                  {buildApplies
+                    ? <Slider label="Build" value={appearance.body.build} ends={['Slim', 'Sturdy']} testId="slider-build" onChange={v => setBody({ build: v })} />
+                    : <Note>Build is fixed on {baseName}; height scales the whole body.</Note>}
                 </>
               ) : <Note>{baseName} is {fixedWhy}; height and build are fixed.</Note>}
               <div className="hwc-label">Skin tone</div>

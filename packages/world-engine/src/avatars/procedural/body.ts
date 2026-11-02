@@ -123,18 +123,11 @@ export function legShell(d: Dims, lod: LodCfg, side: 1 | -1, o: LimbOpts): THREE
 /** Hand in hand-bone local space for the LEFT hand (+X along fingers, palm -Y, thumb +Z). */
 export function handGeometry(lod: LodCfg): Array<{ g: THREE.BufferGeometry; m: THREE.Matrix4 }> {
   const out: Array<{ g: THREE.BufferGeometry; m: THREE.Matrix4 }> = [];
-  out.push({ g: roundBoxG(0.082, 0.03, 0.07, 0.014, lod.high ? 3 : 1), m: trs([0.045, 0, 0]) });
-  if (lod.high) {
-    const fz = [0.026, 0.009, -0.009, -0.025];
-    const fl = [0.042, 0.047, 0.044, 0.034];
-    for (let i = 0; i < 4; i++) {
-      out.push({ g: capsuleG(0.0098, fl[i]!, 3, 8), m: trs([0.085 + fl[i]! * 0.42, -0.006, fz[i]!], [0, 0, -Math.PI / 2 - 0.28], 1) });
-    }
-    out.push({ g: capsuleG(0.0115, 0.032, 3, 8), m: trs([0.035, -0.008, 0.04], [0.5, 0.0, -Math.PI / 2 + 0.75]) });
-  } else {
-    out.push({ g: roundBoxG(0.05, 0.026, 0.066, 0.012, 1), m: trs([0.1, -0.006, 0], [0, 0, -0.3]) });
-    out.push({ g: capsuleG(0.012, 0.03, 2, 6), m: trs([0.035, -0.008, 0.04], [0.5, 0, -Math.PI / 2 + 0.75]) });
-  }
+  // Soft "mitten" hand: palm + curled finger block + chunky thumb (reads well at any distance).
+  const hi = lod.high;
+  out.push({ g: roundBoxG(0.078, 0.036, 0.072, 0.017, hi ? 3 : 1), m: trs([0.038, 0, 0]) });
+  out.push({ g: roundBoxG(0.064, 0.03, 0.07, 0.0145, hi ? 3 : 1), m: trs([0.094, -0.01, -0.002], [0, 0, -0.38]) });
+  out.push({ g: capsuleG(0.0145, 0.03, hi ? 3 : 2, hi ? 10 : 6), m: trs([0.04, -0.008, 0.042], [0.55, 0, -Math.PI / 2 + 0.85]) });
   return out;
 }
 

@@ -81,6 +81,9 @@ export const CREATOR_CSS = /* css */ `
 .hwc-real-sub { font-size: 11.5px; color: var(--hwc-faint); }
 .hwc-base .hwc-realtag { display: inline-block; margin-top: 4px; padding: 1px 6px; border-radius: 6px; font-size: 9.5px; font-weight: 700; letter-spacing: 0.04em; background: rgba(255, 214, 150, 0.16); color: #ffd9a6; }
 .hwc-base-real.is-on { border-color: #ffd29a; background: rgba(255, 210, 154, 0.12); }
+.hwc-base .hwc-credit { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.hwc-real-credits { display: flex; flex-direction: column; gap: 3px; margin-top: 10px; padding-top: 8px; border-top: 1px solid rgba(255, 214, 150, 0.14); }
+.hwc-real-credits small { font-size: 10px; color: var(--hwc-faint); line-height: 1.35; }
 .hwc-loading i { width: 12px; height: 12px; border-radius: 50%; border: 2px solid rgba(255,255,255,.2); border-top-color: var(--hwc-accent); animation: hwc-spin .8s linear infinite; }
 
 /* ---------------- panel ---------------- */

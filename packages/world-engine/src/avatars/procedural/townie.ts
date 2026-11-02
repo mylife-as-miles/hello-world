@@ -6,6 +6,7 @@
  * and shared across residents with the same look.
  */
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { AvatarAppearance } from '@hello-world/contracts';
 import { HUMAN_BONES, type AttachSlot, type AvatarLod, type ExpressionName, type HumanBoneName, type HumanoidRig } from '../rig';
 import { BOTTOMS, SHOES, hashString } from '../catalog';
@@ -117,6 +118,24 @@ function resolveMaterial(key: string, a: AvatarAppearance): [string, Finish] {
   }
 }
 
+/** Merge per-material geometries into one, multiplying each part's vertex colours by its material colour. */
+function bakeColors(geos: Map<string, THREE.BufferGeometry>, a: AvatarAppearance): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  for (const [key, g] of geos) {
+    const [hex, finish] = resolveMaterial(key, a);
+    if (finish === 'lens' || finish === 'glow') continue;
+    const c = new THREE.Color(hex);
+    const gg = g.clone();
+    const col = gg.getAttribute('color') as THREE.BufferAttribute;
+    for (let i = 0; i < col.count; i++) col.setXYZ(i, col.getX(i) * c.r, col.getY(i) * c.g, col.getZ(i) * c.b);
+    parts.push(gg);
+  }
+  const merged = mergeGeometries(parts, false) ?? parts[0]!;
+  for (const p of parts) if (p !== merged) p.dispose();
+  merged.computeBoundingSphere();
+  return merged;
+}
+
 // ---------------------------------------------------------------- rig
 export interface TownieOptions { lod?: AvatarLod; seed?: string }
 
@@ -145,7 +164,7 @@ export function createTownieRig(a: AvatarAppearance, opts: TownieOptions = {}): 
   const o = a.outfit;
   const bodyAcc = a.accessories.filter(x => !HEAD_ACCESSORIES.has(x)).sort();
   const bodyKey = `body|${d.key}|${o.top}|${o.bottom}|${o.shoes}|${bodyAcc.join(',')}|${lod}`;
-  const bodyGeos = acquireGeo(bodyKey, () => {
+  const buildBody = () => {
     const b = new GeoBuilder(true);
     buildSkin(b, d, L, coverageFor(o, d));
     buildTop(b, d, L, o.top, o.bottom);
@@ -153,6 +172,17 @@ export function createTownieRig(a: AvatarAppearance, opts: TownieOptions = {}): 
     buildShoes(b, d, L, o.shoes);
     buildBodyAccessories(b, d, L, bodyAcc, TOP_OFFSET[o.top] ?? 0.012);
     return b.build();
+  };
+  const low = lod === 'low';
+  // Low LOD: every colour baked into vertex colours -> ONE skinned draw call sharing one material.
+  const sig = `${a.skinTone}|${a.hairColor}|${o.color}|${a.face.eyeColor}|${Math.round(a.face.eyeSize * 10)}`;
+  const bodyCacheKey = low ? `baked|${bodyKey}|${sig}` : bodyKey;
+  const bodyGeos = acquireGeo(bodyCacheKey, () => {
+    const src = buildBody();
+    if (!low) return src;
+    const baked = bakeColors(src, a);
+    for (const g of src.values()) g.dispose();
+    return new Map([['#ffffff|cloth', baked]]);
   });
   const identity = new THREE.Matrix4();
   for (const [key, g] of bodyGeos) {
@@ -168,16 +198,33 @@ export function createTownieRig(a: AvatarAppearance, opts: TownieOptions = {}): 
   const headContent = new THREE.Group(); headContent.name = 'headContent';
   headContent.scale.setScalar(d.headScale);
   headBone.add(headContent);
-  const headMesh = new THREE.Mesh(headSkin(lod), mat('skin'));
-  headMesh.castShadow = true; headContent.add(headMesh);
+  if (!low) {
+    const headMesh = new THREE.Mesh(headSkin(lod), mat('skin'));
+    headMesh.castShadow = true; headContent.add(headMesh);
+  }
   const headAcc = a.accessories.filter(x => HEAD_ACCESSORIES.has(x)).sort();
   const hat = headAcc.some(x => HATS.has(x));
-  const hairKey = `head|${a.hairStyle}|${headAcc.join(',')}|${lod}`;
+  const hairKey = low ? `bakedHead|${a.hairStyle}|${headAcc.join(',')}|${sig}` : `head|${a.hairStyle}|${headAcc.join(',')}|${lod}`;
   const headGeos = acquireGeo(hairKey, () => {
     const b = new GeoBuilder(false);
+    if (low) {
+      b.add('skin', headSkin('low'));
+      const eyeR = 0.0272 * (0.8 + a.face.eyeSize * 0.48);
+      for (const side of [1, -1]) {
+        const ph = side * 0.41, el = -0.075;
+        const n = headNormal(ph, el);
+        const c = headPoint(ph, el, -eyeR * 0.3);
+        const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3(n[0] * 0.5, 0, 1).normalize());
+        b.add('#1c1414|dark', sphereG(8, 6), { matrix: new THREE.Matrix4().compose(new THREE.Vector3(...c), q, new THREE.Vector3(eyeR * 0.62, eyeR * 0.85, eyeR * 0.45)) });
+      }
+    }
     buildHair(b, a.hairStyle, lod, hat);
     buildHeadAccessories(b, headAcc, a.hairStyle, lod, '');
-    return b.build();
+    const src = b.build();
+    if (!low) return src;
+    const baked = bakeColors(src, a);
+    for (const g of src.values()) g.dispose();
+    return new Map([['#ffffff|cloth', baked]]);
   });
   for (const [key, g] of headGeos) {
     const m = new THREE.Mesh(g, mat(key));
@@ -187,7 +234,7 @@ export function createTownieRig(a: AvatarAppearance, opts: TownieOptions = {}): 
   }
 
   // --- face
-  const face = new TownieFace(lod, {
+  const face = low ? null : new TownieFace(lod, {
     eyeScale: 0.8 + a.face.eyeSize * 0.48,
     noseScale: 0.65 + a.face.noseSize * 0.8,
     mouthScale: 0.72 + a.face.mouthSize * 0.62,
@@ -196,7 +243,7 @@ export function createTownieRig(a: AvatarAppearance, opts: TownieOptions = {}): 
     skin: mat('skin'), brow: mat(`${shade(a.hairColor, -0.25)}|hair`), eye: mat('#ffffff|eye'),
     mouth: mat('#6b2a35|mouth'), teeth: mat('#fbf8f2|teeth'), dark: mat('#1c1414|dark'), highlight: mat('#ffffff|glow'),
   }, hashString(opts.seed ?? JSON.stringify(a)));
-  headContent.add(face.group);
+  if (face) headContent.add(face.group);
 
   // --- attach points
   const attach: Record<AttachSlot, THREE.Object3D> = {
@@ -221,15 +268,15 @@ export function createTownieRig(a: AvatarAppearance, opts: TownieOptions = {}): 
     root, kind: 'procedural', height,
     setBoneRotation(bone, q) { const b = bones.get(bone); if (b) b.quaternion.copy(q); },
     setHipsOffset(x, y, z) { hips.position.set(hipsRest.x + x, hipsRest.y + y, hipsRest.z + z); },
-    setExpression(name: ExpressionName, w: number) { face.setExpression(name, w); },
+    setExpression(name: ExpressionName, w: number) { face?.setExpression(name, w); },
     getAttachPoint(slot) { return attach[slot] ?? null; },
-    update(dt) { if (!disposed) face.update(Math.min(0.1, Math.max(0, dt))); },
+    update(dt) { if (!disposed) face?.update(Math.min(0.1, Math.max(0, dt))); },
     dispose() {
       if (disposed) return; disposed = true;
       root.removeFromParent();
       releaseGeo(bodyKey); releaseGeo(hairKey);
       for (const m of usedMats) releaseMaterial(m);
-      face.dispose();
+      face?.dispose();
       skeleton.dispose();
     },
   };

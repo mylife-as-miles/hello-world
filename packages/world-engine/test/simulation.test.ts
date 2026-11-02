@@ -4,6 +4,7 @@ import { createSimulation, setDialogueProvider } from '../src/simulation';
 import { createWorldRuntime } from '../src/runtime/createWorldRuntime';
 import { findSeatNear, SPAWN_POINT } from '../src/world/layout';
 import { ACTIVITY_VERBS, parseActivityVerb } from '../src/world/activities';
+import { memoryClause, personalize } from '../src/simulation/dialogue';
 
 const T0 = 1_700_000_000_000;
 function clock() { let t = T0; return { now: () => t, advance: (ms: number) => { t += ms; } }; }
@@ -20,15 +21,31 @@ function runtime(opts: { initialSnapshot?: WorldSnapshot; seedResidents?: boolea
 const verbOk = (activity: string) => (ACTIVITY_VERBS as readonly string[]).includes(activity.trim().split(/\s+/)[0]!.toLowerCase());
 
 describe('simulation: seeds & contract shape', () => {
-  it('seeds 7 named residents with 3 pre-existing relationships and memories', () => {
+  it('seeds 13 distinct residents with 9 pre-existing relationships (incl. a rivalry) and plausible backstory memories', () => {
     const { rt } = runtime();
     const s = rt.getSnapshot();
-    expect(s.residents.map(r => r.id)).toEqual(['seed:nova', 'seed:pixelcat', 'seed:mochi', 'seed:rex', 'seed:lumi', 'seed:bram', 'seed:kiki']);
-    expect(new Set(s.residents.map(r => r.activity)).size).toBeGreaterThanOrEqual(6);
-    expect(new Set(s.residents.map(r => r.appearance.outfit.top)).size).toBe(7);
+    expect(s.residents.map(r => r.id)).toEqual(['seed:nova', 'seed:pixelcat', 'seed:mochi', 'seed:rex', 'seed:lumi', 'seed:bram', 'seed:kiki',
+      'seed:elena', 'seed:marco', 'seed:juno', 'seed:ziggy', 'seed:olive', 'seed:toby']);
+    expect(new Set(s.residents.map(r => r.activity)).size).toBeGreaterThanOrEqual(11);
+    expect(new Set(s.residents.map(r => JSON.stringify(r.appearance))).size).toBe(13);
+    expect(new Set(s.residents.map(r => r.personality.join(','))).size).toBe(13);
     expect(s.residents.filter(r => r.appearance.baseModelId.startsWith('vrm-')).map(r => r.id)).toEqual(['seed:kiki']);
-    expect(s.relationships.length).toBe(3);
-    for (const r of s.relationships) { expect(r.residentA < r.residentB).toBe(true); expect(r.memories.length).toBeGreaterThan(0); }
+    expect(s.residents.filter(r => r.appearance.baseModelId.startsWith('mh-')).map(r => r.id)).toEqual(['seed:elena', 'seed:marco']);
+    expect(s.relationships.length).toBe(9);
+    expect(s.relationships.some(r => r.friendship < 25)).toBe(true);
+    for (const r of s.relationships) {
+      expect(r.residentA < r.residentB).toBe(true);
+      expect(r.memories.length).toBeGreaterThan(0);
+      for (const m of r.memories) expect(m).toMatch(/^Yesterday · \d\d:\d\d · .+ — .+\.$/);
+    }
+    for (const r of s.residents) for (const k of ['energy', 'social', 'fun'] as const) { expect(r.needs[k]).toBeGreaterThanOrEqual(35); expect(r.needs[k]).toBeLessThanOrEqual(85); }
+  });
+
+  it('memory callbacks understand both stamp styles and speak in first person', () => {
+    expect(memoryClause('Yesterday · 18:20 · Kiki and Toby raced around Town Plaza — Toby claims it was a tie.')).toBe('Kiki and Toby raced around Town Plaza');
+    expect(memoryClause('Day 2 09:14 · Nova greeted PixelCat at Town Plaza — PixelCat beamed.')).toBe('Nova greeted PixelCat at Town Plaza');
+    expect(personalize('Kiki and Toby raced around Town Plaza', 'Toby', 'Kiki')).toBe('we raced around Town Plaza');
+    expect(personalize("Kiki beat Rex's high score at Pixel Arcade", 'Rex', 'Kiki')).toBe('you beat my high score at Pixel Arcade');
   });
 
   it('exportState returns fresh plain JSON with only contract keys', () => {
@@ -112,6 +129,43 @@ describe('simulation: life', () => {
       }
     }
     expect(changes).toBeGreaterThan(10);
+  });
+
+  it('needs hover in a healthy band and never pin at 100 for long', () => {
+    const { rt, tick } = runtime();
+    let total = 0, band = 0, wide = 0, maxStreak = 0;
+    const streak = new Map<string, number>();
+    for (let i = 0; i < 160; i++) {
+      tick(5);
+      for (const r of rt.getSnapshot().residents) for (const k of ['energy', 'social', 'fun'] as const) {
+        const v = r.needs[k];
+        total++; if (v >= 30 && v <= 80) band++; if (v >= 15 && v <= 95) wide++;
+        const st = v >= 97 ? (streak.get(r.id + k) ?? 0) + 2.5 : 0;
+        streak.set(r.id + k, st); maxStreak = Math.max(maxStreak, st);
+      }
+    }
+    expect(band / total).toBeGreaterThan(0.75);
+    expect(wide / total).toBeGreaterThan(0.95);
+    expect(maxStreak).toBeLessThan(30);
+  });
+
+  it('low needs become visible states (lonely sulk, nap thoughts, bored wandering) and then drive goals', () => {
+    const base = runtime().rt.getSnapshot();
+    const pick = (id: string, needs: { energy: number; social: number; fun: number }) => ({ ...base.residents.find(r => r.id === id)!, needs, activity: 'thinking' });
+    const snap: WorldSnapshot = { ...base, residents: [
+      pick('seed:nova', { energy: 70, social: 4, fun: 70 }),
+      pick('seed:rex', { energy: 6, social: 70, fun: 70 }),
+      pick('seed:kiki', { energy: 70, social: 70, fun: 3 }),
+    ], relationships: [], eventHistory: [] };
+    const { rt, tick } = runtime({ initialSnapshot: snap });
+    const seen = new Map<string, string[]>();
+    for (let i = 0; i < 240; i++) { tick(1); for (const r of rt.getSnapshot().residents) seen.set(r.id, [...(seen.get(r.id) ?? []), r.activity]); }
+    expect(seen.get('seed:nova')!.some(a => a.startsWith('sulking'))).toBe(true);
+    expect(seen.get('seed:rex')!.some(a => a === 'thinking about a nap' || /^(resting|sitting|sleeping|drinking|eating)/.test(a))).toBe(true);
+    expect(seen.get('seed:kiki')!.some(a => a === 'wandering around looking for fun' || /^(playing|dancing)/.test(a))).toBe(true);
+    const end = rt.getSnapshot().residents;
+    expect(end.find(r => r.id === 'seed:rex')!.needs.energy).toBeGreaterThan(20);
+    expect(end.find(r => r.id === 'seed:kiki')!.needs.fun).toBeGreaterThan(20);
   });
 
   it('seats are exclusive and sitters stand exactly on seat coordinates', () => {
@@ -218,8 +272,13 @@ describe('simulation: contract events', () => {
     tick(8);
     let visitors = rt.getSnapshot().residents.filter(r => r.id.startsWith('raid:raid-1:'));
     expect(visitors.length).toBe(5);
+    expect(new Set(visitors.map(v => v.displayName)).size).toBe(5);
+    expect(visitors.map(v => v.displayName)).toContain("CozyStreamer's #1 fan");
+    const celebrate = rt.getSnapshot().eventHistory.find(e => e.source === 'simulation' && e.payload?.reaction === 'raid')!;
+    expect(celebrate.payload).toMatchObject({ action: 'celebrate', visitors: 30, amount: 30, channel: 'CozyStreamer' });
     for (const v of visitors) {
-      expect(v.displayName).toMatch(/^CozyStreamer Raider \d$/);
+      expect(v.displayName).not.toMatch(/Raider \d+$/);
+      expect(v.displayName.length).toBeLessThanOrEqual(40);
       expect(Math.hypot(v.location.x - SPAWN_POINT.x, v.location.z - SPAWN_POINT.z)).toBeLessThan(6);
       expect(v.appearance.baseModelId.startsWith('vrm-')).toBe(true);
     }
@@ -290,7 +349,7 @@ describe('simulation: contract events', () => {
 
   it('50 residents step in well under 2 ms', () => {
     const { rt, c, tick } = runtime();
-    for (let i = 0; i < 43; i++) { c.advance(10); rt.dispatch(ev('join', `tw:p${i}`, `P${i}`, {}, c.now())); }
+    for (let i = 0; i < 60; i++) { c.advance(10); rt.dispatch(ev('join', `tw:p${i}`, `P${i}`, {}, c.now())); }
     tick(40);
     // Best of several chunks: robust against CI / parallel-test CPU contention.
     let best = Infinity;

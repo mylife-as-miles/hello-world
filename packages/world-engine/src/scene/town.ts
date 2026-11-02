@@ -27,6 +27,8 @@ export interface SignDef {
 
 export interface TownGeometry {
   solid: THREE.BufferGeometry;
+  /** Small props (flowers, tufts, pebbles): lit + receive shadows but never cast (cheaper shadow pass). */
+  detail: THREE.BufferGeometry;
   far: THREE.BufferGeometry;
   flat: THREE.BufferGeometry;
   glass: THREE.BufferGeometry;
@@ -105,8 +107,13 @@ const LEAF = ['#6aa84f', '#78b55a', '#5e9e48', '#86c062'];
 const CANOPY = ['#6fae4f', '#7dbb57', '#62a347', '#8cc463', '#5b9a45'];
 const PINE = ['#3f7d4e', '#4a8a56', '#3a7448', '#568f5c'];
 
+export interface TownOptions {
+  /** Built-in forest belt, distant hills and rolling ground beyond the town (switch off when an external landscape is mounted). */
+  horizon?: boolean;
+}
+
 interface Ctx {
-  solid: Batch; far: Batch; flat: Batch; glass: Batch; bulbs: Batch;
+  solid: Batch; detail: Batch; far: Batch; flat: Batch; glass: Batch; bulbs: Batch;
   P: Prims; r: () => number; space: Space; q: number;
   lamps: THREE.Vector3[]; chimneys: THREE.Vector3[]; signs: SignDef[];
 }
@@ -132,8 +139,8 @@ function addWindow(c: Ctx, M: THREE.Matrix4, ww: number, wh: number, trim: strin
     const n = Math.max(3, Math.round(ww * 4.5));
     for (let i = 0; i < n; i++) {
       const fx = -ww / 2 + 0.06 + (i / (n - 1)) * (ww - 0.12);
-      c.solid.add(c.P.ico(0), pick(c.r, LEAF), at(mtx(fx, -wh / 2 - 0.14, 0.2, c.r() * 3, 0.13, 0.1, 0.12)), true);
-      if (i % 2 === 0) c.solid.add(c.P.ico(0), pick(c.r, FLOWERS), at(mtx(fx + 0.02, -wh / 2 - 0.06, 0.24, c.r() * 3, 0.06, 0.06, 0.06)), true);
+      c.detail.add(c.P.ico(0), pick(c.r, LEAF), at(mtx(fx, -wh / 2 - 0.14, 0.2, c.r() * 3, 0.13, 0.1, 0.12)), true);
+      if (i % 2 === 0) c.detail.add(c.P.ico(0), pick(c.r, FLOWERS), at(mtx(fx + 0.02, -wh / 2 - 0.06, 0.24, c.r() * 3, 0.06, 0.06, 0.06)), true);
     }
   }
 }
@@ -421,8 +428,8 @@ function buildCafe(c: Ctx, b: BuildingDef) {
     c.solid.add(c.P.box(), '#fff6e6', at(mtx(x, F + 0.98, fz + 0.12, 0, 2.4, 0.08, 0.26)));
     c.solid.add(c.P.rbox(2.0, 0.42, 0.42, 0.04), '#7a4f35', at(mtx(x, 0.21, fz + 0.4)));
     for (let i = 0; i < 7; i++) {
-      c.solid.add(c.P.ico(0), pick(c.r, LEAF), at(mtx(x - 0.85 + i * 0.28, 0.5, fz + 0.4, c.r() * 3, 0.17, 0.14, 0.17)), true);
-      if (i % 2 === 0) c.solid.add(c.P.ico(0), pick(c.r, FLOWERS), at(mtx(x - 0.85 + i * 0.28, 0.62, fz + 0.45, 0, 0.07, 0.07, 0.07)), true);
+      c.detail.add(c.P.ico(0), pick(c.r, LEAF), at(mtx(x - 0.85 + i * 0.28, 0.5, fz + 0.4, c.r() * 3, 0.17, 0.14, 0.17)), true);
+      if (i % 2 === 0) c.detail.add(c.P.ico(0), pick(c.r, FLOWERS), at(mtx(x - 0.85 + i * 0.28, 0.62, fz + 0.45, 0, 0.07, 0.07, 0.07)), true);
     }
   }
   // Striped awning with scalloped valance
@@ -455,8 +462,8 @@ function buildCafe(c: Ctx, b: BuildingDef) {
   c.solid.add(c.P.cyl(10), '#8d857b', at(mtx(-2.2, yT + 0.5, -1.2, 0, 0.18, 0.8, 0.18)));
   c.solid.add(c.P.rbox(1.6, 0.35, 0.5, 0.04), '#7a4f35', at(mtx(-0.6, yT + 0.25, 1.6)));
   for (let i = 0; i < 4; i++) {
-    c.solid.add(c.P.blob(i, 0.22, 0), pick(c.r, LEAF), at(mtx(-1.2 + i * 0.4, yT + 0.52, 1.6, c.r() * 6, 0.22, 0.2, 0.22)), true);
-    c.solid.add(c.P.ico(0), pick(c.r, FLOWERS), at(mtx(-1.15 + i * 0.4, yT + 0.68, 1.65, 0, 0.07, 0.07, 0.07)), true);
+    c.detail.add(c.P.blob(i, 0.22, 0), pick(c.r, LEAF), at(mtx(-1.2 + i * 0.4, yT + 0.52, 1.6, c.r() * 6, 0.22, 0.2, 0.22)), true);
+    c.detail.add(c.P.ico(0), pick(c.r, FLOWERS), at(mtx(-1.15 + i * 0.4, yT + 0.68, 1.65, 0, 0.07, 0.07, 0.07)), true);
   }
   // Potted plants by the door + chalkboard
   for (const s of [-1, 1]) {
@@ -571,7 +578,7 @@ function buildPlaza(c: Ctx) {
     addTree(c, c.solid, x, z, a > 0 && a < 1 ? 'blossom' : 'round', 0.62);
     for (let i = 0; i < 8; i++) {
       const fa = (i / 8) * Math.PI * 2;
-      c.solid.add(c.P.ico(0), pick(c.r, FLOWERS), mtx(x + Math.cos(fa) * 0.52, 0.7, z + Math.sin(fa) * 0.52, 0, 0.09, 0.08, 0.09), true);
+      c.detail.add(c.P.ico(0), pick(c.r, FLOWERS), mtx(x + Math.cos(fa) * 0.52, 0.7, z + Math.sin(fa) * 0.52, 0, 0.09, 0.08, 0.09), true);
     }
   }
 }
@@ -782,8 +789,8 @@ function buildPortalBase(c: Ctx) {
 
 /* ---------------------------------------------------------------- ground */
 
-function buildGround(q: number): THREE.BufferGeometry {
-  const size = 320, seg = q > 0.7 ? 160 : 110;
+function buildGround(q: number, horizon = true): THREE.BufferGeometry {
+  const size = horizon ? 320 : 140, seg = q > 0.7 ? (horizon ? 160 : 90) : (horizon ? 96 : 60);
   const g = new THREE.PlaneGeometry(size, size, seg, seg);
   g.rotateX(-Math.PI / 2);
   const pos = g.attributes.position!;
@@ -799,7 +806,7 @@ function buildGround(q: number): THREE.BufferGeometry {
     if (n1 > 0.7) c.lerp(D, (n1 - 0.7) * 1.5);
     const hill = smooth(46, 120, r);
     c.lerp(F, hill * 0.5);
-    const h = hill * (5 + 14 * noise2(x * 0.025, z * 0.025, 11)) + smooth(110, 160, r) * 10;
+    const h = horizon ? hill * (5 + 14 * noise2(x * 0.025, z * 0.025, 11)) + smooth(110, 160, r) * 10 : 0;
     pos.setY(i, h);
     col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
   }
@@ -819,10 +826,12 @@ function smooth(e0: number, e1: number, x: number) { const t = Math.min(1, Math.
 
 /* ------------------------------------------------------------------ main */
 
-export function buildTown(quality: 'low' | 'high'): TownGeometry {
+export function buildTown(quality: 'low' | 'high', options: TownOptions = {}): TownGeometry {
   const q = quality === 'high' ? 1 : 0.55;
+  const horizon = options.horizon ?? true;
+  const low = quality === 'low';
   const ctx: Ctx = {
-    solid: new Batch(), far: new Batch(), flat: new Batch(), glass: new Batch(), bulbs: new Batch(),
+    solid: new Batch(), detail: new Batch(), far: new Batch(), flat: new Batch(), glass: new Batch(), bulbs: new Batch(),
     P: new Prims(), r: rng(20261102), space: new Space(), q, lamps: [], chimneys: [], signs: [],
   };
   const c = ctx;
@@ -908,19 +917,19 @@ export function buildTown(quality: 'low' | 'high'): TownGeometry {
     if (r() > 0.62 * (q > 0.7 ? 1 : 0.7)) return;
     if (!c.space.free(x, z, 1.5)) return;
     const kind = treeKinds[Math.floor(r() * treeKinds.length)]!;
-    addTree(c, c.solid, x, z, kind, 0.85 + r() * 0.45);
+    addTree(c, c.solid, x, z, kind, 0.85 + r() * 0.45, low ? 0 : 1);
     c.space.circle(x, z, 1.0);
   });
   // Forest belt beyond the town edge
-  scatter(3.4, 70, (x, z, r) => {
+  if (horizon) scatter(low ? 4.2 : 3.4, 70, (x, z, r) => {
     const d = Math.max(Math.abs(x), Math.abs(z));
-    if (d < 35 || Math.hypot(x, z) > 72) return;
-    if (r() > 0.8 * q + 0.1) return;
+    if (d < 35 || Math.hypot(x, z) > (low ? 58 : 72)) return;
+    if (r() > (low ? 0.55 : 0.9)) return;
     const kind = r() < 0.6 ? 'pine' : (r() < 0.8 ? 'round' : 'autumn');
     addTree(c, c.far, x, z, kind, 1.0 + r() * 0.7, 0, groundHeight(x, z));
   });
   // Distant hills ring (big soft blobs)
-  for (let i = 0; i < 18; i++) {
+  for (let i = 0; i < (horizon ? 18 : 0); i++) {
     const a = (i / 18) * Math.PI * 2 + c.r() * 0.2;
     const R = 115 + c.r() * 30;
     const hx = Math.cos(a) * R, hz = Math.sin(a) * R;
@@ -929,39 +938,42 @@ export function buildTown(quality: 'low' | 'high'): TownGeometry {
   scatter(2.4, 38, (x, z, r) => {
     if (r() > 0.36 * q) return;
     if (!c.space.free(x, z, 0.65)) return;
-    addBush(c, inTown(x, z) ? c.solid : c.far, x, z, 0.65 + r() * 0.5, r() < 0.3);
+    addBush(c, inTown(x, z) ? (low ? c.detail : c.solid) : (horizon ? c.far : c.detail), x, z, 0.65 + r() * 0.5, r() < 0.3);
     c.space.circle(x, z, 0.5);
   });
   scatter(2.6, 34, (x, z, r) => {
     if (r() > 0.4 * q) return;
     if (!c.space.free(x, z, 0.3)) return;
     const fc = pick(r, FLOWERS);
-    const n = 4 + Math.floor(r() * 5);
+    const n = low ? 3 : 4 + Math.floor(r() * 5);
     for (let i = 0; i < n; i++) {
       const fx = x + (r() - 0.5) * 1.2, fz = z + (r() - 0.5) * 1.2;
-      c.solid.add(c.P.ico(0), pick(r, LEAF), mtx(fx, 0.08, fz, r() * 6, 0.13, 0.09, 0.13), true);
-      c.solid.add(c.P.cyl(4), '#5e8f3e', mtx(fx, 0.13, fz, 0, 0.012, 0.22, 0.012));
-      c.solid.add(c.P.ico(0), fc, mtx(fx, 0.26, fz, r() * 6, 0.075, 0.06, 0.075), true);
+      if (!low) {
+        c.detail.add(c.P.ico(0), pick(r, LEAF), mtx(fx, 0.08, fz, r() * 6, 0.13, 0.09, 0.13), true);
+        c.detail.add(c.P.cyl(3), '#5e8f3e', mtx(fx, 0.13, fz, 0, 0.012, 0.22, 0.012));
+      }
+      c.detail.add(c.P.ico(0), fc, mtx(fx, low ? 0.12 : 0.26, fz, r() * 6, 0.085, 0.07, 0.085), true);
     }
   });
-  scatter(1.8, 40, (x, z, r) => {
+  if (!low) scatter(1.8, 40, (x, z, r) => {
     if (r() > 0.5 * q) return;
     if (!c.space.free(x, z, 0.15)) return;
     const col = pick(r, ['#6aa84f', '#7cb85b', '#8cc46a', '#5e9a46']);
     for (let i = 0; i < 3; i++) {
-      c.solid.add(c.P.cone(3), col, mtx(x + (r() - 0.5) * 0.18, 0.16, z + (r() - 0.5) * 0.18, r() * 6, 0.05, 0.34 + r() * 0.15, 0.05, (r() - 0.5) * 0.6, (r() - 0.5) * 0.6), true);
+      c.detail.add(c.P.cone(3), col, mtx(x + (r() - 0.5) * 0.18, 0.16, z + (r() - 0.5) * 0.18, r() * 6, 0.05, 0.34 + r() * 0.15, 0.05, (r() - 0.5) * 0.6, (r() - 0.5) * 0.6), true);
     }
   });
   scatter(6.5, 44, (x, z, r) => {
     if (r() > 0.3) return;
     if (!c.space.free(x, z, 0.5)) return;
     const s = 0.3 + r() * 0.5;
-    (inTown(x, z) ? c.solid : c.far).add(c.P.blob(Math.floor(r() * 6), 0.3, 0), pick(r, ['#a8a49c', '#b5b0a5', '#9b968c']), mtx(x, s * 0.2, z, r() * 6, s, s * 0.6, s * 0.85), true);
+    if (!inTown(x, z) && !horizon) return;
+    (inTown(x, z) ? c.detail : c.far).add(c.P.blob(Math.floor(r() * 6), 0.3, 0), pick(r, ['#a8a49c', '#b5b0a5', '#9b968c']), mtx(x, s * 0.2, z, r() * 6, s, s * 0.6, s * 0.85), true);
   });
 
   const out: TownGeometry = {
-    solid: c.solid.build(), far: c.far.build(), flat: c.flat.build(), glass: c.glass.build(), bulbs: c.bulbs.build(),
-    ground: buildGround(q), lamps: c.lamps, chimneys: c.chimneys, signs: c.signs,
+    solid: c.solid.build(), detail: c.detail.build(), far: c.far.build(), flat: c.flat.build(), glass: c.glass.build(), bulbs: c.bulbs.build(),
+    ground: buildGround(q, horizon), lamps: c.lamps, chimneys: c.chimneys, signs: c.signs,
   };
   c.P.dispose();
   return out;
@@ -983,4 +995,41 @@ export function poiAt(x: number, z: number): string | null {
     if (!best || score < best.score) best = { id: p.id, score };
   }
   return best?.id ?? null;
+}
+
+/**
+ * Minimal props for the transparent overlay: benches, café chairs/tables and the stage
+ * platform, so seated/dancing residents never hover in mid-air. Same seat heights (0.45 m).
+ */
+export function buildOverlayProps(): THREE.BufferGeometry {
+  const c: Ctx = {
+    solid: new Batch(), detail: new Batch(), far: new Batch(), flat: new Batch(), glass: new Batch(), bulbs: new Batch(),
+    P: new Prims(), r: rng(7), space: new Space(), q: 0.5, lamps: [], chimneys: [], signs: [],
+  };
+  for (const poi of POIS) {
+    if (poi.kind !== 'bench' || !poi.seats?.length) continue;
+    const xs = poi.seats.map(s => s.x), zs = poi.seats.map(s => s.z);
+    const cx = xs.reduce((a, b) => a + b, 0) / xs.length, cz = zs.reduce((a, b) => a + b, 0) / zs.length;
+    const span = poi.seats.length > 1 ? Math.hypot(xs[0]! - xs[xs.length - 1]!, zs[0]! - zs[zs.length - 1]!) : 0;
+    addBench(c, cx, cz, poi.seats[0]!.facing, span + 0.9);
+  }
+  const cafe = getPoi('cafe');
+  if (cafe?.seats) {
+    for (let i = 0; i + 1 < cafe.seats.length; i += 2) {
+      const s1 = cafe.seats[i]!, s2 = cafe.seats[i + 1]!;
+      const tx = (s1.x + s2.x) / 2, tz = (s1.z + s2.z) / 2;
+      c.solid.add(c.P.cyl(14), '#fbf7ef', mtx(tx, 0.76, tz, 0, 0.55, 0.05, 0.55));
+      c.solid.add(c.P.cyl(8), '#3d3a36', mtx(tx, 0.38, tz, 0, 0.05, 0.76, 0.05));
+      addChair(c, s1.x, s1.z, s1.facing, '#4e8f7a');
+      addChair(c, s2.x, s2.z, s2.facing, '#d9644f');
+    }
+  }
+  const st = getPoi('stage');
+  if (st) {
+    c.solid.add(c.P.cyl(24), '#8a6a52', mtx(st.position.x, 0.18, st.position.z, 0, 2.82, 0.36, 2.82));
+    c.solid.add(c.P.cyl(24), '#e0b98d', mtx(st.position.x, 0.4, st.position.z, 0, 2.62, 0.08, 2.62));
+  }
+  const g = c.solid.build();
+  c.P.dispose();
+  return g;
 }

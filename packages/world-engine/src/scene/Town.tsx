@@ -12,13 +12,15 @@ import { createWaterMaterial } from './water';
 export interface TownProps {
   quality: 'low' | 'high';
   onLocationSelect?: (poiId: string) => void;
+  /** Built-in forest belt / hills / rolling ground (default true). Turn off when an external landscape is mounted. */
+  horizon?: boolean;
 }
 
-export function Town({ quality, onLocationSelect }: TownProps) {
+export function Town({ quality, onLocationSelect, horizon = true }: TownProps) {
   const kit = useKit();
-  const town = useMemo(() => buildTown(quality), [quality]);
+  const town = useMemo(() => buildTown(quality, { horizon }), [quality, horizon]);
   useEffect(() => () => {
-    for (const g of [town.solid, town.far, town.flat, town.glass, town.bulbs, town.ground]) g.dispose();
+    for (const g of [town.solid, town.detail, town.far, town.flat, town.glass, town.bulbs, town.ground]) g.dispose();
   }, [town]);
 
   const plaza = useMemo(() => {
@@ -50,6 +52,7 @@ export function Town({ quality, onLocationSelect }: TownProps) {
       <mesh geometry={town.flat} material={kit.ground} receiveShadow />
       <mesh geometry={plaza.geo} material={plaza.mat} position={[0, 0.052, 0]} receiveShadow />
       <mesh geometry={town.solid} material={kit.solid} castShadow receiveShadow />
+      <mesh geometry={town.detail} material={kit.solid} receiveShadow />
       <mesh geometry={town.far} material={kit.solid} />
       <mesh geometry={town.glass} material={kit.glass} receiveShadow />
       <mesh geometry={town.bulbs} material={kit.bulbs} />

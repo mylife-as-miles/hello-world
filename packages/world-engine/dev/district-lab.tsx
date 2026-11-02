@@ -1,6 +1,8 @@
 /**
  * District lab (City District Engineer): http://localhost:5188/district-lab.html
- *   ?night=1 · ?t=<simulationTime seconds> · ?q=low · ?view=far · ?weather=rain
+ *   ?night=1 · ?t=<simulationTime seconds> · ?q=low · ?view=far|east|town|townfar · ?weather=rain
+ *   ?view=town mounts the real Town/Atmosphere/Sky/Portal with the real neighborhood camera pose
+ *   (fake store; ?nodistrict=1 to compare without the district).
  */
 import { StrictMode, useMemo } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -10,6 +12,15 @@ import { SceneStoreContext } from '../src/core/SceneContext';
 import type { SceneStore } from '../src/core/sceneStore';
 import { groundHeight } from '../src/scene/town';
 import { DowntownDistrict } from '../src/scene/district';
+import { createKit } from '../src/scene/kit';
+import { KitContext } from '../src/scene/context';
+import { Town } from '../src/scene/Town';
+import { Atmosphere } from '../src/scene/Atmosphere';
+import { SkyDome, Clouds, createSkyUniforms } from '../src/scene/Sky';
+import { Fountain } from '../src/scene/Fountain';
+import { Portal } from '../src/scene/Portal';
+import { PostFX } from '../src/scene/PostFX';
+import { poseFor } from '../src/scene/CameraRig';
 
 const params = new URLSearchParams(location.search);
 const night = params.get('night') === '1';
@@ -19,7 +30,14 @@ const view = params.get('view') ?? 'neighborhood';
 const weather = params.get('weather') ?? 'sunny';
 const flat = params.get('flat') === '1';
 
-const fakeStore = { current: { simulationTime: simTime, weather } } as unknown as SceneStore;
+const noDistrict = params.get('nodistrict') === '1';
+const integrated = view === 'town' || view === 'townfar';
+
+const fakeStore = {
+  current: { simulationTime: simTime, weather, residents: [], eventHistory: [], relationships: [] },
+  previous: null, receivedAt: performance.now(), snapshotInterval: 500, recentEvents: [],
+  onEvent: () => () => {}, onStructure: () => () => {}, onSnapshot: () => () => {}, latestEventFor: () => undefined,
+} as unknown as SceneStore;
 
 const LOOK = night
   ? { bg: '#1c2646', hs: '#3c4f86', hg: '#1c1f2e', hI: 0.62, sun: '#9fb2ff', sunI: 0.55 }
@@ -81,7 +99,58 @@ function Stats() {
   return null;
 }
 
+function TownCamera() {
+  const camera = useThree(s => s.camera);
+  useMemo(() => {
+    const pos = new THREE.Vector3(), look = new THREE.Vector3();
+    poseFor('neighborhood', 0, pos, look);
+    if (view === 'townfar') { pos.set(-8, 34, 62); look.set(2, 6, -20); }
+    camera.position.copy(pos); camera.lookAt(look); camera.updateProjectionMatrix();
+  }, [camera]);
+  return null;
+}
+
+function IntegratedContent() {
+  const sky = useMemo(() => createSkyUniforms(), []);
+  const cloudTint = useMemo(() => new THREE.Color('#ffffff'), []);
+  return (
+    <>
+      <TownCamera />
+      <Atmosphere transparent={false} quality={quality} sky={sky} cloudTint={cloudTint} />
+      <SkyDome uniforms={sky} />
+      <Clouds tint={cloudTint} />
+      <Town quality={quality} />
+      <Fountain />
+      <Portal quality={quality} />
+      {!noDistrict && <DowntownDistrict quality={quality} heightAt={flat ? undefined : groundHeight} />}
+      {quality === 'high' && <PostFX />}
+      <Stats />
+    </>
+  );
+}
+
+function IntegratedApp() {
+  const kit = useMemo(() => createKit(), []);
+  return (
+    <SceneStoreContext.Provider value={fakeStore}>
+      <Canvas shadows={{ type: THREE.PCFShadowMap }} dpr={quality === 'high' ? [1, 1.75] : [1, 1]}
+        gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, outputColorSpace: THREE.SRGBColorSpace }}
+        camera={{ fov: 42, near: 0.1, far: 1200, position: [0, 14.6, 23.2] }}
+        onCreated={({ gl }) => gl.setClearColor('#cfe6f3', 1)}>
+        <KitContext.Provider value={kit}>
+          <IntegratedContent />
+        </KitContext.Provider>
+      </Canvas>
+      <div className="hud">
+        <a href="?view=town">town day</a><a href="?view=town&night=1">town night</a><a href="?view=town&t=680">town dusk</a><a href="?view=townfar">town far</a><a href="?view=townfar&night=1">far night</a><a href="?">lab</a>
+        <span id="stats" />
+      </div>
+    </SceneStoreContext.Provider>
+  );
+}
+
 function App() {
+  if (integrated) return <IntegratedApp />;
   return (
     <SceneStoreContext.Provider value={fakeStore}>
       <Canvas dpr={[1, 1.5]} camera={{ fov: 42, near: 0.1, far: 1200, position: [0, 38, 46] }} gl={{ antialias: true }}

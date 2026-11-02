@@ -4,7 +4,7 @@
  * `source: 'simulation'` follow-up events (replies, wave-backs, welcomes...).
  */
 import type { WorldEvent, WorldEventPayload } from '@hello-world/contracts';
-import { appearanceFromSeed, normalizeAppearance } from '../avatars/catalog';
+import { appearanceFromSeed, hashString, normalizeAppearance } from '../avatars/catalog';
 import { POIS, SPAWN_POINT } from '../world/layout';
 import { worldClock } from '../world/time';
 import { gesture, goThen, interrupt, removeAgent, scoreChoices, startAction, startChoice } from './actions';
@@ -35,7 +35,7 @@ export function createAgent(w: World, init: NewAgentInit): Agent {
     x: init.x, z: init.z, zone: init.zone ?? 'portal', activity: init.activity ?? 'arriving through the portal',
     joinedAt: init.joinedAt, lastActiveAt: init.lastActiveAt, homeId: homeFor(init.id).id, seed: !!init.seed, visitor: !!init.visitor,
     leaveAt: Infinity, leaving: false, needsWelcome: false, action: null, path: [], mood: 0.2, sentiment: 0,
-    socialReadyAt: 0, lastReplyAt: -1e9,
+    socialReadyAt: 0, lastReplyAt: -1e9, moodShownAt: -1e9,
   };
 }
 
@@ -399,7 +399,22 @@ function onRaid(w: World, e: WorldEvent): void {
     });
   });
   const announcer = locals[0]?.a;
-  if (announcer) emit(w, 'social', announcer, { text: lines.raidAnnounce(w, announcer, placeVars(w, announcer, null, '')), payload: { action: 'celebrate', sentiment: 'positive', reaction: 'raid', visitors: n, channel: base } });
+  // Crowd size for the renderer (banner / extra crowd): `amount` is the real raid size, `visitors` the same clamped to the validator's 50.
+  const crowd = { visitors: Math.min(50, Math.max(n, amount)), amount: Math.max(n, amount), channel: base };
+  w.facts.raidCrowd = crowd;
+  if (announcer) emit(w, 'social', announcer, { text: lines.raidAnnounce(w, announcer, placeVars(w, announcer, null, '')), payload: { action: 'celebrate', sentiment: 'positive', reaction: 'raid', ...crowd } });
+}
+
+const RAIDER_NAMES = ['Pip', 'Sprout', 'Biscuit', 'Clover', 'Comet', 'Pebble', 'Maple', 'Nimbus', 'Waffles', 'Bean', 'Taffy', 'Echo', 'Sunny', 'Dot', 'Mango', 'Fig', 'Rook', 'Moss', 'Tango', 'Nova Jr', 'Pixel', 'Juniper', 'Bramble', 'Kiwi'] as const;
+
+/** Friendly, varied, unique-per-raid visitor names ("CozyStreamer's #1 fan", "Raider Pip", "Biscuit from CozyStreamer"). */
+export function raiderName(group: string, k: number, base: string): string {
+  if (k === 1) return cleanText(`${base}'s #1 fan`, 40);
+  const start = hashString(group) % RAIDER_NAMES.length;
+  const name = RAIDER_NAMES[(start + (k - 2) * 7) % RAIDER_NAMES.length]!;
+  const pattern = (hashString(`${group}:${k}`) >>> 3) % 4;
+  const full = pattern === 0 ? `Raider ${name}` : pattern === 1 ? `${name} from ${base}` : pattern === 2 ? `${name} the Raider` : `${base}'s fan ${name}`;
+  return cleanText(full, 40);
 }
 
 function spawnVisitor(w: World, group: string, k: number, base: string): void {
@@ -408,7 +423,7 @@ function spawnVisitor(w: World, group: string, k: number, base: string): void {
   const spot = arrivalSpot(w, { id } as Agent);
   const appearance = { ...appearanceFromSeed(id), baseModelId: VISITOR_BASES[(k - 1) % VISITOR_BASES.length]! };
   const a = createAgent(w, {
-    id, name: `${base} Raider ${k}`, x: spot.x, z: spot.z, appearance: normalizeAppearance(appearance),
+    id, name: raiderName(group, k, base), x: spot.x, z: spot.z, appearance: normalizeAppearance(appearance),
     personality: ['energetic', 'friendly', w.rng.pick(['playful', 'curious', 'chaotic', 'creative'] as const, 'raider-trait', id)],
     joinedAt: Math.floor(w.now), lastActiveAt: Math.floor(w.now), visitor: true,
     needs: { energy: 85, social: 60, fun: 70 },
@@ -422,7 +437,7 @@ function spawnVisitor(w: World, group: string, k: number, base: string): void {
     schedule(w, 2.2, w2 => {
       const v = w2.agents.get(id);
       if (!v) return;
-      emit(w2, 'chat', v, { text: lines.raidArrival(w2, v, placeVars(w2, v, null, '')), payload: { reaction: 'raid-arrival', sentiment: 'positive', channel: base } });
+      emit(w2, 'chat', v, { text: lines.raidArrival(w2, v, placeVars(w2, v, null, '')), payload: { reaction: 'raid-arrival', sentiment: 'positive', ...(w2.facts.raidCrowd ?? { channel: base }) } });
     });
   }
 }

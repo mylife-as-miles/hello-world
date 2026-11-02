@@ -8,7 +8,7 @@ import type { Affordance, PoiDef, PoiKind, Vec2 } from '../world/layout';
 import { POIS, PLAZA_RADIUS } from '../world/layout';
 import type { WorldClock } from '../world/time';
 import { BOOKS, DRINKS_COLD, DRINKS_HOT, FOODS, GAMES, PLAYGROUND_TOYS } from './dialogue';
-import { isSleeping, urgency } from './needs';
+import { isSleeping, lowestNeed, urgency } from './needs';
 import { atPlace, freeSeat, hasFreeSeat, pickSpot, placeName, pushOut, SEAT_BY_KEY } from './places';
 import { pathLength, planPath, RUN_SPEED, WALK_SPEED, meetingPoint } from './movement';
 import type { Temperament } from './personality';
@@ -33,49 +33,49 @@ const no = () => false;
 const dancerAt = (w: World, p: PoiDef, self: Agent) => [...w.agents.values()].find(o => o !== self && o.action?.type === 'dance' && o.action.poiId === p.id && o.action.phase === 'perform');
 
 export const ACTION_DEFS: ActionDef[] = [
-  { type: 'wander', affordance: 'wander', kinds: ['plaza', 'park', 'garden'], effects: { energy: -0.02, social: 0.06, fun: 0.22 }, duration: [14, 26], base: 0.2,
+  { type: 'wander', affordance: 'wander', kinds: ['plaza', 'park', 'garden'], effects: { energy: -0.05, social: 0.03, fun: 0.28 }, duration: [14, 26], base: 0.2,
     needsSeat: no, groundSit: no, pref: t => 0.6 + 0.4 * t.curiosity,
     phrase: (_w, _a, p) => (p.kind === 'plaza' ? `wandering around ${placeName(p)}` : `wandering through ${placeName(p)}`) },
-  { type: 'sit', affordance: 'sit', kinds: ['bench', 'cafe'], effects: { energy: 0.45, social: 0.04, fun: 0.08 }, duration: [18, 32], base: 0.14,
+  { type: 'sit', affordance: 'sit', kinds: ['bench', 'cafe'], effects: { energy: 0.5, social: 0.02, fun: -0.02 }, duration: [18, 32], base: 0.14,
     needsSeat: () => true, groundSit: no, pref: t => t.restLove, phrase: (_w, _a, p) => `sitting ${atPlace(p)}`,
     available: (w, a, p) => hasFreeSeat(w, p, a) },
-  { type: 'rest', affordance: 'rest', kinds: ['fountain', 'park', 'garden', 'bench', 'home'], effects: { energy: 0.65, social: 0, fun: 0.05 }, duration: [14, 26], base: 0.08,
+  { type: 'rest', affordance: 'rest', kinds: ['fountain', 'park', 'garden', 'bench', 'home'], effects: { energy: 0.7, social: 0, fun: 0 }, duration: [14, 26], base: 0.08,
     needsSeat: p => p.kind === 'bench', groundSit: p => p.kind !== 'bench', pref: t => t.restLove,
     phrase: (_w, _a, p) => (p.kind === 'home' ? `resting at ${p.name}` : `resting ${atPlace(p)}`),
     available: (w, a, p) => (p.kind === 'home' ? p.id === a.homeId && !a.visitor : p.kind === 'bench' ? hasFreeSeat(w, p, a) : true) },
-  { type: 'sleep', affordance: 'sleep', kinds: ['home'], effects: { energy: 1.5, social: 0, fun: 0 }, duration: [50, 100], base: 0,
+  { type: 'sleep', affordance: 'sleep', kinds: ['home'], effects: { energy: 1.4, social: 0, fun: 0 }, duration: [50, 100], base: 0,
     needsSeat: no, groundSit: () => true, pref: () => 1, phrase: (_w, _a, p) => `sleeping at ${p.name}`,
     available: (_w, a, p) => p.id === a.homeId && !a.visitor },
-  { type: 'drink', affordance: 'drink', kinds: ['cafe'], effects: { energy: 0.5, social: 0.15, fun: 0.25 }, duration: [16, 26], base: 0.2,
+  { type: 'drink', affordance: 'drink', kinds: ['cafe'], effects: { energy: 0.45, social: 0.15, fun: 0.05 }, duration: [16, 26], base: 0.2,
     needsSeat: () => true, groundSit: no, pref: t => Math.pow(t.foodie, 0.8),
     phrase: (w, a, p, c) => `drinking ${w.rng.pick(w.weather === 'rain' || w.weather === 'snow' || c.period === 'night' || c.period === 'morning' ? DRINKS_HOT : DRINKS_COLD, 'drink', a.id)} ${atPlace(p)}`,
     available: (w, a, p) => hasFreeSeat(w, p, a) },
-  { type: 'eat', affordance: 'eat', kinds: ['cafe'], effects: { energy: 0.7, social: 0.1, fun: 0.3 }, duration: [18, 30], base: 0.14,
+  { type: 'eat', affordance: 'eat', kinds: ['cafe'], effects: { energy: 0.6, social: 0.05, fun: 0.1 }, duration: [18, 30], base: 0.14,
     needsSeat: () => true, groundSit: no, pref: t => t.foodie,
     phrase: (w, a, p) => `eating ${w.rng.pick(FOODS, 'food', a.id)} ${atPlace(p)}`, available: (w, a, p) => hasFreeSeat(w, p, a) },
-  { type: 'dance', affordance: 'dance', kinds: ['stage'], effects: { energy: -0.35, social: 0.25, fun: 0.95 }, duration: [14, 24], base: 0.18,
+  { type: 'dance', affordance: 'dance', kinds: ['stage'], effects: { energy: -0.4, social: 0.15, fun: 0.9 }, duration: [14, 24], base: 0.18,
     needsSeat: no, groundSit: no, pref: t => (t.playfulness + t.creative) / 2,
     phrase: (w, _a, p, c) => (w.weather === 'rain' ? `dancing in the rain ${atPlace(p)}` : c.period === 'night' || c.period === 'evening' ? 'dancing under the stage lights' : `dancing ${atPlace(p)}`),
     available: (_w, a) => a.needs.energy > 22 },
-  { type: 'play', affordance: 'play', kinds: ['arcade', 'playground', 'park'], effects: { energy: -0.3, social: 0.1, fun: 1 }, duration: [16, 28], base: 0.18,
+  { type: 'play', affordance: 'play', kinds: ['arcade', 'playground', 'park'], effects: { energy: -0.35, social: 0.05, fun: 0.9 }, duration: [16, 28], base: 0.18,
     needsSeat: no, groundSit: no,
     pref: (t, p) => (p.kind === 'arcade' ? 0.45 * t.playfulness + 0.6 * t.competitive : p.kind === 'playground' ? t.playfulness : 0.8 * t.playfulness),
     phrase: (w, a, p) => (p.kind === 'arcade' ? `playing ${w.rng.pick(GAMES, 'game', a.id)} ${atPlace(p)}`
       : w.weather === 'snow' ? `playing in the snow ${atPlace(p)}`
         : p.kind === 'playground' ? `playing on ${w.rng.pick(PLAYGROUND_TOYS, 'toy', a.id)} ${atPlace(p)}` : `playing frisbee ${atPlace(p)}`),
     available: (_w, a) => a.needs.energy > 18 },
-  { type: 'read', affordance: 'read', kinds: ['park', 'bench'], effects: { energy: 0.15, social: -0.02, fun: 0.5 }, duration: [22, 38], base: 0.12,
+  { type: 'read', affordance: 'read', kinds: ['park', 'bench'], effects: { energy: 0.1, social: -0.05, fun: 0.45 }, duration: [22, 38], base: 0.12,
     needsSeat: p => p.kind === 'bench', groundSit: p => p.kind !== 'bench', pref: t => t.bookish,
     phrase: (w, a, p) => `reading ${w.rng.pick(BOOKS, 'book', a.id)} ${atPlace(p)}`,
     available: (w, a, p) => (p.kind === 'bench' ? hasFreeSeat(w, p, a) : true) },
-  { type: 'admire', affordance: 'admire', kinds: ['fountain', 'garden', 'portal', 'plaza'], effects: { energy: 0.1, social: 0.02, fun: 0.38 }, duration: [10, 18], base: 0.16,
+  { type: 'admire', affordance: 'admire', kinds: ['fountain', 'garden', 'portal', 'plaza'], effects: { energy: 0.05, social: 0, fun: 0.3 }, duration: [10, 18], base: 0.16,
     needsSeat: no, groundSit: no, pref: t => (t.curiosity + t.creative) / 2,
     phrase: (w, _a, p, c) => (w.weather === 'sunset' ? `admiring the sunset ${atPlace(p)}`
       : w.weather === 'snow' ? `admiring the snow ${atPlace(p)}`
         : p.kind === 'garden' ? `admiring the flowers ${atPlace(p)}`
           : c.period === 'night' ? `admiring the stars ${atPlace(p)}` : p.kind === 'plaza' ? `admiring the lamps ${atPlace(p)}` : `admiring ${placeName(p)}`),
     available: (w, _a, p, c) => p.kind !== 'plaza' || w.weather === 'sunset' || w.weather === 'snow' || c.period === 'night' || c.period === 'evening' },
-  { type: 'watch', affordance: 'watch', kinds: ['stage', 'plaza'], effects: { energy: 0.05, social: 0.2, fun: 0.38 }, duration: [10, 18], base: 0.12,
+  { type: 'watch', affordance: 'watch', kinds: ['stage', 'plaza'], effects: { energy: 0, social: 0.1, fun: 0.3 }, duration: [10, 18], base: 0.12,
     needsSeat: no, groundSit: no, pref: t => 0.7 + 0.3 * t.creative,
     phrase: (w, a, p) => { const d = p.kind === 'stage' ? dancerAt(w, p, a) : undefined; return d ? `watching ${d.displayName} dance` : `watching the crowd ${atPlace(p)}`; },
     available: (w, a, p) => (p.kind === 'stage' ? !!dancerAt(w, p, a) : [...w.agents.values()].filter(o => o !== a && Math.hypot(o.x, o.z) < PLAZA_RADIUS).length >= 3) },
@@ -170,6 +170,9 @@ export function scoreChoices(w: World, a: Agent, c: WorldClock): Choice[] {
           const u = urgency(a.needs[k]);
           s += gain > 0 ? (Math.min(gain, 40) / 20) * u : -(Math.min(-gain, 30) / 30) * u * 0.8;
         }
+        // A low need dominates: actions that fix it get a boost, the rest are damped.
+        const low = lowestNeed(a);
+        if (low.value < 32) s *= def.effects[low.key] >= 0.2 ? 1.8 : 0.55;
         s *= def.pref(t, p);
         s *= timeFactor(def.type, p, c, t);
         if (a.visitor) s *= def.type === 'dance' ? 1.4 : def.type === 'watch' || def.type === 'admire' || def.type === 'play' ? 1.2 : def.type === 'sit' || def.type === 'rest' || def.type === 'read' ? 0.6 : 1;

@@ -93,7 +93,7 @@ export function planDistrict(quality: 'low' | 'high'): DistrictLot[] {
 }
 
 /** Street lamps along both sidewalks (skips the neighborhood square and crossings). */
-export function planLamps(quality: 'low' | 'high'): DistrictLamp[] {
+export function planLamps(quality: 'low' | 'high', phase = 0, inset = 0.7): DistrictLamp[] {
   const out: DistrictLamp[] = [];
   const step = quality === 'high' ? 15 : 22;
   for (const s of DISTRICT_STREETS) {
@@ -102,8 +102,8 @@ export function planLamps(quality: 'low' | 'high'): DistrictLamp[] {
     const nx = -uz, nz = ux;
     for (let d = 6, i = 0; d < len - 4; d += step, i++) {
       for (const side of [-1, 1]) {
-        const off = s.width / 2 - 0.7;
-        const along = d + (side > 0 ? step / 2 : 0);
+        const off = s.width / 2 - inset;
+        const along = d + phase * step + (side > 0 ? step / 2 : 0);
         if (along > len - 4) continue;
         const x = s.ax + ux * along + nx * off * side, z = s.az + uz * along + nz * off * side;
         if (Math.max(Math.abs(x), Math.abs(z)) < 36) continue;
@@ -119,6 +119,11 @@ export function planLamps(quality: 'low' | 'high'): DistrictLamp[] {
     }
   }
   return out;
+}
+
+/** Street trees, interleaved with the lamps (high quality only). */
+export function planStreetTrees(): DistrictLamp[] {
+  return planLamps('high', 0.25, 0.85);
 }
 
 let cachedLots: DistrictLot[] | null = null;

@@ -364,8 +364,10 @@ export class AvatarAnimator {
     S(p, 'rightFoot', -0.02 - 0.08 * pos(sway), 0, roll);
     hipsOff(p, 0.022 * sway * k, (-0.006 - 0.004 * br - 0.008 * Math.abs(sway)) * k, 0);
     const a = armAmt;
-    arm(p, 1, 0.04 + 0.02 * br * a, 1.2 + 0.02 * br, 0, 0.15, 0.2 + 0.04 * Math.sin(t * 0.7 + 1));
-    arm(p, -1, 0.04 + 0.02 * br * a, 1.2 + 0.02 * br, 0, 0.15, 0.22 + 0.04 * Math.sin(t * 0.6));
+    // Arms hang close to the body (z ≈ ∓1.38; 1.25 reads as an A-pose on Townie
+    // proportions), slight forward swing (canonical x < 0 = forward), soft elbows.
+    arm(p, 1, -0.08 + 0.015 * br * a, 1.38 + 0.012 * br, 0, 0.12, 0.2 + 0.04 * Math.sin(t * 0.7 + 1));
+    arm(p, -1, -0.08 + 0.015 * br * a, 1.38 + 0.012 * br, 0, 0.12, 0.2 + 0.04 * Math.sin(t * 0.6));
     hand(p, 1, 0.1, 0.05); hand(p, -1, 0.1, 0.05);
   }
 
@@ -401,8 +403,8 @@ export class AvatarAnimator {
       hand(p, 1, 0.2, 0); hand(p, -1, 0.2, 0);
     } else {
       const sw = 0.42 * clamp(Math.sqrt(speed), 0.6, 1.3);
-      arm(p, 1, 0.05 + sw * s, 1.24, 0, 0.25, 0.25 + 0.25 * pos(-s));
-      arm(p, -1, 0.05 - sw * s, 1.24, 0, 0.25, 0.25 + 0.25 * pos(s));
+      arm(p, 1, -0.04 + sw * s, 1.3, 0, 0.2, 0.25 + 0.25 * pos(-s));
+      arm(p, -1, -0.04 - sw * s, 1.3, 0, 0.2, 0.25 + 0.25 * pos(s));
       hand(p, 1, 0.12, 0.05); hand(p, -1, 0.12, 0.05);
     }
   }
@@ -411,8 +413,8 @@ export class AvatarAnimator {
     this.poseIdle(p, 0.5);
     const t = this.t;
     const g1 = this.noise(t * 0.9, 0), g2 = this.noise(t * 1.25, 2), beat = Math.sin(t * 5.4);
-    arm(p, -1, -0.38 - 0.22 * g1, 1.18 - 0.08 * pos(g1), 0, 0.45, 1.35 + 0.3 * pos(g1) + 0.1 * beat * pos(g1 + 0.3));
-    arm(p, 1, -0.12 - 0.25 * pos(g2), 1.22, 0, 0.35 + 0.2 * pos(g2), 0.35 + 0.9 * pos(g2));
+    arm(p, -1, -0.38 - 0.22 * g1, 1.34 - 0.08 * pos(g1), 0, 0.45, 1.35 + 0.3 * pos(g1) + 0.1 * beat * pos(g1 + 0.3));
+    arm(p, 1, -0.1 - 0.25 * pos(g2), 1.36, 0, 0.3 + 0.2 * pos(g2), 0.25 + 0.9 * pos(g2));
     hand(p, -1, -0.25 + 0.15 * beat, 0.15); hand(p, 1, -0.15, 0.1);
     A(p, 'chest', 0, 0.06 * g1, 0);
     A(p, 'head', 0.05 * Math.sin(t * 3.1) * pos(g2 + 0.2), 0.08 * g1, 0.06 * Math.sin(t * 0.8));

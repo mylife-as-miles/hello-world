@@ -8,14 +8,24 @@ import type { WorldClock } from '../world/time';
 import { clamp, type Agent, type Needs } from './state';
 
 /** Points lost per simulation second (1 s = 1 game minute). */
-export const BASE_DECAY: Readonly<Needs> = { energy: 0.045, social: 0.09, fun: 0.085 };
+export const BASE_DECAY: Readonly<Needs> = { energy: 0.06, social: 0.11, fun: 0.1 };
+
+/**
+ * Diminishing returns: gains taper off above ~55 so needs hover in the 30–80
+ * band instead of pinning at 100 (full effect ≤ 55, half at ~77, ~0.1 at 95).
+ */
+export function gainFactor(value: number): number {
+  return clamp((100 - value) / 45, 0.06, 1);
+}
 
 export const clampNeed = (v: number) => clamp(v, 0, 100);
 
 /** How badly a need wants filling: ~0.06 when full … ~1.66 when empty. */
 export function urgency(value: number): number {
-  const d = 1 - clampNeed(value) / 100;
-  return 0.06 + d * d * 1.6;
+  const v = clampNeed(value);
+  const d = 1 - v / 100;
+  // Steep below 35 so low needs dominate goal selection.
+  return 0.05 + d * d * 1.5 + (v < 35 ? ((35 - v) / 35) * 1.6 : 0);
 }
 
 export function isSleeping(a: Agent): boolean {
@@ -32,17 +42,38 @@ export function decayNeeds(a: Agent, dt: number, clock: WorldClock): void {
   a.needs.fun = clampNeed(a.needs.fun - BASE_DECAY.fun * t.funDecay * (sleeping ? 0.2 : 1) * dt);
 }
 
+const add = (v: number, delta: number) => clampNeed(v + (delta > 0 ? delta * gainFactor(v) : delta));
+
 export function applyEffects(a: Agent, e: Needs, dt: number): void {
-  if (e.energy) a.needs.energy = clampNeed(a.needs.energy + e.energy * dt);
-  if (e.social) a.needs.social = clampNeed(a.needs.social + e.social * dt);
-  if (e.fun) a.needs.fun = clampNeed(a.needs.fun + e.fun * dt);
+  if (e.energy) a.needs.energy = add(a.needs.energy, e.energy * dt);
+  if (e.social) a.needs.social = add(a.needs.social, e.social * dt);
+  if (e.fun) a.needs.fun = add(a.needs.fun, e.fun * dt);
 }
 
-/** One-off need change (gift received, greeting...). */
+/** One-off need change (gift received, greeting...) — also with diminishing returns. */
 export function bump(a: Agent, e: Partial<Needs>): void {
-  if (e.energy) a.needs.energy = clampNeed(a.needs.energy + e.energy);
-  if (e.social) a.needs.social = clampNeed(a.needs.social + e.social);
-  if (e.fun) a.needs.fun = clampNeed(a.needs.fun + e.fun);
+  if (e.energy) a.needs.energy = add(a.needs.energy, e.energy);
+  if (e.social) a.needs.social = add(a.needs.social, e.social);
+  if (e.fun) a.needs.fun = add(a.needs.fun, e.fun);
+}
+
+export type NeedKey = keyof Needs;
+
+/** The need an activity mainly serves (used for satiation: stop when it is full). */
+export function primaryNeed(type: string): NeedKey | null {
+  switch (type) {
+    case 'sit': case 'rest': case 'sleep': case 'drink': case 'eat': return 'energy';
+    case 'wander': case 'dance': case 'play': case 'read': case 'admire': case 'watch': return 'fun';
+    case 'socialize': case 'converse': return 'social';
+    default: return null;
+  }
+}
+
+/** The lowest need (and its value). */
+export function lowestNeed(a: Agent): { key: NeedKey; value: number } {
+  const n = a.needs;
+  if (n.energy <= n.social && n.energy <= n.fun) return { key: 'energy', value: n.energy };
+  return n.social <= n.fun ? { key: 'social', value: n.social } : { key: 'fun', value: n.fun };
 }
 
 export function feel(a: Agent, delta: number): void {

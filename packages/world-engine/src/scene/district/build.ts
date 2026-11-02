@@ -8,7 +8,7 @@
  * → 2 draw calls for the whole district, no shadows, no per-frame allocations.
  */
 import * as THREE from 'three';
-import { DISTRICT_STREETS, planDistrict, planLamps, type DistrictLot } from './plan';
+import { DISTRICT_STREETS, planDistrict, planLamps, planStreetTrees, type DistrictLot } from './plan';
 
 type RGB = readonly [number, number, number];
 const BLACK: RGB = [0, 0, 0];
@@ -71,6 +71,26 @@ class Writer {
   }
 }
 
+/* ------------------------------------------------------------ low-poly tree crown template */
+let ICO: number[][][] | null = null;
+function icoTris(): number[][][] {
+  if (ICO) return ICO;
+  const g = new THREE.IcosahedronGeometry(1, 0).toNonIndexed();
+  const a = g.attributes.position!;
+  const tris: number[][][] = [];
+  for (let i = 0; i < a.count; i += 3) tris.push([0, 1, 2].map(k => [a.getX(i + k), a.getY(i + k), a.getZ(i + k)]));
+  g.dispose();
+  return (ICO = tris);
+}
+const LEAVES = ['#7bb35a', '#6aa457', '#8cc46a', '#5f9a52', '#9cc76a'].map(h => lin(h));
+const BLOSSOM = lin('#f2b0c0');
+const TRUNK = lin('#7a5a44');
+function addTree(p: Writer, x: number, y: number, z: number, s: number, crown: RGB) {
+  p.box(x - 0.13 * s, y, z - 0.13 * s, x + 0.13 * s, y + 1.3 * s, z + 0.13 * s, TRUNK);
+  const cy = y + 1.3 * s + 0.9 * s, rx = 1.15 * s, ry = 1.25 * s;
+  for (const t of icoTris()) p.poly(t.map(v => [x + v[0]! * rx, cy + v[1]! * ry, z + v[2]! * rx]), crown);
+}
+
 /* ------------------------------------------------------------ palettes */
 const WALLS = ['#f3e3c3', '#ecd2a8', '#e3a687', '#f1c09a', '#c9d3ad', '#b3c6d6', '#cdbfdc', '#d28a6c', '#ddd0c0', '#bfe0cc', '#f2dc98', '#e9b7b0', '#c7a58a', '#a9c4bd'].map(h => lin(h));
 const TRIMS = ['#fbf3e4', '#efe2cc', '#d9c7ae', '#b9a68f'].map(h => lin(h));
@@ -107,23 +127,38 @@ function windowTextures(size: number): { map: THREE.CanvasTexture; emissive: THR
   cb.fillStyle = '#000000'; cb.fillRect(0, 0, size, size);
   const r = (() => { let s = 1234567; return () => ((s = (s * 16807) % 2147483647) / 2147483647); })();
   const warm = ['#ffd27a', '#ffe0a3', '#ffc066', '#ffe9c2', '#ffcf8f', '#cfe3ff'];
-  for (let i = 0; i < cells; i++) for (let j = 0; j < cells; j++) {
-    const x = i * cs, y = j * cs;
-    // spandrel band (floor slab) — a touch darker than the wall
-    ca.fillStyle = '#e6e0d8'; ca.fillRect(x, y + cs * 0.86, cs, cs * 0.14);
-    const wx = x + cs * 0.2, wy = y + cs * 0.16, ww = cs * 0.6, wh = cs * 0.58;
-    const grd = ca.createLinearGradient(wx, wy, wx + ww, wy + wh);
-    grd.addColorStop(0, '#a9c3d8'); grd.addColorStop(0.55, '#6f88a3'); grd.addColorStop(1, '#5a6f88');
-    ca.fillStyle = grd; ca.fillRect(wx, wy, ww, wh);
-    ca.fillStyle = '#fbf7f0'; ca.fillRect(wx - cs * 0.03, wy + wh, ww + cs * 0.06, cs * 0.06); // sill
-    ca.fillStyle = 'rgba(255,255,255,0.35)'; ca.fillRect(wx + ww * 0.48, wy, cs * 0.04, wh);  // mullion
-    if (r() < 0.46) {
-      const col = warm[Math.floor(r() * warm.length)]!;
-      const g2 = cb.createLinearGradient(wx, wy, wx, wy + wh);
-      g2.addColorStop(0, col); g2.addColorStop(1, r() < 0.5 ? '#b5722e' : col);
-      cb.fillStyle = g2; cb.fillRect(wx, wy, ww, wh);
-    } else if (r() < 0.18) {
-      cb.fillStyle = '#3a2c40'; cb.fillRect(wx, wy, ww, wh); // dim TV-blue/purple glow
+  // Columns 0–7: style A (punched windows with sills) · columns 8–15: style B (office ribbon glazing).
+  for (let j = 0; j < cells; j++) {
+    let runLit = false;
+    for (let i = 0; i < cells; i++) {
+      const x = i * cs, y = j * cs;
+      const office = i >= cells / 2;
+      if (!office) {
+        ca.fillStyle = '#e6e0d8'; ca.fillRect(x, y + cs * 0.86, cs, cs * 0.14); // spandrel / floor slab
+        const wx = x + cs * 0.2, wy = y + cs * 0.16, ww = cs * 0.6, wh = cs * 0.58;
+        const grd = ca.createLinearGradient(wx, wy, wx + ww, wy + wh);
+        grd.addColorStop(0, '#a9c3d8'); grd.addColorStop(0.55, '#6f88a3'); grd.addColorStop(1, '#5a6f88');
+        ca.fillStyle = grd; ca.fillRect(wx, wy, ww, wh);
+        ca.fillStyle = '#fbf7f0'; ca.fillRect(wx - cs * 0.03, wy + wh, ww + cs * 0.06, cs * 0.06); // sill
+        ca.fillStyle = 'rgba(255,255,255,0.35)'; ca.fillRect(wx + ww * 0.48, wy, cs * 0.04, wh); // mullion
+        if (r() < 0.46) {
+          const col = warm[Math.floor(r() * warm.length)]!;
+          const g2 = cb.createLinearGradient(wx, wy, wx, wy + wh);
+          g2.addColorStop(0, col); g2.addColorStop(1, r() < 0.5 ? '#b5722e' : col);
+          cb.fillStyle = g2; cb.fillRect(wx, wy, ww, wh);
+        } else if (r() < 0.18) {
+          cb.fillStyle = '#3a2c40'; cb.fillRect(wx, wy, ww, wh); // dim TV glow
+        }
+      } else {
+        const wy = y + cs * 0.14, wh = cs * 0.64;
+        const grd = ca.createLinearGradient(x, wy, x + cs, wy + wh);
+        grd.addColorStop(0, '#b4cde0'); grd.addColorStop(0.5, '#7d97b2'); grd.addColorStop(1, '#647d98');
+        ca.fillStyle = grd; ca.fillRect(x, wy, cs, wh);
+        ca.fillStyle = 'rgba(255,255,255,0.55)'; ca.fillRect(x, wy, cs * 0.05, wh); // mullion at bay edge
+        ca.fillStyle = '#ece6dd'; ca.fillRect(x, y + cs * 0.82, cs, cs * 0.18);      // spandrel band
+        if (i === cells / 2 || r() < 0.3) runLit = r() < 0.5;                        // lit runs (open-plan floors)
+        if (runLit) { cb.fillStyle = r() < 0.75 ? '#fff0cf' : '#d6e8ff'; cb.fillRect(x, wy, cs, wh); }
+      }
     }
   }
   const map = new THREE.CanvasTexture(a), emissive = new THREE.CanvasTexture(b);
@@ -155,6 +190,9 @@ function addBuilding(f: Writer, p: Writer, lot: DistrictLot, high: boolean) {
   const store = high ? max + STORE_H : max + 0.2;
   const floors = Math.max(2, Math.round((lot.height - (store - max)) / FLOOR_H));
   const towerSplit = lot.style === 'tower' && high ? Math.round(floors * (0.62 + rnd() * 0.12)) : floors;
+  const rs = rnd();
+  const office = lot.style === 'tower' ? rs < 0.7 : lot.style === 'mid' ? rs < 0.3 : false;
+  const styleBase = office ? CELLS / 2 : 0;
 
   // Storefront band (high) or plain plinth (low)
   if (high) {
@@ -188,7 +226,9 @@ function addBuilding(f: Writer, p: Writer, lot: DistrictLot, high: boolean) {
     for (let i = 0; i < 4; i++) {
       const [ax, az] = ring[i]!, [bx, bz] = ring[i + 1]!;
       const len = Math.hypot(bx - ax, bz - az);
-      const u0 = (uOff + (face0 + i) * 3) / CELLS, u1 = u0 + len / lot.bayW / CELLS;
+      const span = Math.round(len / lot.bayW);
+      const start = (uOff + (face0 + i) * 3) % Math.max(1, CELLS / 2 - span + 1);
+      const u0 = (styleBase + start) / CELLS, u1 = u0 + span / CELLS;
       const v0 = (vOff + (y0 - store) / FLOOR_H) / CELLS, v1 = v0 + nF / CELLS;
       f.poly([[ax, y0, az], [bx, y0, bz], [bx, y1, bz], [ax, y1, az]], [cb, cb, ct, ct], BLACK, [[u0, v0], [u1, v0], [u1, v1], [u0, v1]]);
     }
@@ -237,6 +277,15 @@ function addBuilding(f: Writer, p: Writer, lot: DistrictLot, high: boolean) {
     const tank = lin('#a77b5a');
     p.box(wx - 1.1, roofY + 1.8, wz - 1.1, wx + 1.1, roofY + 4.2, wz + 1.1, tank);
     p.pyramid(wx, roofY + 4.2, wz, 1.25, 1.25, 1.2, lin('#6d5a4e'));
+  } else if (rnd() < 0.45) {
+    // cozy rooftop garden: lawn + a few little trees
+    const ix = Math.max(0.6, hx - 1.0), iz = Math.max(0.6, hz - 1.0);
+    p.box(lot.x - ix, roofY, lot.z - iz, lot.x + ix, roofY + 0.35, lot.z + iz, lin('#86b862'));
+    const n = 2 + Math.floor(rnd() * 3);
+    for (let i = 0; i < n; i++) {
+      const tx = lot.x + (rnd() - 0.5) * (ix * 1.4), tz = lot.z + (rnd() - 0.5) * (iz * 1.4);
+      addTree(p, tx, roofY + 0.35, tz, 0.55 + rnd() * 0.35, rnd() < 0.2 ? BLOSSOM : LEAVES[Math.floor(rnd() * LEAVES.length)]!);
+    }
   } else {
     // AC units / roof hatch
     const n = 1 + Math.floor(rnd() * 3);
@@ -293,7 +342,7 @@ function addLamp(p: Writer, x: number, z: number, dx: number, dz: number, high: 
   p.box(hx - 0.3, y + H - 0.55, hz - 0.3, hx + 0.3, y + H - 0.1, hz + 0.3, LAMP_HEAD, LAMP_GLOW);
   if (!high) return;
   // light pool on the street: octagon fan, warm centre → black rim (invisible by day)
-  const cx = x + dx * 1.6, cz = z + dz * 1.6, R = 3.4, N = 10;
+  const cx = x + dx * 2.5, cz = z + dz * 2.5, R = 3.0, N = 10;
   const cy = hAt(cx, cz) + 0.2;
   for (let i = 0; i < N; i++) {
     const a0 = (i / N) * Math.PI * 2, a1 = ((i + 1) / N) * Math.PI * 2;
@@ -322,6 +371,13 @@ export function buildDistrict(quality: 'low' | 'high', heightAt: (x: number, z: 
   for (const lot of lots) addBuilding(f, p, lot, high);
   for (const s of DISTRICT_STREETS) addStreet(p, s, high);
   for (const l of planLamps(quality)) addLamp(p, l.x, l.z, l.dx, l.dz, high);
+  if (high) {
+    let k = 0;
+    for (const t of planStreetTrees()) {
+      k++;
+      addTree(p, t.x, hAt(t.x, t.z) + 0.26, t.z, 0.85 + ((k * 37) % 10) / 25, k % 9 === 0 ? BLOSSOM : LEAVES[k % LEAVES.length]!);
+    }
+  }
 
   const tex = windowTextures(high ? 512 : 256);
   const facadeMat = new THREE.MeshStandardMaterial({

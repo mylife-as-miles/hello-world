@@ -58,14 +58,15 @@ function appearanceFor(id: string, i: number): AvatarAppearance {
 }
 
 async function main() {
-  const ids = REALISTIC_BASE_MODELS.map((b) => b.id);
+  const set = params.get('set');
+  const ids = REALISTIC_BASE_MODELS.map((b) => b.id).filter((id) => !set || id.startsWith(set + '-'));
   const n = ids.length;
   const t0 = performance.now();
   for (let row = 0; row < 2; row++) {
     await Promise.all(ids.map(async (id, i) => {
       const rig = await loadRealisticRig(appearanceFor(id, i), { lod: row === 0 ? 'high' : 'low' });
       if (!rig) { console.error('realistic rig failed', id); return; }
-      const x = (i - (n - 1) / 2) * 1.6;
+      const x = (i - (n - 1) / 2) * (n > 4 ? 1.25 : 1.6);
       const z = row === 0 ? 0 : -3;
       rig.root.position.set(x, 0, z);
       rig.root.rotation.y = row === 0 ? 0 : Math.PI / 2; // back row: profile (faces +X)

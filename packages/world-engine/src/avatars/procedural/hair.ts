@@ -19,8 +19,17 @@ interface CapOpts {
   /** extend below the head: y (relative to head bone) per |phi| for curtain bottoms */
   bottomY?: (absPhi: number) => number | null;
   shadeLow?: number;
-  /** vertical bumps (curly/afro) */
+  /** soft clumps (curly/afro): amplitude + integer lobe frequencies */
   bumps?: number;
+  lobe?: [number, number];
+}
+
+/** Smooth clump field in [0,1] (integer phi frequencies keep the back seam continuous). */
+export function lobes(phi: number, el: number, kp: number, ke: number): number {
+  const a = 0.5 + 0.5 * Math.sin(phi * kp + el * 2.3);
+  const b = 0.5 + 0.5 * Math.sin(el * ke - phi * 2 + 1.3);
+  const c = 0.5 + 0.5 * Math.sin(phi * (kp - 2) + el * (ke - 3) + 2.1);
+  return Math.pow(a * b * 0.6 + c * 0.4, 0.8) * smooth(Math.PI / 2, 1.15, el);
 }
 
 function lineAt(keys: number[][], aphi: number): number {
@@ -46,7 +55,7 @@ function capGeometry(o: CapOpts, lod: Lod): THREE.BufferGeometry {
       const vv = v / headPart;
       const el = lerp(Math.PI / 2 - 0.001, elMin, Math.pow(vv, 0.95));
       let off = o.off(phi, el, vv) + gd * smooth(0, 0.25, vv);
-      if (o.bumps) off += o.bumps * (0.5 + 0.5 * Math.sin(phi * 9 + el * 3) * Math.sin(el * 11 + phi * 2));
+      if (o.bumps) off += o.bumps * lobes(phi, el, o.lobe?.[0] ?? 9, o.lobe?.[1] ?? 9);
       // tuck the edge onto the scalp
       if (bottom === null) off *= lerp(1, 0.25, smooth(0.86, 1, vv));
       p = headPoint(phi, el, off);
@@ -75,12 +84,36 @@ function capGeometry(o: CapOpts, lod: Lod): THREE.BufferGeometry {
   }, nu, nv, { poleTop: headPoint(0, Math.PI / 2, o.off(0, Math.PI / 2, 0)), center: HC });
 }
 
-function hairShade(lowEl = -0.6, depth = 0.25) {
+function hairShade(lowEl = -0.6, depth = 0.25, grooves = 0) {
   return (x: number, y: number, z: number): V3 => {
     const el = Math.atan2(y - HC[1], Math.hypot(x - HC[0], z - HC[2]));
-    const s = 1 - depth + depth * smooth(lowEl, 1.1, el);
+    let s = 1 - depth + depth * smooth(lowEl, 1.1, el);
+    if (grooves) { const ph = Math.atan2(x - HC[0], z - HC[2]); s *= 0.87 + 0.13 * (0.5 + 0.5 * Math.cos(ph * grooves)) * (1 - smooth(1.0, 1.45, el)) + 0.13 * smooth(1.0, 1.45, el); }
     return [s, s, s];
   };
+}
+
+/**
+ * Approximate outward offset (m, unit head) of a hair style's surface at (phi, el):
+ * accessories (headphones, flower, crown, hats) sit on top of it instead of vanishing inside.
+ */
+export function hairOffset(styleIn: string, phi: number, el: number, hat: boolean): number {
+  const style = hat && styleIn === 'afro' ? 'curly' : styleIn;
+  const top = smooth(-0.2, 1.2, el);
+  const below = (line: number[][]) => el < lineAt(line, Math.abs(phi)) - 0.05;
+  switch (style) {
+    case 'bald': return 0;
+    case 'buzz': return below(STD_LINE) ? 0 : 0.004;
+    case 'mohawk': return (!hat && Math.abs(Math.sin(phi)) < 0.2 && el > 0.3) ? 0.075 : 0.004;
+    case 'short': return below(STD_LINE) ? 0 : 0.016 + (hat ? 0.004 : 0.016) * top;
+    case 'bob': return 0.02 + 0.012 * top + (el < 0 ? 0.03 : 0);
+    case 'long': return 0.02 + 0.01 * top + (el < 0 ? 0.035 : 0);
+    case 'ponytail': case 'bun': case 'braids': return below(SLEEK_LINE) ? 0 : 0.012 + 0.006 * top;
+    case 'curly': return below(STD_LINE) ? 0 : 0.026 + (hat ? 0 : 0.012 + 0.018) * top;
+    case 'afro': return 0.055 + 0.03 * smooth(-0.4, 0.9, el) + 0.024;
+    case 'spiky': return below(STD_LINE) ? 0 : 0.016 + 0.006 * top;
+    default: return 0.02;
+  }
 }
 
 /** Lock of hair lying on the head: control points given as [phi, el, off]. */
@@ -111,7 +144,7 @@ export function buildHair(b: GeoBuilder, styleIn: string, lod: Lod, hat: boolean
       add(capGeometry({ line: [[0, 0.56], [0.6, 0.48], [1.1, 0.16], [1.5, 0.0], [1.8, -0.1], [2.5, -0.5], [Math.PI, -0.62]], off: () => 0.0035, grooves: hi ? 90 : 0, grooveDepth: 0.0008 }, lod), hairShade(-0.6, 0.12));
       return;
     case 'short': {
-      add(capGeometry({ line: STD_LINE, off: vol(0.012, hat ? 0.004 : 0.016), grooves: 28, grooveDepth: 0.0035 }, lod));
+      add(capGeometry({ line: STD_LINE, off: vol(0.012, hat ? 0.004 : 0.016), grooves: 28, grooveDepth: 0.0035 }, lod), hairShade(-0.6, 0.25, 28));
       if (hi || true) {
         // swept fringe locks
         const locks: Array<[number, number]> = [[-0.5, 0.0], [-0.25, 0.04], [0.0, 0.06], [0.25, 0.05], [0.48, 0.02]];
@@ -126,7 +159,7 @@ export function buildHair(b: GeoBuilder, styleIn: string, lod: Lod, hat: boolean
         line: [[0, 0.5], [0.6, 0.42], [0.95, 0.0], [1.15, -0.62], [Math.PI / 2, -0.72], [Math.PI, -0.72]],
         off: (_p, el, v) => 0.016 + 0.012 * smooth(-0.1, 1.2, el) + 0.006 * Math.sin(v * Math.PI),
         grooves: 40, grooveDepth: 0.003, hang: { from: -0.05, flare: 0.1 },
-      }, lod));
+      }, lod), hairShade(-0.9, 0.25, 40));
       // straight bangs
       const bangs = grid((u, v) => {
         const phi = lerp(-0.92, 0.92, u);
@@ -142,13 +175,13 @@ export function buildHair(b: GeoBuilder, styleIn: string, lod: Lod, hat: boolean
         off: (_p, el) => 0.016 + 0.01 * smooth(-0.1, 1.2, el),
         grooves: 46, grooveDepth: 0.003, hang: { from: -0.1, flare: 0.16 },
         bottomY: (ap) => ap < 0.95 ? null : lerp(-0.08, -0.36, smooth(1.0, 2.6, ap)),
-      }, lod));
+      }, lod), hairShade(-1.4, 0.25, 46));
       add(lock([[0.62, 0.95, 0.018], [0.4, 0.62, 0.022], [0.32, 0.42, 0.012]], 0.04, 0.02, 0.012, lod));
       add(lock([[-0.2, 0.95, 0.018], [-0.36, 0.7, 0.022], [-0.5, 0.45, 0.014], [-0.7, 0.3, 0.008]], 0.04, 0.018, 0.012, lod));
       return;
     }
     case 'ponytail': {
-      add(capGeometry({ line: SLEEK_LINE, off: vol(0.009, 0.006), grooves: 36, grooveDepth: 0.0025 }, lod));
+      add(capGeometry({ line: SLEEK_LINE, off: vol(0.009, 0.006), grooves: 36, grooveDepth: 0.0025 }, lod), hairShade(-0.6, 0.25, 36));
       if (!hat || true) {
         const tie: V3 = [0, HC[1] + 0.07, HC[2] - 0.13];
         b.add('#2d2a3a|plastic', new THREE.TorusGeometry(0.022, 0.009, 6, hi ? 16 : 8).deleteAttribute('uv'), { matrix: new THREE.Matrix4().compose(new THREE.Vector3(...tie), new THREE.Quaternion().setFromEuler(new THREE.Euler(0.5, 0, 0)), new THREE.Vector3(1, 1, 1)) });
@@ -158,7 +191,7 @@ export function buildHair(b: GeoBuilder, styleIn: string, lod: Lod, hat: boolean
       return;
     }
     case 'bun': {
-      add(capGeometry({ line: SLEEK_LINE, off: vol(0.009, 0.006), grooves: 36, grooveDepth: 0.0025 }, lod));
+      add(capGeometry({ line: SLEEK_LINE, off: vol(0.009, 0.006), grooves: 36, grooveDepth: 0.0025 }, lod), hairShade(-0.6, 0.25, 36));
       if (!hat) {
         const top = headPoint(Math.PI, 1.15, 0.045);
         sphereAt(b, H, top, [0.056, 0.05, 0.056], lod, hairShade(0, 0.2));
@@ -167,32 +200,18 @@ export function buildHair(b: GeoBuilder, styleIn: string, lod: Lod, hat: boolean
       return;
     }
     case 'curly': {
-      add(capGeometry({ line: STD_LINE, off: vol(0.022, hat ? 0.0 : 0.012), grooves: 0, bumps: 0.006 }, lod));
-      if (hi && !hat) {
-        let k = 0;
-        for (let ring = 0; ring < 4; ring++) {
-          const el = lerp(0.45, 1.2, ring / 3.2);
-          const n = Math.round(lerp(13, 5, ring / 3));
-          for (let i = 0; i < n; i++) {
-            const phi = -Math.PI + ((i + (ring % 2) * 0.5) / n) * Math.PI * 2;
-            const elc = Math.max(el, lineAt(STD_LINE, Math.abs(phi)) + 0.12);
-            const r = 0.024 + 0.006 * ((k++ * 37) % 5) / 5;
-            sphereAt(b, H, headPoint(phi, elc, 0.02), r, lod, hairShade(-0.4, 0.2));
-          }
+      add(capGeometry({ line: STD_LINE, off: vol(0.024, hat ? 0.0 : 0.012), grooves: 0, bumps: hat ? 0 : 0.019, lobe: [9, 10] }, lod), hairShade(-0.5, 0.3));
+      if (!hat) {
+        // soft fringe curls along the hairline
+        for (let i = 0; i < 7; i++) {
+          const phi = lerp(-0.75, 0.75, i / 6);
+          add(lock([[phi * 0.9, 0.85, 0.03], [phi, 0.6, 0.032], [phi * 1.05, 0.46, 0.02]], 0.03, 0.022, 0.016, lod), hairShade(0.0, 0.25));
         }
       }
       return;
     }
     case 'afro': {
-      add(capGeometry({ line: [[0, 0.5], [0.6, 0.42], [1.1, 0.0], [1.5, -0.25], [Math.PI, -0.62]], off: (_p, el) => 0.05 + 0.03 * smooth(-0.4, 0.9, el), grooves: 0, bumps: 0.012 }, lod), hairShade(-0.6, 0.3));
-      if (hi) {
-        for (let i = 0; i < 26; i++) {
-          const phi = -Math.PI + ((i * 0.618) % 1) * Math.PI * 2;
-          const el = lerp(0.1, 1.3, ((i * 0.382) % 1));
-          if (Math.abs(phi) < 0.8 && el < 0.7) continue;
-          sphereAt(b, H, headPoint(phi, el, 0.07), 0.04, lod, hairShade(-0.6, 0.25));
-        }
-      }
+      add(capGeometry({ line: [[0, 0.5], [0.6, 0.42], [1.1, 0.0], [1.5, -0.25], [Math.PI, -0.62]], off: (_p, el) => 0.055 + 0.03 * smooth(-0.4, 0.9, el), grooves: 0, bumps: 0.024, lobe: [7, 6] }, lod), hairShade(-0.6, 0.32));
       return;
     }
     case 'spiky': {
@@ -224,7 +243,7 @@ export function buildHair(b: GeoBuilder, styleIn: string, lod: Lod, hat: boolean
       return;
     }
     case 'braids': {
-      add(capGeometry({ line: SLEEK_LINE, off: (phi) => 0.009 - 0.004 * Math.exp(-(phi * phi) / 0.004), grooves: 36, grooveDepth: 0.0025 }, lod));
+      add(capGeometry({ line: SLEEK_LINE, off: (phi) => 0.009 - 0.004 * Math.exp(-(phi * phi) / 0.004), grooves: 36, grooveDepth: 0.0025 }, lod), hairShade(-0.6, 0.25, 36));
       for (const side of [1, -1]) {
         const start = headPoint(side * 1.95, -0.25, 0.01);
         const segN = hi ? 9 : 5;

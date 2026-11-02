@@ -1,18 +1,22 @@
 /**
- * Realistic avatar loader: photoreal CARLA 0.10 / Epic MetaHuman-derived bodies from the Valdrada dataset
- * (see ./assets/NOTICE.md for licences — CC BY 4.0 + MetaHuman licence: rendering only, never datasets / AI training).
+ * Realistic avatar loader: photoreal bodies from the Valdrada dataset (see ./assets/NOTICE.md for licences):
+ *  - 'mh-*': CARLA 0.10 walkers with Epic MetaHuman components — CC BY 4.0 "CARLA Simulator (carla.org)" + MetaHuman
+ *    licence (rendering / interactive use only; never for building datasets or training/testing AI).
+ *  - 'rb-*': Microsoft Rocketbox Avatar Library bodies, re-bound by Valdrada to the same CARLA skeleton — MIT.
  *
- * The Valdrada body GLBs carry NO glTF skin: they hold three LODs (each an 'opaque' + a 'hair' primitive) with
- * JOINTS_0/WEIGHTS_0 indexing the manifest skeleton, plus per-vertex _SLOT/_CLS/_PART attributes. Textures live in
- * KTX2 2D arrays upstream; the layers our bodies use were extracted offline to small WebP files (assets/tex/aN = albedo
- * layer N, hN = hair layer N). Here we rebuild a plain three.js SkinnedMesh: bones from the manifest rest pose
- * (./bodies.ts), one material group per (slot, UDIM tile), props (_PART >= 10) dropped.
+ * The Valdrada body GLBs carry NO glTF skin: they hold three LODs (each an 'opaque' + a 'hair' primitive) whose
+ * JOINTS_0/WEIGHTS_0 index the manifest skeleton, plus per-vertex _SLOT/_CLS/_PART attributes. Textures live in KTX2 2D
+ * arrays upstream; the layers our bodies use were extracted offline to WebP (assets/tex/[r]aN = albedo layer N,
+ * [r]hN = hair layer N, 'r' prefix = Rocketbox arrays). Here we rebuild a plain three.js SkinnedMesh: the bind pose
+ * comes from the manifest's inverse bind matrices (./bodies.ts), one material group per (slot, UDIM tile), and props
+ * (_PART >= 10: bags, phones) are dropped.
  *
- * The skeleton already rests in a T-pose, faces +Z with its left side on +X and feet on y = 0, i.e. it matches the
- * canonical frame of ../rig.ts. Retarget (three-vrm "normalized rig" style): canonical bone c has local rotation q_c
- * relative to an identity T-pose; its world (rig-root frame) rotation is N_c = N_parent(c) · q_c, and the raw bone's
- * world rotation becomes N_c · R_rest (R_rest = the raw bone's rest world rotation). Unmapped raw bones keep their rest
- * local rotation. Contract: loadRealisticRig never rejects — any failure resolves to null (caller falls back).
+ * Retarget (three-vrm "normalized rig" style). The bodies face +Z with their left on +X and feet on y = 0, like the
+ * canonical frame of ../rig.ts. CARLA bodies are bound in a T-pose, Rocketbox bodies in an A-pose; a rest correction K
+ * (shortest arc taking upper-arm and forearm directions onto ±X) makes canonical identity a T-pose for both.
+ * Canonical bone c with local rotation q_c has world (rig-root frame) rotation N_c = N_parent(c) · q_c; the raw bone's
+ * world rotation becomes N_c · K_b · R_b (R_b = bind world rotation). Unmapped raw bones keep their bind local rotation.
+ * Contract: loadRealisticRig never rejects — any failure resolves to null (the caller falls back to procedural).
  */
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
@@ -20,7 +24,7 @@ import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.j
 import type { AvatarAppearance } from '@hello-world/contracts';
 import { HUMAN_BONES, type AttachSlot, type AvatarLod, type ExpressionName, type HumanBoneName, type HumanoidRig } from '../rig';
 import { BODIES, SKELETONS, type RealisticBodyData } from './bodies';
-export { REALISTIC_BASE_MODELS, REALISTIC_SUPPORT, isRealisticBase } from './catalog';
+export { REALISTIC_BASE_MODELS, REALISTIC_SUPPORT, isRealisticBase, realisticSupportFor } from './catalog';
 export type { AppearanceSupport } from './catalog';
 
 const GLB_URLS: Record<string, string> = {
@@ -28,10 +32,14 @@ const GLB_URLS: Record<string, string> = {
   'mh-marco': new URL('./assets/SK_euroM_.glb', import.meta.url).href,
   'mh-amara': new URL('./assets/SK_AfroW_03_GEN23.glb', import.meta.url).href,
   'mh-kenji': new URL('./assets/SK_AsiaM_v2.glb', import.meta.url).href,
+  'rb-sofia': new URL('./assets/RB_Female_Adult_01.glb', import.meta.url).href,
+  'rb-daniel': new URL('./assets/RB_Male_Adult_01.glb', import.meta.url).href,
+  'rb-claire': new URL('./assets/RB_Business_Female_01.glb', import.meta.url).href,
+  'rb-james': new URL('./assets/RB_Business_Male_01.glb', import.meta.url).href,
 };
 const texUrl = (file: string): string => new URL(`./assets/tex/${file}.webp`, import.meta.url).href;
 
-/** Canonical bone -> raw Valdrada/CARLA bone name (gen2 + gen3 skeletons share these). */
+/** Canonical bone -> raw Valdrada/CARLA bone name (gen2 + gen3 skeletons share these; Rocketbox is re-bound to gen2). */
 const BONE_MAP: Partial<Record<HumanBoneName, string>> = {
   hips: 'crl_hips__C', spine: 'crl_spine__C', chest: 'crl_spine01__C', neck: 'crl_neck__C', head: 'crl_Head__C',
   leftShoulder: 'crl_shoulder__L', leftUpperArm: 'crl_arm__L', leftLowerArm: 'crl_foreArm__L', leftHand: 'crl_hand__L',
@@ -39,7 +47,7 @@ const BONE_MAP: Partial<Record<HumanBoneName, string>> = {
   leftUpperLeg: 'crl_thigh__L', leftLowerLeg: 'crl_leg__L', leftFoot: 'crl_foot__L', leftToes: 'crl_toe__L',
   rightUpperLeg: 'crl_thigh__R', rightLowerLeg: 'crl_leg__R', rightFoot: 'crl_foot__R', rightToes: 'crl_toe__R',
 };
-/** Canonical hierarchy (parent of each HUMAN_BONES entry, -1 for hips). */
+/** Canonical hierarchy (parent of each HUMAN_BONES entry). */
 const CANON_PARENT: Record<HumanBoneName, HumanBoneName | null> = {
   hips: null, spine: 'hips', chest: 'spine', upperChest: 'chest', neck: 'upperChest', head: 'neck',
   leftShoulder: 'upperChest', leftUpperArm: 'leftShoulder', leftLowerArm: 'leftUpperArm', leftHand: 'leftLowerArm',
@@ -62,8 +70,13 @@ function stats(): Stats {
 interface PartGeo { geo: THREE.BufferGeometry; hair: boolean; groups: { slot: number; tile: number }[] }
 interface BodyAsset {
   id: string; data: RealisticBodyData; bones: string[]; parents: number[];
-  restLocalT: THREE.Vector3[]; restLocalQ: THREE.Quaternion[]; restWorldQ: THREE.Quaternion[]; restWorldP: THREE.Vector3[];
-  boneInverses: THREE.Matrix4[]; lods: PartGeo[][];
+  /** Bind pose, local (relative to parent bone / model) and world (model space). */
+  restLocalT: THREE.Vector3[]; restLocalQ: THREE.Quaternion[]; restWorldP: THREE.Vector3[];
+  /** Rest world rotation used by the retarget: bind world rotation with the A→T-pose arm correction applied. */
+  tposeWorldQ: THREE.Quaternion[];
+  boneInverses: THREE.Matrix4[];
+  /** [0] = LOD0 (high), [1] = LOD1 (low). */
+  lods: PartGeo[][];
 }
 
 const bodyCache = new Map<string, Promise<BodyAsset | null>>();
@@ -78,11 +91,11 @@ function loadTexture(file: string): Promise<THREE.Texture | null> {
       new THREE.TextureLoader().load(texUrl(file), (t) => {
         t.flipY = false; // glTF UV convention (same orientation as the upstream KTX2 layers)
         t.colorSpace = THREE.SRGBColorSpace;
-        t.wrapS = t.wrapT = THREE.RepeatWrapping; // UDIM tile 1 (u in [1,2)) samples its own layer file
+        t.wrapS = t.wrapT = THREE.RepeatWrapping; // UDIM tile 1 (u in [1,2)) samples its own layer file with u - 1
         t.anisotropy = 4;
         t.needsUpdate = true;
         resolve(t);
-      }, undefined, () => resolve(null));
+      }, undefined, () => { texCache.delete(file); resolve(null); });
     });
     texCache.set(file, p);
   }
@@ -149,41 +162,62 @@ function buildPart(mesh: THREE.Mesh, data: RealisticBodyData): PartGeo | null {
   return { geo, hair, groups };
 }
 
+/** World-space rest corrections that turn an A-pose arm chain into a T-pose (identity for T-posed bodies). */
+function armCorrections(bones: string[], worldP: THREE.Vector3[]): Map<number, THREE.Quaternion> {
+  const K = new Map<number, THREE.Quaternion>();
+  for (const [s, x] of [['L', 1], ['R', -1]] as const) {
+    const ua = bones.indexOf('crl_arm__' + s), fa = bones.indexOf('crl_foreArm__' + s), h = bones.indexOf('crl_hand__' + s);
+    if (ua < 0 || fa < 0 || h < 0) continue;
+    const target = new THREE.Vector3(x, 0, 0);
+    const dUA = worldP[fa]!.clone().sub(worldP[ua]!).normalize();
+    const kUA = new THREE.Quaternion().setFromUnitVectors(dUA, target);
+    const dFA = worldP[h]!.clone().sub(worldP[fa]!).normalize().applyQuaternion(kUA);
+    const kFA = new THREE.Quaternion().setFromUnitVectors(dFA, target).multiply(kUA);
+    K.set(ua, kUA); K.set(fa, kFA); K.set(h, kFA.clone());
+  }
+  return K;
+}
+
 async function loadBody(id: string): Promise<BodyAsset | null> {
   const data = BODIES[id], url = GLB_URLS[id];
   if (!data || !url) return null;
   const skel = SKELETONS[data.skeleton];
-  if (!skel) return null;
+  if (!skel || data.ibm.length < skel.bones.length * 16) return null;
   loader ??= new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
   const gltf = await loader.loadAsync(url);
   gltf.scene.updateMatrixWorld(true);
   const lods: PartGeo[][] = [];
-  for (let li = 0; li < 3; li++) {
+  for (let li = 0; li < 2; li++) {
     const node = gltf.scene.getObjectByName('LOD' + li);
     const parts: PartGeo[] = [];
     node?.traverse((o) => { if ((o as THREE.Mesh).isMesh) { const p = buildPart(o as THREE.Mesh, data); if (p) parts.push(p); } });
     lods.push(parts);
-    // source geometry is no longer needed once rebuilt
-    node?.traverse((o) => { if ((o as THREE.Mesh).isMesh) (o as THREE.Mesh).geometry.dispose(); });
   }
+  gltf.scene.traverse((o) => { if ((o as THREE.Mesh).isMesh) (o as THREE.Mesh).geometry.dispose(); });
   if (!lods[0]!.length) return null;
+  // Bind pose from the inverse bind matrices (for CARLA bodies this equals the manifest rest pose; Rocketbox bodies are
+  // bound in an A-pose that differs from the manifest's T-pose reference).
   const nb = skel.bones.length;
-  const restLocalT: THREE.Vector3[] = [], restLocalQ: THREE.Quaternion[] = [], restWorldQ: THREE.Quaternion[] = [], restWorldP: THREE.Vector3[] = [];
-  const worldM: THREE.Matrix4[] = [], boneInverses: THREE.Matrix4[] = [];
+  const boneInverses: THREE.Matrix4[] = [], worldM: THREE.Matrix4[] = [];
+  const restLocalT: THREE.Vector3[] = [], restLocalQ: THREE.Quaternion[] = [], restWorldP: THREE.Vector3[] = [], restWorldQ: THREE.Quaternion[] = [];
+  const s = new THREE.Vector3(), m = new THREE.Matrix4();
   for (let i = 0; i < nb; i++) {
-    const t = new THREE.Vector3(data.refT[i * 3]!, data.refT[i * 3 + 1]!, data.refT[i * 3 + 2]!);
-    const q = new THREE.Quaternion(data.refR[i * 4]!, data.refR[i * 4 + 1]!, data.refR[i * 4 + 2]!, data.refR[i * 4 + 3]!).normalize();
-    restLocalT.push(t); restLocalQ.push(q);
-    const m = new THREE.Matrix4().compose(t, q, new THREE.Vector3(1, 1, 1));
-    const p = skel.parents[i]!;
-    const w = p >= 0 ? worldM[p]!.clone().multiply(m) : m;
+    const ibm = new THREE.Matrix4().fromArray(data.ibm, i * 16);
+    boneInverses.push(ibm);
+    const w = ibm.clone().invert();
     worldM.push(w);
-    const wp = new THREE.Vector3(), wq = new THREE.Quaternion(), ws = new THREE.Vector3();
-    w.decompose(wp, wq, ws);
-    restWorldQ.push(wq); restWorldP.push(wp);
-    boneInverses.push(w.clone().invert());
+    const wp = new THREE.Vector3(), wq = new THREE.Quaternion();
+    w.decompose(wp, wq, s);
+    restWorldP.push(wp); restWorldQ.push(wq.normalize());
+    const p = skel.parents[i]!;
+    m.copy(p >= 0 ? worldM[p]! : new THREE.Matrix4()).invert().multiply(w);
+    const lt = new THREE.Vector3(), lq = new THREE.Quaternion();
+    m.decompose(lt, lq, s);
+    restLocalT.push(lt); restLocalQ.push(lq.normalize());
   }
-  return { id, data, bones: skel.bones, parents: skel.parents, restLocalT, restLocalQ, restWorldQ, restWorldP, boneInverses, lods };
+  const K = armCorrections(skel.bones, restWorldP);
+  const tposeWorldQ = restWorldQ.map((q, i) => { const k = K.get(i); return k ? k.clone().multiply(q) : q.clone(); });
+  return { id, data, bones: skel.bones, parents: skel.parents, restLocalT, restLocalQ, restWorldP, tposeWorldQ, boneInverses, lods };
 }
 
 function getBody(id: string): Promise<BodyAsset | null> {
@@ -195,6 +229,8 @@ function getBody(id: string): Promise<BodyAsset | null> {
   }
   return p;
 }
+
+const texName = (body: BodyAsset, hair: boolean, layer: number): string => `${body.data.set === 'rb' ? 'r' : ''}${hair ? 'h' : 'a'}${layer}`;
 
 /* --------------------------------------------------------------- materials */
 
@@ -226,8 +262,9 @@ function tintedMaterial(base: THREE.MeshStandardMaterial, tint: THREE.Color): TH
       .replace('#include <common>', '#include <common>\nuniform vec3 uHwTint;')
       .replace('#include <map_fragment>', `#include <map_fragment>
       {
+        // luminance keeps folds/stitching; the floor lets dark garments still read as the chosen colour
         float hwL = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722));
-        diffuseColor.rgb = mix(diffuseColor.rgb, uHwTint * clamp(hwL * 2.6, 0.0, 1.4), 0.82);
+        diffuseColor.rgb = mix(diffuseColor.rgb, uHwTint * clamp(0.22 + hwL * 1.9, 0.0, 1.3), 0.85);
       }`);
   };
   m.customProgramCacheKey = () => 'hw-realistic-tint';
@@ -238,13 +275,15 @@ function tintedMaterial(base: THREE.MeshStandardMaterial, tint: THREE.Color): TH
 
 const _q = new THREE.Quaternion();
 const _v = new THREE.Vector3();
+const IDENTITY = new THREE.Matrix4();
 
 class RealisticRig implements HumanoidRig {
   readonly root = new THREE.Group();
-  readonly kind = 'vrm' as const; // HumanoidRig['kind'] is 'procedural' | 'vrm'; this behaves like a skinned (VRM-style) rig
-  readonly realistic = true;
+  readonly kind = 'realistic' as const;
   readonly baseModelId: string;
+  readonly lod: AvatarLod;
   readonly height: number;
+  /** Rest hip / knee heights above the feet (m, root frame) — read by AvatarAnimator's seat solver. */
   readonly hipsHeight: number;
   readonly kneeHeight: number;
   private readonly model = new THREE.Group();
@@ -262,7 +301,9 @@ class RealisticRig implements HumanoidRig {
 
   constructor(private readonly body: BodyAsset, lod: AvatarLod, appearance: AvatarAppearance, textures: Map<string, THREE.Texture | null>) {
     this.baseModelId = body.id;
-    const h01 = Number.isFinite(appearance.body?.height) ? Math.min(1, Math.max(0, appearance.body.height)) : 0.5;
+    this.lod = lod;
+    const hRaw = appearance.body?.height;
+    const h01 = typeof hRaw === 'number' && Number.isFinite(hRaw) ? Math.min(1, Math.max(0, hRaw)) : 0.5;
     this.height = 1.6 + 0.25 * h01;
     this.scale = this.height / body.data.height;
     this.root.name = 'realistic-avatar';
@@ -288,38 +329,37 @@ class RealisticRig implements HumanoidRig {
     this.hipsHeight = (body.restWorldP[this.hipsIdx]?.y ?? 1) * this.scale;
     this.kneeHeight = (body.restWorldP[kneeIdx]?.y ?? 0.5) * this.scale;
 
-    const skeleton = new THREE.Skeleton(this.bones, body.boneInverses.map((m) => m.clone()));
-    const tint = appearance.outfit?.color ? safeColor(appearance.outfit.color) : null;
-    const parts = body.lods[lod === 'low' ? 1 : 0]!.length ? body.lods[lod === 'low' ? 1 : 0]! : body.lods[0]!;
-    for (const part of parts) {
+    const skeleton = new THREE.Skeleton(this.bones, body.boneInverses.map((mm) => mm.clone()));
+    const tint = body.data.set === 'mh' && appearance.outfit?.color ? safeColor(appearance.outfit.color) : null;
+    const li = lod === 'low' && body.lods[1]?.length ? 1 : 0;
+    for (const part of body.lods[li]!) {
       const mats = part.groups.map(({ slot, tile }) => {
-        const layer = body.data.layers[slot]! + tile;
-        const tex = textures.get((part.hair ? 'h' : 'a') + layer) ?? null;
+        const tex = textures.get(texName(body, part.hair, body.data.layers[slot]! + tile)) ?? null;
         const base = baseMaterial(body, slot, tile, part.hair, tex);
         if (tint && !part.hair && body.data.part[slot] === 1 && body.data.cls[slot] === 1) {
-          const m = tintedMaterial(base, tint);
-          this.ownMaterials.push(m);
-          return m;
+          const tm = tintedMaterial(base, tint);
+          this.ownMaterials.push(tm);
+          return tm;
         }
         return base;
       });
       const mesh = new THREE.SkinnedMesh(part.geo, mats);
       mesh.name = part.hair ? 'realistic-hair' : 'realistic-body';
       mesh.castShadow = true; mesh.receiveShadow = !part.hair;
-      mesh.frustumCulled = false;
+      mesh.frustumCulled = false; // skinned bounds move with the pose; residents are culled by the caller
       this.model.add(mesh);
-      mesh.bind(skeleton, new THREE.Matrix4());
+      mesh.bind(skeleton, IDENTITY);
     }
 
     // Proxies for AvatarAnimator's seat solver (it looks up Object3Ds named 'hips' / 'leftLowerLeg').
     const proxy = (name: string, raw: string) => { const i = body.bones.indexOf(raw); if (i < 0) return; const o = new THREE.Object3D(); o.name = name; this.bones[i]!.add(o); };
     proxy('hips', 'crl_hips__C');
     proxy('leftLowerLeg', 'crl_leg__L');
-    // Attach points: axes aligned with the rig root at rest, unscaled, small offsets in metres (root frame).
+    // Attach points: axes aligned with the rig root at the canonical rest, unscaled, offsets in metres (root frame).
     const mk = (slot: AttachSlot, raw: string, off: [number, number, number]) => {
       const i = body.bones.indexOf(raw); if (i < 0) return;
       const o = new THREE.Object3D(); o.name = 'attach:' + slot;
-      const inv = body.restWorldQ[i]!.clone().invert();
+      const inv = body.tposeWorldQ[i]!.clone().invert();
       o.quaternion.copy(inv);
       o.position.set(off[0], off[1], off[2]).divideScalar(this.scale).applyQuaternion(inv);
       o.scale.setScalar(1 / this.scale);
@@ -345,7 +385,7 @@ class RealisticRig implements HumanoidRig {
     this.dirty = true;
   }
 
-  setExpression(_name: ExpressionName, _weight: number): void { /* CARLA bodies ship without morph targets */ }
+  setExpression(_name: ExpressionName, _weight: number): void { /* these bodies ship without morph targets */ }
 
   getAttachPoint(slot: AttachSlot): THREE.Object3D | null { return this.attach[slot] ?? null; }
 
@@ -353,7 +393,6 @@ class RealisticRig implements HumanoidRig {
 
   private applyPose(): void {
     this.dirty = false;
-    // canonical world rotations (rig-root frame)
     for (let c = 0; c < HUMAN_BONES.length; c++) {
       const p = CANON_PARENT_IDX[c]!;
       if (p < 0) this.canonWorld[c]!.copy(this.canonLocal[c]!);
@@ -365,7 +404,7 @@ class RealisticRig implements HumanoidRig {
       const bone = this.bones[i]!;
       const c = this.canonOf[i]!;
       if (c >= 0) {
-        this.boneWorld[i]!.multiplyQuaternions(this.canonWorld[c]!, B.restWorldQ[i]!);
+        this.boneWorld[i]!.multiplyQuaternions(this.canonWorld[c]!, B.tposeWorldQ[i]!);
         if (p >= 0) bone.quaternion.copy(_q.copy(this.boneWorld[p]!).invert()).multiply(this.boneWorld[i]!);
         else bone.quaternion.copy(this.boneWorld[i]!);
       } else {
@@ -374,7 +413,7 @@ class RealisticRig implements HumanoidRig {
         else this.boneWorld[i]!.copy(bone.quaternion);
       }
     }
-    // hips offset: canonical metres (root frame) -> hips parent's local frame
+    // hips offset: canonical metres (root frame) -> the hips parent's local frame
     const h = this.hipsIdx;
     if (h >= 0) {
       const p = B.parents[h]!;
@@ -388,20 +427,39 @@ class RealisticRig implements HumanoidRig {
     this.root.removeFromParent();
     for (const m of this.ownMaterials) m.dispose();
     this.ownMaterials.length = 0;
-    // geometries, shared materials and textures stay cached for other residents
+    // geometries, shared materials and textures stay cached for other residents (see disposeRealisticCache)
   }
 }
 
 function safeColor(s: string): THREE.Color | null {
-  try { const c = new THREE.Color(); c.set(s); return c; } catch { return null; }
+  const v = typeof s === 'string' ? s.trim().toLowerCase() : '';
+  if (!v) return null;
+  try {
+    if (/^#([0-9a-f]{3}|[0-9a-f]{6})$/.test(v) || /^(rgb|hsl)a?\(/.test(v)) return new THREE.Color().setStyle(v);
+    const named = (THREE.Color.NAMES as Record<string, number>)[v];
+    return named === undefined ? null : new THREE.Color(named);
+  } catch { return null; }
 }
 
-/** Ids of the realistic bases this loader can build (all entries of REALISTIC_BASE_MODELS). */
-export const REALISTIC_BASE_IDS = Object.keys(GLB_URLS);
+/** Ids of the realistic bases this loader can build. */
+export const REALISTIC_BASE_IDS: readonly string[] = Object.keys(GLB_URLS);
+
+/** Start fetching/decoding a base (e.g. when the creator shows its card). Never rejects. */
+export function preloadRealisticBase(baseModelId: string): Promise<boolean> {
+  return GLB_URLS[baseModelId] ? getBody(baseModelId).then((b) => !!b) : Promise.resolve(false);
+}
+
+/** Drop every cached body/texture/material (e.g. when leaving the world). Live rigs must be disposed first. */
+export function disposeRealisticCache(): void {
+  for (const p of bodyCache.values()) void p.then((b) => b?.lods.forEach((l) => l.forEach((part) => part.geo.dispose())));
+  for (const p of texCache.values()) void p.then((t) => t?.dispose());
+  for (const m of matCache.values()) m.dispose();
+  bodyCache.clear(); texCache.clear(); matCache.clear();
+}
 
 /**
- * Build a realistic rig for `appearance.baseModel` (an 'mh-*' id). Resolves null (never rejects) on unknown ids or any
- * load error, so the caller can fall back to the procedural rig.
+ * Build a realistic rig for `appearance.baseModelId` ('mh-*' / 'rb-*'). Resolves null (never rejects) on unknown ids or
+ * any load error, so the caller can fall back to the procedural rig. lod 'high' → LOD0 (~30k verts), 'low' → LOD1 (~10k).
  */
 export async function loadRealisticRig(appearance: AvatarAppearance, opts: { lod?: AvatarLod } = {}): Promise<HumanoidRig | null> {
   const st = stats();
@@ -410,9 +468,11 @@ export async function loadRealisticRig(appearance: AvatarAppearance, opts: { lod
     if (!GLB_URLS[id]) { st.realisticFailed++; return null; }
     const body = await getBody(id);
     if (!body) { st.realisticFailed++; return null; }
-    const lod = opts.lod ?? 'high';
+    const lod: AvatarLod = opts.lod === 'low' ? 'low' : 'high';
     const files = new Set<string>();
-    for (const part of body.lods[lod === 'low' ? 1 : 0] ?? []) for (const g of part.groups) files.add((part.hair ? 'h' : 'a') + (body.data.layers[g.slot]! + g.tile));
+    for (const part of body.lods[lod === 'low' && body.lods[1]?.length ? 1 : 0] ?? []) {
+      for (const g of part.groups) files.add(texName(body, part.hair, body.data.layers[g.slot]! + g.tile));
+    }
     const textures = new Map<string, THREE.Texture | null>();
     await Promise.all([...files].map(async (f) => textures.set(f, await loadTexture(f))));
     const rig = new RealisticRig(body, lod, appearance, textures);

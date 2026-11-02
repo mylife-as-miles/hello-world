@@ -4,7 +4,6 @@
  * calls for the whole town). Also: deterministic RNG + canvas sign textures.
  */
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 
 const tmpColor = new THREE.Color();
@@ -20,39 +19,92 @@ export function mtx(x: number, y: number, z: number, ry = 0, sx = 1, sy = 1, sz 
   return new THREE.Matrix4().compose(tmpPos.set(x, y, z), tmpQuat, tmpScale.set(sx, sy, sz));
 }
 
-export class Batch {
-  private parts: THREE.BufferGeometry[] = [];
-  /**
-   * @param flat recompute normals per face (faceted low-poly look)
-   */
-  add(src: THREE.BufferGeometry, color: THREE.ColorRepresentation, matrix: THREE.Matrix4, flat = false): void {
-    const g = src.index ? src.toNonIndexed() : src.clone();
-    for (const name of Object.keys(g.attributes)) if (name !== 'position' && name !== 'normal') g.deleteAttribute(name);
-    g.applyMatrix4(matrix);
-    if (flat || !g.attributes.normal) g.computeVertexNormals();
-    const n = g.attributes.position!.count;
-    const c = new Float32Array(n * 3);
-    tmpColor.set(color);
-    for (let i = 0; i < n; i++) { c[i * 3] = tmpColor.r; c[i * 3 + 1] = tmpColor.g; c[i * 3 + 2] = tmpColor.b; }
-    g.setAttribute('color', new THREE.BufferAttribute(c, 3));
-    this.parts.push(g);
+class FloatBuf {
+  arr = new Float32Array(1 << 15);
+  n = 0;
+  ensure(extra: number) {
+    if (this.n + extra <= this.arr.length) return;
+    let cap = this.arr.length;
+    while (cap < this.n + extra) cap *= 2;
+    const next = new Float32Array(cap);
+    next.set(this.arr.subarray(0, this.n));
+    this.arr = next;
   }
+  view(): Float32Array { return this.arr.slice(0, this.n); }
+}
+
+const _v = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
+const _n = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
+const _c = [new THREE.Color(), new THREE.Color(), new THREE.Color()];
+const _nm = new THREE.Matrix3();
+const _e1 = new THREE.Vector3(), _e2 = new THREE.Vector3(), _fn = new THREE.Vector3();
+
+/**
+ * Accumulates transformed, vertex-coloured triangles straight into typed arrays
+ * (no per-part geometry clones / merges → fast town builds).
+ */
+export class Batch {
+  private pos = new FloatBuf();
+  private nor = new FloatBuf();
+  private col = new FloatBuf();
+  private parts = 0;
+
+  /** @param flat recompute normals per face (faceted low-poly look) */
+  add(src: THREE.BufferGeometry, color: THREE.ColorRepresentation, matrix: THREE.Matrix4, flat = false): void {
+    tmpColor.set(color);
+    this.push(src, matrix, flat, null);
+  }
+
   /** Add an already vertex-coloured geometry (keeps its colours). */
   addColored(src: THREE.BufferGeometry, matrix: THREE.Matrix4): void {
-    const g = src.index ? src.toNonIndexed() : src.clone();
-    for (const name of Object.keys(g.attributes)) if (name !== 'position' && name !== 'normal' && name !== 'color') g.deleteAttribute(name);
-    g.applyMatrix4(matrix);
-    this.parts.push(g);
+    this.push(src, matrix, false, src.attributes.color ?? null);
   }
-  get size(): number { return this.parts.length; }
+
+  private push(src: THREE.BufferGeometry, matrix: THREE.Matrix4, flat: boolean, colors: THREE.BufferAttribute | THREE.InterleavedBufferAttribute | null) {
+    const P = src.attributes.position;
+    if (!P) return;
+    const N = flat ? undefined : src.attributes.normal;
+    const idx = src.index;
+    const count = idx ? idx.count : P.count;
+    const tris = Math.floor(count / 3);
+    _nm.getNormalMatrix(matrix);
+    this.pos.ensure(tris * 9); this.nor.ensure(tris * 9); this.col.ensure(tris * 9);
+    const pa = this.pos.arr, na = this.nor.arr, ca = this.col.arr;
+    for (let t = 0; t < tris; t++) {
+      for (let k = 0; k < 3; k++) {
+        const vi = idx ? idx.getX(t * 3 + k) : t * 3 + k;
+        _v[k]!.fromBufferAttribute(P, vi).applyMatrix4(matrix);
+        if (N) _n[k]!.fromBufferAttribute(N, vi).applyMatrix3(_nm).normalize();
+        if (colors) _c[k]!.fromBufferAttribute(colors, vi); else _c[k]!.copy(tmpColor);
+      }
+      if (!N) {
+        _e1.subVectors(_v[1]!, _v[0]!); _e2.subVectors(_v[2]!, _v[0]!);
+        _fn.crossVectors(_e1, _e2).normalize();
+        _n[0]!.copy(_fn); _n[1]!.copy(_fn); _n[2]!.copy(_fn);
+      }
+      for (let k = 0; k < 3; k++) {
+        const o = this.pos.n;
+        pa[o] = _v[k]!.x; pa[o + 1] = _v[k]!.y; pa[o + 2] = _v[k]!.z;
+        na[o] = _n[k]!.x; na[o + 1] = _n[k]!.y; na[o + 2] = _n[k]!.z;
+        ca[o] = _c[k]!.r; ca[o + 1] = _c[k]!.g; ca[o + 2] = _c[k]!.b;
+        this.pos.n += 3; this.nor.n += 3; this.col.n += 3;
+      }
+    }
+    this.parts++;
+  }
+
+  get size(): number { return this.parts; }
+
   build(): THREE.BufferGeometry {
-    if (!this.parts.length) return new THREE.BufferGeometry();
-    const merged = mergeGeometries(this.parts, false) ?? new THREE.BufferGeometry();
-    for (const p of this.parts) p.dispose();
-    this.parts = [];
-    merged.computeBoundingSphere();
-    merged.computeBoundingBox();
-    return merged;
+    const g = new THREE.BufferGeometry();
+    if (!this.pos.n) return g;
+    g.setAttribute('position', new THREE.BufferAttribute(this.pos.view(), 3));
+    g.setAttribute('normal', new THREE.BufferAttribute(this.nor.view(), 3));
+    g.setAttribute('color', new THREE.BufferAttribute(this.col.view(), 3));
+    this.pos = new FloatBuf(); this.nor = new FloatBuf(); this.col = new FloatBuf(); this.parts = 0;
+    g.computeBoundingSphere();
+    g.computeBoundingBox();
+    return g;
   }
 }
 
@@ -69,7 +121,8 @@ export class Prims {
   /** Real-size rounded box (bevel radius stays round). */
   rbox(w: number, h: number, d: number, r = 0.06): THREE.BufferGeometry {
     const k = `rb${w.toFixed(2)}_${h.toFixed(2)}_${d.toFixed(2)}_${r.toFixed(2)}`;
-    return this.get(k, () => new RoundedBoxGeometry(w, h, d, 2, Math.min(r, w / 2 - 0.001, h / 2 - 0.001, d / 2 - 0.001)));
+    const seg = Math.max(w, h, d) < 1.3 ? 1 : 2;
+    return this.get(k, () => new RoundedBoxGeometry(w, h, d, seg, Math.min(r, w / 2 - 0.001, h / 2 - 0.001, d / 2 - 0.001)));
   }
   /** Unit cylinder radius 1 height 1. */
   cyl(seg = 10, open = false): THREE.BufferGeometry { return this.get(`cyl${seg}${open}`, () => new THREE.CylinderGeometry(1, 1, 1, seg, 1, open)); }

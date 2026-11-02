@@ -84,9 +84,10 @@ void main() {
   gl_FragColor = vec4(vC * max(I, 1.0), min(I, 1.0));
 }`;
 
-export function Portal({ quality }: { quality: 'low' | 'high' }) {
+export function Portal({ quality, overlay = false }: { quality: 'low' | 'high'; overlay?: boolean }) {
   const kit = useKit();
   const p = getPoi('portal')?.position ?? { x: 0, z: -24 };
+  const root = useRef<THREE.Group>(null);
   const ring = useRef<THREE.Group>(null);
   const light = useRef<THREE.PointLight>(null);
   const beam = useRef<THREE.Mesh>(null);
@@ -118,10 +119,18 @@ export function Portal({ quality }: { quality: 'low' | 'high' }) {
     for (let i = 0; i < M * 4; i++) seeds[i] = Math.abs(Math.sin(i * 12.9898 + 78.233) * 43758.5453) % 1;
     moteGeo.setAttribute('aSeed', new THREE.BufferAttribute(seeds, 4));
     const moteMat = new THREE.ShaderMaterial({ vertexShader: MOTE_VERT, fragmentShader: MOTE_FRAG, uniforms: { ...uniforms, uScale: { value: 600 } }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false });
-    return { stoneGeo, runeGeo, discMat, haloMat, beamMat, runeMat, discGeo, haloGeo, beamGeo, moteGeo, moteMat, uniforms };
+    // Grounding plinth (used in overlay mode, where the town's own plinth is not drawn)
+    const P2 = new Prims();
+    const plinth = new Batch();
+    plinth.add(P2.cyl(28), '#a9a397', mtx(0, 0.13, 0, 0, 3.4, 0.26, 3.0));
+    plinth.add(P2.cyl(28), '#bdb6a8', mtx(0, 0.36, 0, 0, 2.8, 0.22, 2.3));
+    for (const sx of [-1, 1]) plinth.add(P2.rbox(0.9, 2.1, 1.0, 0.08), '#9a9488', mtx(sx * 2.55, 1.35, 0));
+    const plinthGeo = plinth.build();
+    P2.dispose();
+    return { stoneGeo, runeGeo, discMat, haloMat, beamMat, runeMat, discGeo, haloGeo, beamGeo, moteGeo, moteMat, uniforms, plinthGeo };
   }, [kit, quality]);
   useEffect(() => () => {
-    for (const r of [res.stoneGeo, res.runeGeo, res.discMat, res.haloMat, res.beamMat, res.runeMat, res.discGeo, res.haloGeo, res.beamGeo, res.moteGeo, res.moteMat]) r.dispose();
+    for (const r of [res.stoneGeo, res.runeGeo, res.discMat, res.haloMat, res.beamMat, res.runeMat, res.discGeo, res.haloGeo, res.beamGeo, res.moteGeo, res.moteMat, res.plinthGeo]) r.dispose();
   }, [res]);
 
   useFrame((state, dt) => {
@@ -139,12 +148,18 @@ export function Portal({ quality }: { quality: 'low' | 'high' }) {
     res.runeMat.color.setScalar(0.8 + env.lights * 1.5 + raid * 3.5);
     if (light.current) light.current.intensity = 2 + env.lights * 5 + raid * 30 + flash * 80;
     if (beam.current) beam.current.visible = raid > 0.01;
+    // Overlay: the portal only appears (grounded on its plinth) while a raid is happening.
+    if (overlay && root.current) {
+      root.current.visible = raid > 0.01;
+      root.current.scale.setScalar(Math.max(0.001, Math.min(1, raid * 1.4)));
+    }
     const cam = state.camera as THREE.PerspectiveCamera;
     res.moteMat.uniforms.uScale!.value = (state.size.height * state.viewport.dpr) / (2 * Math.tan(THREE.MathUtils.degToRad((cam.fov ?? 45) / 2)));
   });
 
   return (
-    <group position={[p.x, 0, p.z]}>
+    <group ref={root} position={[p.x, 0, p.z]} visible={!overlay}>
+      {overlay && <mesh geometry={res.plinthGeo} material={kit.solid} castShadow receiveShadow />}
       <group position={[0, 2.65, 0]}>
         <group ref={ring}>
           <mesh geometry={res.stoneGeo} material={kit.solid} castShadow receiveShadow />

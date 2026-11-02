@@ -112,7 +112,7 @@ function World() {
     return () => { timers.forEach(clearTimeout); clearInterval(iv); };
   }, [runtime]);
   return <>
-    <Canvas dpr={1} camera={{ position: [0, 6, 11], fov: 45 }} style={{ position: 'fixed', inset: 0 }}>
+    <Canvas dpr={1} camera={{ position: params.get('cam') === 'far' ? [-0.6, 14.6, 23.2] : [0, 6, 11], fov: 45 }} style={{ position: 'fixed', inset: 0 }}>
       <color attach="background" args={['#24313a']} />
       <hemisphereLight args={['#dfefff', '#3a2f28', 1.2]} />
       <directionalLight position={[4, 8, 6]} intensity={2.2} />

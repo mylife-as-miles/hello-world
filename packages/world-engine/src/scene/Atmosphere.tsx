@@ -74,7 +74,7 @@ export function Atmosphere({ transparent, quality, sky, cloudTint }: AtmosphereP
   const fog = useMemo(() => new THREE.Fog('#cfe6f3', 70, 230), []);
   const look = useMemo(newLook, []);
   const golden = useMemo(newLook, []);
-  const tmp = useMemo(() => ({ sunDir: new THREE.Vector3(), moon: new THREE.Vector3(), gold: new THREE.Vector3(), key: new THREE.Vector3(), target: new THREE.Vector3(0, 0, -2) }), []);
+  const tmp = useMemo(() => ({ sunDir: new THREE.Vector3(), sunUp: new THREE.Vector3(), moon: new THREE.Vector3(), gold: new THREE.Vector3(), key: new THREE.Vector3(), target: new THREE.Vector3(0, 0, -2) }), []);
 
   useEffect(() => {
     if (transparent) { scene.fog = null; scene.background = null; return; }
@@ -141,7 +141,7 @@ export function Atmosphere({ transparent, quality, sky, cloudTint }: AtmosphereP
     tmp.sunDir.set(Math.sin(az) * Math.cos(el), Math.sin(el), -Math.cos(az) * Math.cos(el)).normalize();
     tmp.moon.set(-0.35, 0.82, 0.45).normalize();
     tmp.gold.set(-0.86, 0.3, 0.2).normalize();
-    const sunUp = tmp.sunDir.clone();
+    const sunUp = tmp.sunUp.copy(tmp.sunDir);
     sunUp.y = Math.max(sunUp.y, 0.16); sunUp.normalize();
     const dayW = smooth(0.05, 0.4, day);
     tmp.key.copy(tmp.moon).lerp(sunUp, dayW).lerp(tmp.gold, sunset).normalize();

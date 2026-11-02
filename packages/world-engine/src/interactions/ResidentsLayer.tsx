@@ -15,7 +15,7 @@ import type { ResidentStructure, SceneStore } from '../core/sceneStore';
 import { useAvatarRig, type AvatarLod } from '../avatars/index';
 import { hashString } from '../avatars/catalog';
 import { animationForVerb, parseActivityVerb, type AnimationFamily } from '../world/activities';
-import { findSeatNear } from '../world/layout';
+import { findSeatNear, getPoi } from '../world/layout';
 import { AvatarAnimator, RUN_SPEED, WALK_SPEED, type GestureName } from './animation/AvatarAnimator';
 import { EmoteSystem, GiftSystem, makeNameplateTexture, type EmoteKind } from './effects';
 
@@ -24,12 +24,29 @@ export interface ResidentsLayerProps {
   onResidentSelect?: (id: string) => void;
   quality?: 'low' | 'high';
   viewerResidentId?: string;
+  /**
+   * Transparent stream-overlay mode: no seats/benches are drawn, so residents
+   * never sit or sleep on empty air (they stand instead). Defaults to auto:
+   * true when the canvas is transparent (alpha) and the scene has no background.
+   */
+  overlay?: boolean;
 }
 
 const TELEPORT_DISTANCE = 8;
-const BUBBLE_MAX_VISIBLE = 8;
+/** Max simultaneous speech bubbles (nearest/newest win; viewer's own always first). */
+const BUBBLE_MAX_VISIBLE = 6;
+const BUBBLE_MAX_VISIBLE_LOW = 4;
 const BUBBLE_MAX_DISTANCE = 45;
-const NAMEPLATE_FAR = 32;
+/** On-screen bubble scale clamp (base text 14 px → never below 14 px, never huge up close). */
+const BUBBLE_MIN_SCALE = 1;
+const BUBBLE_MAX_SCALE = 1.3;
+/** Distance (m) at which bubbles reach their minimum scale. */
+const BUBBLE_SCALE_DISTANCE = 11.5;
+const NAMEPLATE_SOLID = 22;
+const NAMEPLATE_FAR = 36;
+/** Only residents this close to a confetti burst / raid portal cheer. */
+const CHEER_RADIUS = 12;
+const VIEWER_EMOTE_SCALE = 1.35;
 
 // ---------------------------------------------------------------------------
 // Shared per-layer state
@@ -52,6 +69,10 @@ class BubbleHub {
   private subs = new Map<string, (b: BubbleData | null) => void>();
   readonly active = new Map<string, BubbleData>();
   readonly els = new Map<string, HTMLDivElement>();
+  /** Unscaled bubble size (px), measured once per bubble. */
+  readonly sizes = new Map<string, { w: number; h: number }>();
+  /** Last on-screen scale written to each bubble. */
+  readonly scale = new Map<string, number>();
   private seq = 0;
   subscribe(id: string, cb: (b: BubbleData | null) => void): () => void {
     this.subs.set(id, cb);
@@ -63,12 +84,13 @@ class BubbleHub {
     const duration = Math.min(7, Math.max(5, 3.6 + text.length / 30));
     const b: BubbleData = { key: ++this.seq, text, name, start: now, duration, sim };
     this.active.set(id, b);
+    this.sizes.delete(id);
     this.subs.get(id)?.(b);
     return duration;
   }
   tick(now: number) {
     for (const [id, b] of this.active) {
-      if (now - b.start > b.duration) { this.active.delete(id); this.els.delete(id); this.subs.get(id)?.(null); }
+      if (now - b.start > b.duration) { this.active.delete(id); this.els.delete(id); this.sizes.delete(id); this.scale.delete(id); this.subs.get(id)?.(null); }
     }
   }
 }
@@ -91,7 +113,7 @@ class LodBus {
 export function sanitizeBubbleText(text: unknown): string {
   if (typeof text !== 'string') return '';
   // eslint-disable-next-line no-control-regex
-  const clean = text.replace(/[\u0000-\u001f\u007f-\u009f​-‏‪-‮⁦-⁩]/g, ' ').replace(/\s+/g, ' ').trim();
+  const clean = text.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, ' ').replace(/\s+/g, ' ').trim();
   return clean.length > 140 ? `${clean.slice(0, 139).trimEnd()}…` : clean;
 }
 
@@ -102,14 +124,17 @@ function ensureStyles() {
   const s = document.createElement('style');
   s.dataset.helloWorld = 'residents';
   s.textContent = `
-.hw-bubble{position:relative;transform:translateY(-100%);width:max-content;max-width:230px;min-width:96px;padding:8px 12px 9px;border-radius:16px;
+.hw-bubble{--s:1;position:relative;transform-origin:50% 100%;transform:translateY(-100%) scale(var(--s));width:max-content;max-width:230px;min-width:96px;padding:8px 12px 9px;border-radius:16px;
 background:linear-gradient(180deg,rgba(255,255,255,.97),rgba(244,247,250,.95));color:#1d2329;box-shadow:0 6px 22px rgba(10,20,30,.28),0 1px 0 rgba(255,255,255,.6) inset;
-font:500 13px/1.32 ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;letter-spacing:.005em;white-space:normal;word-wrap:break-word;overflow-wrap:anywhere;
+font:500 14px/1.32 ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;letter-spacing:.005em;white-space:normal;word-wrap:break-word;overflow-wrap:anywhere;
 pointer-events:none;user-select:none;animation:hw-bubble-in .32s cubic-bezier(.2,1.4,.4,1) backwards;transition:opacity .45s ease}
 .hw-bubble::after{content:'';position:absolute;left:50%;bottom:-7px;width:14px;height:14px;margin-left:-7px;background:#f4f7fa;transform:rotate(45deg);border-radius:0 0 4px 0;box-shadow:3px 3px 6px rgba(10,20,30,.12)}
-.hw-bubble .hw-name{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font:700 10.5px/1.2 ui-sans-serif,system-ui,sans-serif;letter-spacing:.06em;text-transform:uppercase;color:#7a5cff;margin-bottom:2px}
+.hw-bubble .hw-name{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font:700 11px/1.2 ui-sans-serif,system-ui,sans-serif;letter-spacing:.06em;text-transform:uppercase;color:#7a5cff;margin-bottom:2px}
 .hw-bubble.hw-sim .hw-name{color:#2f9e8a}
-@keyframes hw-bubble-in{from{opacity:0;transform:translateY(-88%) scale(.85)}to{opacity:1;transform:translateY(-100%) scale(1)}}
+.hw-bubble.hw-me{background:linear-gradient(180deg,#ffffff,#effffa);box-shadow:0 0 0 2.5px #5ef2c6,0 8px 26px rgba(10,20,30,.34)}
+.hw-bubble.hw-me::after{background:#effffa}
+.hw-bubble.hw-me .hw-name{color:#0d9a76}
+@keyframes hw-bubble-in{from{opacity:0;transform:translateY(-92%) scale(calc(var(--s) * .85))}to{opacity:1;transform:translateY(-100%) scale(var(--s))}}
 `;
   document.head.appendChild(s);
 }
@@ -137,6 +162,16 @@ const _m = new THREE.Matrix4();
 const frameCache = { time: -1, frustum: _frustum };
 const nowS = () => performance.now() / 1000;
 
+/** Client rect of a visible ResidentInspector card near this canvas (bubbles avoid it). */
+function findInspectorRect(canvas: HTMLElement): DOMRect | null {
+  let node: HTMLElement | null = canvas.parentElement;
+  for (let i = 0; i < 4 && node; i++, node = node.parentElement) {
+    const el = node.querySelector('.hw-insp');
+    if (el) { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 ? r : null; }
+  }
+  return null;
+}
+
 function angleLerp(a: number, b: number, t: number) {
   let d = (b - a) % (Math.PI * 2);
   if (d > Math.PI) d -= Math.PI * 2;
@@ -148,7 +183,7 @@ function angleLerp(a: number, b: number, t: number) {
 // Layer
 // ---------------------------------------------------------------------------
 export function ResidentsLayer(props: ResidentsLayerProps) {
-  const { selectedResidentId, onResidentSelect, quality = 'high', viewerResidentId } = props;
+  const { selectedResidentId, onResidentSelect, quality = 'high', viewerResidentId, overlay } = props;
   const store = useSceneStore();
   const [structure, setStructure] = useState<ResidentStructure[]>(() => store.getStructure());
   useEffect(() => { setStructure(store.getStructure()); return store.onStructure(setStructure); }, [store]);
@@ -164,7 +199,13 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
   useEffect(() => { ensureStyles(); }, []);
 
   const camera = useThree(s => s.camera);
+  const gl = useThree(s => s.gl);
+  const scene = useThree(s => s.scene);
   const clock = useRef({ now: 0, lodTimer: 0, bubbleTimer: 0 });
+  const viewerRef = useRef(viewerResidentId);
+  viewerRef.current = viewerResidentId;
+  /** Overlay mode, shared with residents through a ref (no re-render). */
+  const overlayRef = useRef(overlay ?? false);
 
   // Fresh-event reactions.
   useEffect(() => {
@@ -180,7 +221,18 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
         if (pending.size > 200) pending.clear();
       }
     };
-    const emoteAt = (h: ResidentHandle, kind: EmoteKind, count = 1, dy = 0.25) => emotes.spawn(kind, h.pos.x, h.pos.y + h.height + dy, h.pos.z, count);
+    const emScale = (h: ResidentHandle) => (h.id === viewerRef.current ? VIEWER_EMOTE_SCALE : 1);
+    const emoteAt = (h: ResidentHandle, kind: EmoteKind, count = 1, dy = 0.25) => emotes.spawn(kind, h.pos.x, h.pos.y + h.height + dy, h.pos.z, count, 0.35, emScale(h));
+    /** Deterministic per-resident cheer for everyone within CHEER_RADIUS of a burst. */
+    const cheerAround = (x: number, z: number, key: string, gestures: GestureName[]) => {
+      for (const h of registry.values()) {
+        if (!h.animator) continue;
+        const dx = h.pos.x - x, dz = h.pos.z - z;
+        if (dx * dx + dz * dz > CHEER_RADIUS * CHEER_RADIUS) continue;
+        const hv = hashString(`${h.id}|${key}`);
+        h.play(gestures[hv % gestures.length]!, 0.15 + ((hv >>> 7) % 90) / 100);
+      }
+    };
     const now = nowS;
     const face = (h: ResidentHandle, other: string | undefined, secs = 4) => { if (other && other !== h.id) h.faceTarget = { id: other, until: now() + secs }; };
 
@@ -217,8 +269,8 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
               _v2.set(th.pos.x, th.pos.y + th.height * 0.62, th.pos.z);
               face(th, actor, 5);
               gifts.launch(_v, _v2, () => {
-                emotes.spawn('sparkle', th.pos.x, th.pos.y + th.height * 0.7, th.pos.z, 5, 0.5);
-                emotes.spawn('heart', th.pos.x, th.pos.y + th.height + 0.2, th.pos.z, 3);
+                emotes.spawn('sparkle', th.pos.x, th.pos.y + th.height * 0.7, th.pos.z, 5, 0.5, emScale(th));
+                emotes.spawn('heart', th.pos.x, th.pos.y + th.height + 0.2, th.pos.z, 3, 0.35, emScale(th));
                 th.play('cheer'); th.animator?.flashExpression('happy', 1, 4);
               });
             } else emoteAt(h, 'sparkle', 3);
@@ -246,12 +298,19 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
           });
           break;
         }
-        case 'confetti':
-          for (const h of registry.values()) if (h.visible && Math.random() < 0.6) h.play(Math.random() < 0.5 ? 'cheer' : 'clap', Math.random() * 0.8);
+        case 'confetti': {
+          // WorldScene bursts confetti above the actor (or the plaza centre).
+          const r = store.getResident(actor);
+          cheerAround(r?.location.x ?? 0, r?.location.z ?? 0, e.id, ['cheer', 'clap', 'cheer']);
           break;
-        case 'raid':
-          for (const h of registry.values()) if (h.visible && Math.random() < 0.7) h.play('wave', Math.random() * 1.2);
+        }
+        case 'raid': {
+          // Raid bursts at the portal and over the plaza.
+          const portal = getPoi('portal')?.position ?? { x: 0, z: -24 };
+          cheerAround(portal.x, portal.z + 3, e.id, ['wave', 'cheer']);
+          cheerAround(0, 0, `${e.id}:plaza`, ['cheer', 'clap']);
           break;
+        }
         default: break;
       }
     });
@@ -260,6 +319,8 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
   const ringRef = useRef<THREE.Mesh>(null);
   const markerRef = useRef<THREE.Group>(null);
   const lodRank = useMemo(() => [] as Array<{ id: string; d: number }>, []);
+  const bubbleRank = useMemo(() => [] as Array<{ id: string; d: number; score: number }>, []);
+  const shownRects = useMemo(() => new Float32Array(4 * 16), []);
 
   useFrame((state, delta) => {
     const dt = Math.min(delta, 0.1);
@@ -295,6 +356,7 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
     // LOD assignment (2 Hz): nearest N within range get 'high'.
     if ((c.lodTimer -= dt) <= 0) {
       c.lodTimer = 0.5;
+      overlayRef.current = overlay ?? (!!gl.getContextAttributes()?.alpha && !scene.background);
       const maxHigh = quality === 'low' ? 8 : 20;
       const highDist = quality === 'low' ? 18 : 30;
       lodRank.length = 0;
@@ -308,26 +370,65 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
       });
     }
 
-    // Speech bubbles: expire, then show the nearest/newest few.
+    // Speech bubbles: expire; keep a readable minimum on-screen size.
     hub.tick(c.now);
+    if (hub.active.size) {
+      for (const [id, el] of hub.els) {
+        const h = registry.get(id);
+        if (!h) continue;
+        const d = Math.max(0.5, camera.position.distanceTo(_v.set(h.pos.x, h.pos.y + h.height, h.pos.z)));
+        const sc = Math.min(BUBBLE_MAX_SCALE, Math.max(BUBBLE_MIN_SCALE, BUBBLE_SCALE_DISTANCE / d)) * (id === viewerResidentId ? 1.08 : 1);
+        const prev = hub.scale.get(id) ?? 0;
+        if (Math.abs(sc - prev) > 0.004) { hub.scale.set(id, sc); el.style.setProperty('--s', sc.toFixed(3)); }
+      }
+    }
+    // Rank (viewer first, then newest/nearest), cap the count, skip bubbles that
+    // would overlap a higher-ranked one or sit under the ResidentInspector card.
     if ((c.bubbleTimer -= dt) <= 0 && hub.active.size) {
-      c.bubbleTimer = 0.2;
-      const ranked: Array<{ id: string; score: number; d: number }> = [];
+      c.bubbleTimer = 0.15;
+      const maxVisible = quality === 'low' ? BUBBLE_MAX_VISIBLE_LOW : BUBBLE_MAX_VISIBLE;
+      bubbleRank.length = 0;
       for (const [id, b] of hub.active) {
         const h = registry.get(id);
         if (!h) continue;
         const d = h.pos.distanceTo(camera.position);
-        ranked.push({ id, d, score: d - (c.now - b.start < 1.5 ? 25 : 0) - (c.now - b.start) * -0.5 });
+        const age = c.now - b.start;
+        bubbleRank.push({ id, d, score: (id === viewerResidentId ? -1000 : 0) + d - (age < 1.5 ? 25 : 0) + age * 0.5 });
       }
-      ranked.sort((a, b) => a.score - b.score);
-      ranked.forEach((r, i) => {
+      bubbleRank.sort((a, b) => a.score - b.score);
+      const cr = gl.domElement.getBoundingClientRect();
+      const ir = findInspectorRect(gl.domElement);
+      let shown = 0;
+      for (const r of bubbleRank) {
         const el = hub.els.get(r.id);
         const b = hub.active.get(r.id);
-        if (!el || !b) return;
-        const show = i < BUBBLE_MAX_VISIBLE && r.d < BUBBLE_MAX_DISTANCE && registry.get(r.id)?.visible !== false;
+        const h = registry.get(r.id);
+        if (!el || !b || !h) continue;
+        let show = shown < maxVisible && r.d < BUBBLE_MAX_DISTANCE && h.visible;
+        if (show) {
+          _v.set(h.pos.x, h.pos.y + h.height + 0.42, h.pos.z).project(camera);
+          if (_v.z > 1) show = false;
+          else {
+            let sz = hub.sizes.get(r.id);
+            if (!sz && el.offsetWidth > 0) { sz = { w: el.offsetWidth, h: el.offsetHeight }; hub.sizes.set(r.id, sz); }
+            const sc = hub.scale.get(r.id) ?? 1;
+            const w = (sz?.w ?? 160) * sc, hh = ((sz?.h ?? 48) + 8) * sc;
+            const x = cr.left + ((_v.x + 1) / 2) * cr.width, y = cr.top + ((1 - _v.y) / 2) * cr.height;
+            const l = x - w / 2, rt = x + w / 2, t = y - hh, bt = y;
+            if (ir && rt > ir.left && l < ir.right && bt > ir.top && t < ir.bottom) show = false;
+            for (let k = 0; show && k < shown && k < 16; k++) {
+              const o = k * 4;
+              const ox = Math.min(rt, shownRects[o + 1]!) - Math.max(l, shownRects[o]!);
+              const oy = Math.min(bt, shownRects[o + 3]!) - Math.max(t, shownRects[o + 2]!);
+              if (ox > 0 && oy > 0 && ox * oy > 0.35 * w * hh) show = false;
+            }
+            if (show && shown < 16) { const o = shown * 4; shownRects[o] = l; shownRects[o + 1] = rt; shownRects[o + 2] = t; shownRects[o + 3] = bt; }
+          }
+        }
+        if (show) shown++;
         const fadingOut = c.now - b.start > b.duration - 0.5;
         el.style.opacity = show && !fadingOut ? '1' : '0';
-      });
+      }
     }
   });
 
@@ -339,7 +440,7 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
 
   return <group name="residents-layer">
     {structure.map(s => <Resident key={s.id} id={s.id} displayName={s.displayName} appearance={s.resident.appearance}
-      store={store} registry={registry} pending={pending} hub={hub} lodBus={lodBus} emotes={emotes}
+      store={store} registry={registry} pending={pending} hub={hub} lodBus={lodBus} emotes={emotes} overlayRef={overlayRef}
       isViewer={s.id === viewerResidentId} onSelect={onResidentSelect} />)}
     <primitive object={emotes.group} />
     <primitive object={gifts.group} />
@@ -363,12 +464,13 @@ interface ResidentProps {
   hub: BubbleHub;
   lodBus: LodBus;
   emotes: EmoteSystem;
+  overlayRef: { readonly current: boolean };
   isViewer: boolean;
   onSelect?: (id: string) => void;
 }
 
 const Resident = memo(function Resident(p: ResidentProps) {
-  const { id, store, registry, pending, hub, lodBus, emotes } = p;
+  const { id, store, registry, pending, hub, lodBus, emotes, overlayRef } = p;
   const [lod, setLod] = useState<AvatarLod>(() => lodBus.lod.get(id) ?? 'high');
   useEffect(() => lodBus.subscribe(id, setLod), [lodBus, id]);
   const rig = useAvatarRig(p.appearance, lod);
@@ -459,7 +561,9 @@ const Resident = memo(function Resident(p: ResidentProps) {
 
     // --- Movement -------------------------------------------------------------
     const pos = handle.pos;
-    const sitFam = s.family === 'sit' || s.family === 'sleep';
+    const overlayMode = overlayRef.current;
+    // Overlay mode draws no benches: never sit/sleep on empty air.
+    const sitFam = !overlayMode && (s.family === 'sit' || s.family === 'sleep');
     const toSeat = sitFam && !!s.seat && s.estSpeed < 0.3;
     const goal = toSeat && s.seat ? _v.set(s.seat.x, 0, s.seat.z) : _v.copy(s.target);
     const dx = goal.x - pos.x, dz = goal.z - pos.z;
@@ -514,9 +618,9 @@ const Resident = memo(function Resident(p: ResidentProps) {
 
     const plateS = plateRef.current;
     if (plateS) {
-      const fade = 1 - Math.min(1, Math.max(0, (camDist - 14) / (NAMEPLATE_FAR - 14)));
+      const fade = 1 - Math.min(1, Math.max(0, (camDist - NAMEPLATE_SOLID) / (NAMEPLATE_FAR - NAMEPLATE_SOLID)));
       plateS.visible = fade > 0.02 && !hub.active.has(id);
-      plateMat.opacity = 0.92 * fade;
+      plateMat.opacity = fade;
       const sc = 0.2 + camDist * 0.006;
       plateS.scale.set(sc * plate.aspect, sc, 1);
       plateS.position.y = handle.height + 0.28 + sc * 0.3;
@@ -530,7 +634,7 @@ const Resident = memo(function Resident(p: ResidentProps) {
     const adt = s.accDt; s.accDt = 0;
 
     // --- Animation family ------------------------------------------------------
-    let fam: AnimationFamily = s.family;
+    let fam: AnimationFamily = overlayMode && (s.family === 'sit' || s.family === 'sleep') ? 'idle' : s.family;
     let speed = 1;
     if (handle.reaction && handle.reaction.until < nowS()) handle.reaction = null;
     if (s.visSpeed > 0.22 && !seated) {
@@ -544,10 +648,11 @@ const Resident = memo(function Resident(p: ResidentProps) {
 
     // Ambient emotes.
     if (onScreen && camDist < 35 && (s.emoteTimer -= adt) <= 0) {
-      if (fam === 'sleep') { emotes.spawn('zzz', pos.x + 0.1, pos.y + handle.height * 0.75, pos.z, 1, 0.05); s.emoteTimer = 2.2; }
-      else if (fam === 'dance') { emotes.spawn('note', pos.x, pos.y + handle.height + 0.1, pos.z, 1, 0.5); s.emoteTimer = 1.3 + Math.random(); }
-      else if (fam === 'sad') { emotes.spawn('cloud', pos.x, pos.y + handle.height + 0.3, pos.z, 1, 0.1); s.emoteTimer = 5; }
-      else if (fam === 'laugh' || fam === 'celebrate') { emotes.spawn('sparkle', pos.x, pos.y + handle.height + 0.1, pos.z, 1, 0.5); s.emoteTimer = 1.6; }
+      const es = p.isViewer ? VIEWER_EMOTE_SCALE : 1;
+      if (fam === 'sleep') { emotes.spawn('zzz', pos.x + 0.1, pos.y + handle.height * 0.75, pos.z, 1, 0.05, es); s.emoteTimer = 2.2; }
+      else if (fam === 'dance') { emotes.spawn('note', pos.x, pos.y + handle.height + 0.1, pos.z, 1, 0.5, es); s.emoteTimer = 1.3 + Math.random(); }
+      else if (fam === 'sad') { emotes.spawn('cloud', pos.x, pos.y + handle.height + 0.3, pos.z, 1, 0.1, es); s.emoteTimer = 5; }
+      else if (fam === 'laugh' || fam === 'celebrate') { emotes.spawn('sparkle', pos.x, pos.y + handle.height + 0.1, pos.z, 1, 0.5, es); s.emoteTimer = 1.6; }
       else s.emoteTimer = 2;
     }
   });
@@ -561,17 +666,23 @@ const Resident = memo(function Resident(p: ResidentProps) {
     {rig && <primitive object={rig.root} />}
     <mesh geometry={hit.geo} material={hit.mat} position={[0, 0.85, 0]} onClick={onClick} onPointerOver={onOver} onPointerOut={onOut} />
     <sprite ref={plateRef} material={plateMat} renderOrder={15} raycast={() => null} />
-    <SpeechBubble hub={hub} id={id} height={handle.height} />
+    <SpeechBubble hub={hub} id={id} height={handle.height} isViewer={p.isViewer} />
   </group>;
 });
 
-function SpeechBubble({ hub, id, height }: { hub: BubbleHub; id: string; height: number }) {
+/**
+ * Bubble DOM. No drei `distanceFactor`: the layer writes a clamped `--s`
+ * scale every frame so text never drops below ~14 px in wide shots.
+ */
+function SpeechBubble({ hub, id, height, isViewer }: { hub: BubbleHub; id: string; height: number; isViewer: boolean }) {
   const [b, setB] = useState<BubbleData | null>(null);
   useEffect(() => hub.subscribe(id, setB), [hub, id]);
   if (!b) return null;
-  return <Html position={[0, height + 0.42, 0]} center={false} distanceFactor={10} zIndexRange={[30, 10]}
+  const cls = `hw-bubble${b.sim ? ' hw-sim' : ''}${isViewer ? ' hw-me' : ''}`;
+  return <Html position={[0, height + 0.42, 0]} center={false} zIndexRange={[30, 10]}
     style={{ pointerEvents: 'none', transform: 'translateX(-50%)' }}>
-    <div key={b.key} className={b.sim ? 'hw-bubble hw-sim' : 'hw-bubble'} ref={el => { if (el) hub.els.set(id, el); }}>
+    <div key={b.key} className={cls} style={{ ['--s' as string]: String(hub.scale.get(id) ?? 1) }}
+      ref={el => { if (el) { hub.els.set(id, el); hub.scale.delete(id); } }}>
       <span className="hw-name">{b.name}</span>{b.text}
     </div>
   </Html>;

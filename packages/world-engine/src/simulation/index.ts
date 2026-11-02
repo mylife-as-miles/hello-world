@@ -16,7 +16,7 @@ import { hashString } from '../avatars/catalog';
 import { findSeatNear } from '../world/layout';
 import { worldClock } from '../world/time';
 import { startAction } from './actions';
-import { decide, updateAgent } from './behavior';
+import { ambientCompany, decide, updateAgent } from './behavior';
 import { createAgent, handleEvent } from './events';
 import { decayNeeds, updateMood } from './needs';
 import { pushOut, zoneAt, POI_BY_ID } from './places';
@@ -167,6 +167,7 @@ function substep(w: World, h: number): void {
   }
   updateEncounters(w);
   directSocial(w);
+  ambientCompany(w, h);
   separate(w);
 }
 

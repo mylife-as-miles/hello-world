@@ -5,6 +5,7 @@
 import type { AvatarAppearance, Relationship, Weather, WorldEvent, WorldEventKind, WorldEventPayload } from '@hello-world/contracts';
 import type { Vec2 } from '../world/layout';
 import { worldClock } from '../world/time';
+import { sanitizeText } from '../runtime/validate';
 import type { Rng } from './rng';
 import type { Temperament } from './personality';
 import type { DialogueProvider } from './dialogue';
@@ -173,9 +174,7 @@ export function nextEventId(w: World): string {
 
 /** Strip markup/control chars, collapse whitespace, clamp length (keeps restore byte-identical). */
 export function cleanText(text: string, max = 140): string {
-  // eslint-disable-next-line no-control-regex
-  const s = text.replace(/[\u0000-\u001f\u007f-\u009f​-‏ -‮]/g, ' ').replace(/[<>]/g, '').replace(/\s+/g, ' ').trim();
-  return s.length > max ? `${s.slice(0, max - 1).trimEnd()}…` : s;
+  return sanitizeText(text, max);
 }
 
 export interface EmitOptions { target?: Agent | null; text?: string; payload?: WorldEventPayload }

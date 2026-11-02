@@ -62,6 +62,7 @@ export class WorldRoom {
       clients: this.peers.size,
       settings: { ...this.settings },
       pending: [...this.pending.values()],
+      capabilities: { ...this.capabilities },
     };
   }
   private watch() {
@@ -85,7 +86,7 @@ export class WorldRoom {
   ) {
     this.mode = mode;
     this.twitch = twitch;
-    this.capabilities = capabilities;
+    this.capabilities = { ...capabilities };
     this.broadcastStatus();
   }
   add(peer: Peer) {

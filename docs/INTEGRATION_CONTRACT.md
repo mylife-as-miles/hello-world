@@ -31,3 +31,7 @@ Codex implements a small WebSocket adapter using shared ClientMessage/ServerMess
 
 ## Package setup and integration
 Use React 19 + R3F v9 / Rapier v2 if selected. Claude can add dependencies ONLY to packages/world-engine/package.json and include its own tsconfig/scripts; root pnpm lockfile is resolved by Codex at merge. Do not change contracts or app files. Run package typecheck/build and document real browser/runtime tests in WORLD_ENGINE_QA. Push complete commits to claude/world-engine; no main push. Codex fetches/reviews ownership and merges only complete implementation. Contract changes require issue communication or explicit version. Early delivery welcomed; target integration 90 minutes after initial kickoff.
+
+## Additive transport clarification — 2026-11-02
+
+Server status messages may include optional `capabilities: Record<string, string>` so connected clients receive current Twitch scope/subscription failures and revocations. This is an additive transport field; all engine interfaces and v1 snapshots/events are unchanged. Older clients may ignore it.

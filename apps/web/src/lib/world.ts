@@ -250,6 +250,7 @@ class WorldConnection {
           clients: message.clients,
           settings: message.settings,
           pending: message.pending,
+          capabilities: message.capabilities || this.state.capabilities,
         });
         break;
       case "director-auth":

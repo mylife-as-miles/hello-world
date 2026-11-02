@@ -37,6 +37,36 @@ function setup() {
   return { room, peer, messages, send };
 }
 describe("authoritative world permissions", () => {
+  it("pushes live subscription capability changes and revocations to an already connected peer", () => {
+    const { room, messages } = setup();
+    room.setConnection("live", "Twitch · subscription active", {
+      "channel.subscribe": "subscribed",
+      chat: "connected",
+    });
+    const connected = messages
+      .filter((message) => message.type === "status")
+      .at(-1)!;
+    expect(connected).toMatchObject({
+      mode: "live",
+      capabilities: { "channel.subscribe": "subscribed", chat: "connected" },
+    });
+    room.setConnection("demo", "Demo Mode · authorization revoked", {
+      "channel.subscribe": "revoked (authorization_revoked)",
+      chat: "disconnected",
+    });
+    const revoked = messages
+      .filter((message) => message.type === "status")
+      .at(-1)!;
+    expect(revoked).toMatchObject({
+      mode: "demo",
+      capabilities: {
+        "channel.subscribe": "revoked (authorization_revoked)",
+        chat: "disconnected",
+      },
+    });
+    expect(connected.capabilities?.["channel.subscribe"]).toBe("subscribed");
+    expect(revoked.capabilities).not.toBe(room.capabilities);
+  });
   it("reset discards queued interactions and detaches the previous runtime", async () => {
     const instances: Array<{
       runtime: ReturnType<RuntimeFactory>;

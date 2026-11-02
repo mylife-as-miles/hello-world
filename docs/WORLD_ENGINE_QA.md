@@ -231,6 +231,29 @@ Remaining:
 - **The default creator face looks drowsy.**
 - **Photoreal and Townie style clash (design trade-off).** The optional `?realisticStylize=1` warms the scans but doesn't close the gap, so it stays off by default.
 
+### Cycle 6 (23:37–23:51 UTC, frozen build of round-6 commit `a2f9557`): **7.7 / 10** (7.74 weighted; flat vs cycle 5)
+
+Scores: world 7.7 · creator/avatars 7.6 · simulation 7.8 · interactions 8.0 · performance 7.4 · persistence 7.8. History: 6.9 → 7.2 → 7.4 → 7.6 → 7.7 → 7.7.
+
+Verified at `a2f9557`: tsc 0 errors, vitest 56/56, build OK.
+
+Fixed:
+- **Overlapping speech bubbles (cycle 5's worst problem).** In an 8-event burst the world view showed 4 bubbles with zero overlap and the rest collapsed into "Name …" tags. The overlay showed exactly 3, stacked with stems.
+- **Seats dissolving under residents, and the coarse screen-door pattern.**
+- **Raid payoff.** Measured with a slowed clock: 7 raiders at 16–20 % of frame height, the fountain out of frame, and the banner showing from +0.3 s to at least +5 s.
+- **Distress.** Residents use at least 8 distinct distress lines, tired residents rest rather than chase fun, and apologies no longer repeat.
+- **The default creator face.** It now reads friendly instead of drowsy.
+
+Remaining:
+- **Most damaging: the camera frames subjects through props.** In follow mode a lamp post sits between the camera and a seated resident. Cause: `centralClutter` ignores props within 1.2 m of the subject. The cinematic drift and the speaker push-in don't use the clutter test at all.
+- **Bubble safe area.** Bubbles can cover the HUD pill and get clipped at the screen edge.
+- **Raids feel small.** 40 viewers spawn only 7 avatars.
+- **Label placement.** Labels can draw through buildings, and occasionally drift away from bodies in cinematic.
+- **Street view cost.** 187 draw calls on low.
+- **Style clash between photoreal humans and Townies.** A design trade-off.
+
+Gains are plateauing around 7.7. The remaining items are composition-heavy camera work and crowd scale.
+
 ## Launch film
 
 A 21.2 s, 1920×1080, 30 fps silent launch cut was made from real product renders by a separate agent pair: footage capture plus a director working from the [cinetic](https://github.com/Leonxlnx/cinetic) skill (MIT). Remotion was skipped for time and the film was assembled with ffmpeg. The film is delivered outside the repository and is not committed.

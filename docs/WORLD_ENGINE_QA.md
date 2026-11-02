@@ -110,7 +110,54 @@ Fixes routed to the owning agents at 21:05 UTC, with a 21:55 freeze:
 - creator: realistic UX
 - interactions: smaller greeting glyph, larger nameplates
 
-_Cycle 3 (final build) results are appended below when available._
+### Cycle 3, final (21:25–21:34 UTC, frozen build of final commit `b67ad69`): **7.4 / 10** (+0.5 vs cycle 1, +0.2 vs cycle 2)
+
+| Category | Weight | Cycle 1 | Cycle 2 | Cycle 3 |
+| --- | ---: | ---: | ---: | ---: |
+| 3D world & visual quality | 20 % | 6.5 | 7.0 | 7.4 |
+| Character creator & avatar quality | 20 % | 6.5 | 6.8 | 7.0 |
+| Sims-like life simulation | 20 % | 7.5 | 7.7 | 7.6 |
+| Interactions & social behaviour | 20 % | 7.0 | 7.2 | 7.8 |
+| Performance & technical reliability | 10 % | 7.0 | 7.3 | 6.8 |
+| Persistence & memory | 10 % | 7.0 | 7.4 | 7.3 |
+
+**The 9/10 target was not reached.** The final weighted score is 7.4.
+
+Fixed:
+- Events pay off in the default camera:
+  - raid: cut to the portal, beam, and the banner "RAID! 40 viewers from CozyStreamer" counting up; 7 raiders arrive
+  - gift: cut to the giver
+- Street camera shows 6 residents at 149–227 px.
+- Dialogue repetition is gone: 170 lines over 12 game hours, 156 exactly unique, none used more than twice.
+- Friendship no longer saturates: peak 93.3, median about 50.
+- The "!" glyph is gone.
+- Nameplates are 11–12.5 px.
+
+Partial:
+- Cinematic composition: string lights and props still cross the orbit shot.
+- Social need still drifts high (median 60 → 74) and never drops below 36.
+- Photoreal bodies read as mid-quality NPCs: no facial rig, stiff idle, and a style clash next to the cartoon residents.
+
+Not fixed:
+- Draw-call budget at quality=low: 139 calls in the default view, 173–186 after a raid, 291–385 in cinematic. High is 349 calls and 724k triangles.
+
+Most damaging remaining problem: **foreground props block close camera shots**: the umbrella in follow, a tree in street, string lights in cinematic, a lamp post in front of the raiders.
+
+Recommended next steps:
+1. Raycast-based occluder fading in the camera director.
+2. Raid polish:
+   - banner lifetime matched to the 9 s raid shot
+   - name the gift recipient
+   - collapse raider nameplates into one chip
+   - let a join cut through the grouping window
+3. Merge or instance static props and use earlier foliage impostors, targeting ≤ 120 draw calls and ~250k triangles at low.
+4. Needs that occasionally become critical, and more autonomous gifts and compliments.
+
+Evidence: `scratchpad/critic/c3/*` (screenshots, metrics JSON, dialogue sample, logs). `tsc` reported 0 errors and `vitest` 50/50.
+
+## Launch film
+
+A 21.2 s, 1920×1080, 30 fps silent launch cut was made from real product renders by a separate agent pair: footage capture plus a director working from the [cinetic](https://github.com/Leonxlnx/cinetic) skill (MIT). Remotion was skipped for time and the film was assembled with ffmpeg. The film is delivered outside the repository and is not committed.
 
 ## 4. Performance findings (measured only)
 

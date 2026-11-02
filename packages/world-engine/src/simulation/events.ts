@@ -52,7 +52,10 @@ function makeRoom(w: World, protect: string): boolean {
 }
 
 function arrive(w: World, a: Agent, then?: (w: World, a: Agent) => void): void {
-  const out = { x: a.x + (0 - a.x) * 0.15, z: a.z + 3 };
+  const portal = poi('portal').position;
+  const dx = a.x - portal.x, dz = a.z - portal.z;
+  const d = Math.hypot(dx, dz) || 1;
+  const out = { x: a.x + (dx / d) * 1.4, z: a.z + Math.max(0.6, (dz / d) * 1.4) };
   startAction(w, a, {
     type: 'goto', phase: 'travel', travelActivity: 'arriving through the portal', activity: 'arriving through the portal', spot: out,
     remaining: 0.4, effects: { energy: 0, social: 0, fun: 0 }, speed: 1.5, priority: 2, travelTimeout: 6, anchored: false, poiId: 'portal',
@@ -238,23 +241,34 @@ function onGift(w: World, e: WorldEvent): void {
   const rawItem = typeof e.payload?.item === 'string' && e.payload.item.trim() ? cleanText(e.payload.item, 32) : 'flowers';
   const item = withArticle(rawItem);
   if (!t) { gesture(w, a, `gifting ${item}`, 3); return; }
-  const woken = isSleeping(t);
-  const at = atPlace(nearestPoi(t.x, t.z));
-  if (!t.leaving) {
-    interrupt(w, t);
-    gesture(w, t, `thanking ${a.displayName}`, 5, { effects: { energy: 0, social: 1.2, fun: 0.8 } });
+  const targetId = t.id;
+  // The hand-over (friendship, memory, thanks) happens only when the giver is actually there.
+  const handOver = (w2: World, giver: Agent) => {
+    const T = w2.agents.get(targetId);
+    if (!T || T.leaving) return;
+    const woken = isSleeping(T);
+    const at = atPlace(nearestPoi(T.x, T.z));
+    interrupt(w2, T);
+    gesture(w2, T, `thanking ${giver.displayName}`, 5, { effects: { energy: 0, social: 1.2, fun: 0.8 } });
+    adjustFriendship(w2, giver, T, w2.rng.range(8, 13, 'gift', T.id));
+    const line = memoryLine(w2, 'gift', true, { a: giver.displayName, b: T.displayName, at, item });
+    addMemory(w2, giver, T, woken ? `${line.split(' — ')[0]} — ${T.displayName} woke up smiling` : line);
+    bump(T, { social: 8, fun: 6 });
+    bump(giver, { social: 5, fun: 3 });
+    feel(T, 0.4);
+    w2.facts.lastGiftAt = w2.simTime;
+    emit(w2, 'chat', T, { target: giver, text: lines.thanks(w2, T, woken, placeVars(w2, T, giver, at, { item })), payload: { reaction: 'thanks', sentiment: 'positive', item: rawItem } });
+  };
+  const d = dist(a, t);
+  if (d > 2.5) {
+    const far = d > 10;
+    // The recipient notices and waits while the giver comes over (no memory / friendship change yet).
+    if (!t.leaving && !isSleeping(t)) gesture(w, t, `waving at ${a.displayName}`, Math.min(25, d / (far ? 3 : 1.3) + 4), { priority: 2 });
+    goThen(w, a, meetingPoint(t, a, 1.1, `${a.id}|gift`), `${far ? 'running' : 'walking'} to ${t.displayName}`, `gifting ${item} to ${t.displayName}`, 3, { run: far, onArrive: handOver });
+  } else {
+    gesture(w, a, `gifting ${item} to ${t.displayName}`, 3);
+    handOver(w, a);
   }
-  if (dist(a, t) > 2.4) {
-    const far = dist(a, t) > 10;
-    goThen(w, a, meetingPoint(t, a, 1.1, `${a.id}|gift`), `${far ? 'running' : 'walking'} to ${t.displayName}`, `gifting ${item} to ${t.displayName}`, 3, { run: far });
-  } else gesture(w, a, `gifting ${item} to ${t.displayName}`, 3);
-  const { after } = adjustFriendship(w, a, t, w.rng.range(8, 13, 'gift', t.id));
-  void after;
-  addMemory(w, a, t, woken ? `${memoryLine(w, 'gift', true, { a: a.displayName, b: t.displayName, at, item }).split(' — ')[0]} — ${t.displayName} woke up smiling` : memoryLine(w, 'gift', true, { a: a.displayName, b: t.displayName, at, item }));
-  bump(t, { social: 8, fun: 6 });
-  bump(a, { social: 5, fun: 3 });
-  feel(t, 0.4);
-  emit(w, 'chat', t, { target: a, text: lines.thanks(w, t, woken, placeVars(w, t, a, at, { item })), payload: { reaction: 'thanks', sentiment: 'positive', item: rawItem } });
 }
 
 function onSocial(w: World, e: WorldEvent): void {
@@ -378,8 +392,20 @@ function onRaid(w: World, e: WorldEvent): void {
   w.facts.raidAt = w.simTime;
   w.facts.raidChannel = base;
   const group = `raid:${safeIdPart(e.id)}`;
+  const spawnAt: number[] = [];
+  let acc = 0;
+  for (let k = 1; k <= n; k++) { spawnAt.push(acc); acc += w.rng.range(0.5, 0.8, 'raid-stagger', `${group}:${k}`); }
   for (let k = 1; k <= n; k++) {
-    schedule(w, (k - 1) * 0.8, w2 => spawnVisitor(w2, group, k, base));
+    const g = Math.floor((k - 1) / 3);
+    const lastInGroup = Math.min(n, g * 3 + 3);
+    const plan: VisitorPlan = {
+      arc: arcSpot(k, n),
+      // Everyone in a group finishes celebrating together, then they walk to the plaza side by side.
+      celebrate: 4 + (spawnAt[lastInGroup - 1]! - spawnAt[k - 1]!),
+      anchor: { x: -3.2 + (g % 3) * 3.2, z: -5.4 + (g % 2) * 0.9 },
+      slot: (k - 1) % 3,
+    };
+    schedule(w, spawnAt[k - 1]!, w2 => spawnVisitor(w2, group, k, base, plan));
   }
   // Locals hurry to the portal to welcome them.
   const portal = poi('portal');
@@ -418,10 +444,19 @@ export function raiderName(group: string, k: number, base: string): string {
   return cleanText(full, 40);
 }
 
-function spawnVisitor(w: World, group: string, k: number, base: string): void {
+interface VisitorPlan { arc: { x: number; z: number }; celebrate: number; anchor: { x: number; z: number }; slot: number }
+
+/** Arrival point k of n on an arc in front of (south of) the portal ring — never stacked. */
+export function arcSpot(k: number, n: number): { x: number; z: number } {
+  const portal = poi('portal').position;
+  const theta = Math.PI * (0.18 + (0.64 * (k - 0.5)) / Math.max(1, n));
+  return { x: portal.x + Math.cos(theta) * 2.8, z: portal.z + Math.sin(theta) * 2.8 };
+}
+
+function spawnVisitor(w: World, group: string, k: number, base: string, plan?: VisitorPlan): void {
   const id = `${group}:${k}`;
   if (w.agents.has(id) || !makeRoom(w, id)) return;
-  const spot = arrivalSpot(w, { id } as Agent);
+  const spot = plan ? { ...plan.arc } : arrivalSpot(w, { id } as Agent);
   const appearance = { ...appearanceFromSeed(id), baseModelId: VISITOR_BASES[(k - 1) % VISITOR_BASES.length]! };
   const a = createAgent(w, {
     id, name: raiderName(group, k, base), x: spot.x, z: spot.z, appearance: normalizeAppearance(appearance),
@@ -433,7 +468,13 @@ function spawnVisitor(w: World, group: string, k: number, base: string): void {
   a.visitorIndex = k;
   a.leaveAt = w.simTime + VISITOR_STAY_SECONDS + k * 2;
   w.agents.set(id, a);
-  arrive(w, a, (w2, ag) => gesture(w2, ag, 'celebrating the raid', 4, { priority: 1, effects: { energy: 0, social: 0.6, fun: 1 } }));
+  arrive(w, a, (w2, ag) => gesture(w2, ag, 'celebrating the raid', plan?.celebrate ?? 4, {
+    priority: 1, effects: { energy: 0, social: 0.6, fun: 1 },
+    ...(plan ? { onDone: (w3: World, v: Agent) => {
+      const target = { x: plan.anchor.x + (plan.slot - 1) * 0.95, z: plan.anchor.z + (plan.slot === 1 ? -0.5 : 0) };
+      goThen(w3, v, target, 'walking to Town Plaza', 'admiring Town Plaza', 4, { priority: 1, speed: WALK_SPEED, poiId: 'plaza', type: 'goto' });
+    } } : {}),
+  }));
   if (k === 1) {
     schedule(w, 2.2, w2 => {
       const v = w2.agents.get(id);

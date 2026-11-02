@@ -169,6 +169,8 @@ export class AvatarAnimator {
   private readonly k: number;
   private seatHeight = DEFAULT_SEAT_HEIGHT;
   private walkA = 0.38; private runA = 0.55;
+  /** Photoreal rigs get a subtler, more natural idle (Townie idle unchanged). */
+  private readonly realistic: boolean;
 
   constructor(private rig: HumanoidRig, private seed = 0) {
     this.rand = mulberry32((seed | 0) ^ 0x9e3779b9);
@@ -182,6 +184,7 @@ export class AvatarAnimator {
     const m = measureLegs(rig);
     this.hipH = m ? clamp(m.hip, 0.3 * H, 0.66 * H) : 0.53 * H;
     this.kneeH = m ? clamp(m.knee, 0.15 * H, 0.4 * H) : 0.27 * H;
+    this.realistic = rig.kind === 'realistic';
   }
 
   /** Looping base animation; crossfades from the previous one. `speed` scales walk/run cadence (1 = WALK_SPEED/RUN_SPEED m/s) or the tempo of other loops. */
@@ -309,11 +312,18 @@ export class AvatarAnimator {
     if (this.extLook) { this.lookYawT = this.extLook.yaw; this.lookPitchT = this.extLook.pitch; }
     else if ((this.lookTimer -= dt) <= 0) {
       const r = this.rand();
-      this.lookTimer = 2.5 + this.rand() * 4.5;
-      if (r < 0.4) { this.lookYawT = 0; this.lookPitchT = 0; }
-      else { this.lookYawT = (this.rand() - 0.5) * 1.2; this.lookPitchT = (this.rand() - 0.6) * 0.25; }
+      if (this.realistic) {
+        // Occasional, small glances; mostly settle back to centre.
+        this.lookTimer = 3.5 + this.rand() * 6;
+        if (r < 0.5) { this.lookYawT = (this.rand() - 0.5) * 0.12; this.lookPitchT = 0; }
+        else { this.lookYawT = (this.rand() - 0.5) * 0.8; this.lookPitchT = (this.rand() - 0.55) * 0.14; }
+      } else {
+        this.lookTimer = 2.5 + this.rand() * 4.5;
+        if (r < 0.4) { this.lookYawT = 0; this.lookPitchT = 0; }
+        else { this.lookYawT = (this.rand() - 0.5) * 1.2; this.lookPitchT = (this.rand() - 0.6) * 0.25; }
+      }
     }
-    const a = 1 - Math.exp(-dt * (this.extLook ? 5 : 3));
+    const a = 1 - Math.exp(-dt * (this.extLook ? 5 : this.realistic ? 1.8 : 3));
     this.lookYaw += (this.lookYawT - this.lookYaw) * a;
     this.lookPitch += (this.lookPitchT - this.lookPitch) * a;
   }
@@ -345,6 +355,7 @@ export class AvatarAnimator {
 
   /** Standing idle: breathing, weight shift, relaxed arms. */
   private poseIdle(p: Pose, armAmt: number) {
+    if (this.realistic) { this.poseIdleRealistic(p, armAmt); return; }
     const t = this.t, k = this.k;
     const br = Math.sin(t * 1.9 + this.ph[0]!);
     const sway = Math.sin(t * 0.42 + this.ph[1]!);
@@ -369,6 +380,47 @@ export class AvatarAnimator {
     arm(p, 1, -0.08 + 0.015 * br * a, 1.38 + 0.012 * br, 0, 0.12, 0.2 + 0.04 * Math.sin(t * 0.7 + 1));
     arm(p, -1, -0.08 + 0.015 * br * a, 1.38 + 0.012 * br, 0, 0.12, 0.2 + 0.04 * Math.sin(t * 0.6));
     hand(p, 1, 0.1, 0.05); hand(p, -1, 0.1, 0.05);
+  }
+
+  /**
+   * Photoreal idle: slow irregular weight shifts that settle on one leg (free knee
+   * soft, pelvis list countered up the spine so the head stays level), quiet
+   * breathing (chest + shoulders), asymmetric relaxed arms with a slight pendulum
+   * sway and micro head motion. Amplitudes are deliberately small.
+   */
+  private poseIdleRealistic(p: Pose, armAmt: number) {
+    const t = this.t, k = this.k;
+    const br = Math.sin(t * 1.45 + this.ph[0]!);                       // ~0.23 Hz breathing
+    const ws = Math.tanh(2.4 * this.noise(t * 0.22, 1));               // weight: + = on left leg, dwells then shifts
+    const wl = 0.5 + 0.5 * ws;                                         // fraction on left
+    const roll = 0.042 * ws;                                           // stance hip rises
+    const micro = this.noise(t * 0.9, 5), micro2 = this.noise(t * 0.63, 6);
+    S(p, 'hips', 0.01, 0.035 * ws, roll);
+    S(p, 'spine', 0.025 + 0.004 * br, -0.02 * ws, -roll * 0.55);
+    S(p, 'chest', 0.01 + 0.012 * br, -0.012 * ws + 0.01 * micro, -roll * 0.3);
+    S(p, 'upperChest', 0.008 * br, 0, 0);
+    S(p, 'neck', -0.02 + 0.006 * micro2, 0.02 * micro, roll * 0.25);
+    S(p, 'head', -0.01 - 0.006 * br + 0.01 * micro2, 0.03 * micro2, roll * 0.2 + 0.015 * micro);
+    // Stance leg nearly straight, free leg relaxed (knee soft, heel slightly lifted).
+    const freeL = 1 - wl, freeR = wl;
+    const flexL = 0.015 + 0.06 * freeL, flexR = 0.015 + 0.06 * freeR;
+    const kneeL = 0.025 + 0.15 * freeL, kneeR = 0.025 + 0.15 * freeR;
+    S(p, 'leftUpperLeg', -flexL, 0.03 * freeL, -roll + 0.025 - 0.02 * freeL);
+    S(p, 'rightUpperLeg', -flexR, -0.03 * freeR, -roll - 0.025 + 0.02 * freeR);
+    S(p, 'leftLowerLeg', kneeL, 0, 0);
+    S(p, 'rightLowerLeg', kneeR, 0, 0);
+    S(p, 'leftFoot', (flexL - kneeL) + 0.05 * freeL, 0, roll);
+    S(p, 'rightFoot', (flexR - kneeR) + 0.05 * freeR, 0, roll);
+    hipsOff(p, 0.026 * ws * k, (-0.006 - 0.003 * br - 0.01 * Math.abs(ws)) * k, 0.004 * micro * k);
+    // Shoulders: breathe, weighted side sits a touch lower.
+    S(p, 'leftShoulder', 0, 0, 0.012 * br - 0.02 * ws);
+    S(p, 'rightShoulder', 0, 0, -0.012 * br - 0.02 * ws);
+    // Arms: relaxed, asymmetric, slight pendulum sway following the weight shift.
+    const sway = Math.sin(t * 0.85 + this.ph[4]!) * 0.02 + 0.015 * ws;
+    const a = armAmt;
+    arm(p, 1, -0.07 + sway * a, 1.38 + 0.015 * br - 0.02 * ws, 0, 0.1, 0.2 + 0.03 * br + 0.02 * micro);
+    arm(p, -1, -0.09 - sway * a, 1.4 + 0.015 * br + 0.02 * ws, 0, 0.16, 0.27 + 0.03 * br - 0.02 * micro);
+    hand(p, 1, 0.12 + 0.03 * micro2, 0.06); hand(p, -1, 0.16 - 0.03 * micro2, 0.08);
   }
 
   /** Walk / run cycle with arm swing, pelvis rotation, bob and head stabilisation. */

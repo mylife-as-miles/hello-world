@@ -8,7 +8,7 @@ import { createRoot } from 'react-dom/client';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Html, OrbitControls } from '@react-three/drei';
 import type { WorldEvent } from '@hello-world/contracts';
-import { createAvatarRig, type HumanoidRig } from '../src/avatars/index';
+import { createAvatarRig, loadAvatarRig, type HumanoidRig } from '../src/avatars/index';
 import { appearanceFromSeed } from '../src/avatars/catalog';
 import { AvatarAnimator, ANIMATION_FAMILIES, GESTURE_NAMES, type GestureName } from '../src/interactions/animation/AvatarAnimator';
 import type { AnimationFamily } from '../src/world/activities';
@@ -22,6 +22,8 @@ const only = params.get('only')?.split(',').filter(Boolean);
 const freeze = params.get('time') ? Number(params.get('time')) : null;
 const view = params.get('view') ?? 'front';
 const cols = Number(params.get('cols') ?? 6);
+/** ?real=mh-elena,mh-marco → load photoreal rigs (async) instead of procedural Townies. */
+const real = params.get('real')?.split(',').filter(Boolean);
 
 type Item = { label: string; family: AnimationFamily; gesture?: GestureName };
 const ALL_ITEMS: Item[] = [
@@ -31,11 +33,23 @@ const ALL_ITEMS: Item[] = [
 const ITEMS = ALL_ITEMS.filter(i => !only || only.includes(i.label) || (i.gesture && only.includes(i.gesture)));
 
 function LabRig({ item, index, x, z }: { item: Item; index: number; x: number; z: number }) {
-  const rig = useMemo<HumanoidRig>(() => createAvatarRig(appearanceFromSeed(`lab-${index}`)), [index]);
+  const [rig, setRig] = useState<HumanoidRig | null>(null);
+  useEffect(() => {
+    let alive = true;
+    let made: HumanoidRig | null = null;
+    const app = appearanceFromSeed(`lab-${index}`);
+    if (real?.length) {
+      void loadAvatarRig({ ...app, baseModelId: real[index % real.length]! }).then(r => { if (alive) { made = r; setRig(r); } else r.dispose(); });
+    } else { made = createAvatarRig(app); setRig(made); }
+    return () => { alive = false; made?.dispose(); };
+  }, [index]);
+  return rig ? <LabRigAnimated rig={rig} item={item} index={index} x={x} z={z} /> : null;
+}
+
+function LabRigAnimated({ rig, item, index, x, z }: { rig: HumanoidRig; item: Item; index: number; x: number; z: number }) {
   const anim = useMemo(() => new AvatarAnimator(rig, index * 7919), [rig, index]);
   const gTimer = useRef(0.2);
   const frozen = useRef(false);
-  useEffect(() => () => rig.dispose(), [rig]);
   useEffect(() => {
     if (params.get('seat')) anim.setSeatHeight(Number(params.get('seat')));
     anim.setBase(item.family);

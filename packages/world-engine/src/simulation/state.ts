@@ -87,7 +87,7 @@ export interface Agent {
   moodShownAt: number;
 }
 
-export type EncounterKind = 'greet' | 'chat' | 'compliment' | 'gift';
+export type EncounterKind = 'greet' | 'chat' | 'compliment' | 'gift' | 'befriend';
 
 export interface PlannedLine {
   speaker: 'a' | 'b';
@@ -131,6 +131,7 @@ export interface WorldFacts {
   lastAmbientAt: number;
   lastChatReplyAt: number;
   lastWelcomeAt: number;
+  lastGiftAt: number;
   /** Crowd info of the latest raid (shared by its celebrate + arrival events). */
   raidCrowd?: { visitors: number; amount: number; channel: string };
 }
@@ -146,6 +147,10 @@ export interface World {
   relationships: Map<string, Relationship>;
   /** pairKey → sim time of the last memory written (throttles chatty memories). */
   memoryAt: Map<string, number>;
+  /** Pairs that already had their best-friends moment. */
+  bestFriends: Set<string>;
+  /** pairKey → sim time of the last autonomous gift. */
+  giftAt: Map<string, number>;
   /** seatKey → agent id. */
   seats: Map<string, string>;
   encounters: Map<number, Encounter>;

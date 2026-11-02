@@ -9,9 +9,10 @@ import type { WorldEvent } from '@hello-world/contracts';
 import type { SceneStore } from '../core/sceneStore';
 
 type ToastKind = 'raid' | 'join' | 'gift' | 'confetti';
-interface Toast { id: string; kind: ToastKind; title: string; text: string; amount?: number; born: number }
+interface Toast { id: string; kind: ToastKind; title: string; text: string; amount?: number; born: number; life: number }
 
-const LIFETIME_MS = 5200;
+/** Raid toasts last as long as the 9 s raid camera shot; everything else ~5 s. */
+const LIFETIME_MS: Record<ToastKind, number> = { raid: 9500, join: 5200, gift: 5200, confetti: 5200 };
 const ACCENT: Record<ToastKind, string> = { raid: '#c792ff', join: '#6ff3ff', gift: '#ffd166', confetti: '#ff8fab' };
 
 const clean = (v: unknown, max = 32): string => {
@@ -20,7 +21,7 @@ const clean = (v: unknown, max = 32): string => {
   return t.length > max ? `${t.slice(0, max - 1)}…` : t;
 };
 
-function toastFor(e: WorldEvent, lastRaidAt: { t: number }): Toast | null {
+function toastFor(e: WorldEvent, lastRaidAt: { t: number }, nameOf: (id: string) => string | undefined): Toast | null {
   const now = Date.now();
   const p = e.payload ?? {};
   const name = clean(e.actorDisplayName) || 'Someone';
@@ -30,16 +31,17 @@ function toastFor(e: WorldEvent, lastRaidAt: { t: number }): Toast | null {
     lastRaidAt.t = now;
     const amount = typeof p.amount === 'number' && Number.isFinite(p.amount) ? Math.max(0, Math.round(p.amount)) : undefined;
     const channel = clean(p['channel']) || name;
-    return { id: `${e.id}-raid`, kind: 'raid', title: 'RAID!', text: amount !== undefined ? `viewers from ${channel}` : `${channel} is raiding the neighborhood`, amount, born: now };
+    return { id: `${e.id}-raid`, kind: 'raid', title: 'RAID!', text: amount !== undefined ? `viewers from ${channel}` : `${channel} is raiding the neighborhood`, amount, born: now, life: LIFETIME_MS.raid };
   }
   if (e.source === 'simulation') return null;
   switch (e.kind) {
-    case 'join': return { id: e.id, kind: 'join', title: 'Welcome', text: `to the neighborhood, ${name}!`, born: now };
+    case 'join': return { id: e.id, kind: 'join', title: 'Welcome', text: `to the neighborhood, ${name}!`, born: now, life: LIFETIME_MS.join };
     case 'gift': {
-      const item = clean(p['item'], 24);
-      return { id: e.id, kind: 'gift', title: 'Gift', text: `${name} sent ${item ? `${item} ` : 'a gift '}to the neighborhood`, born: now };
+      const item = clean(p['item'], 24) || 'a gift';
+      const to = e.targetId ? clean(nameOf(e.targetId)) : '';
+      return { id: e.id, kind: 'gift', title: 'Gift', text: to ? `${name} gave ${to} ${item}` : `${name} shared ${item} with the neighborhood`, born: now, life: LIFETIME_MS.gift };
     }
-    case 'confetti': return { id: e.id, kind: 'confetti', title: 'Confetti', text: `${name} made it rain confetti!`, born: now };
+    case 'confetti': return { id: e.id, kind: 'confetti', title: 'Confetti', text: `${name} made it rain confetti!`, born: now, life: LIFETIME_MS.confetti };
     default: return null;
   }
 }
@@ -78,8 +80,8 @@ const wrap: CSSProperties = {
 const CSS = `
 @keyframes hwEvbIn { from { opacity: 0; transform: translateY(14px) scale(.96); } to { opacity: 1; transform: none; } }
 @keyframes hwEvbOut { to { opacity: 0; transform: translateY(-6px) scale(.98); } }
-.hw-evb-toast { animation: hwEvbIn .38s cubic-bezier(.2,.9,.3,1.2) both, hwEvbOut .45s ease-in ${(LIFETIME_MS - 450) / 1000}s forwards; }
 `;
+const anim = (life: number) => `hwEvbIn .38s cubic-bezier(.2,.9,.3,1.2) both, hwEvbOut .45s ease-in ${((life - 450) / 1000).toFixed(2)}s forwards`;
 
 export function EventBanner({ store }: { store: SceneStore }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -92,11 +94,11 @@ export function EventBanner({ store }: { store: SceneStore }) {
       if (now - windowStart > 1000) { windowStart = now; inWindow = 0; }
       // bursts: accept at most 2 toasts per second (raids always pass), drop the rest
       if (inWindow >= 2 && event.kind !== 'raid') return;
-      const t = toastFor(event, lastRaid.current);
+      const t = toastFor(event, lastRaid.current, id => store.getResident(id)?.displayName);
       if (!t) return;
       inWindow++;
       setToasts(prev => [...prev.filter(x => x.id !== t.id), t].slice(-2));
-      const timer = setTimeout(() => { timers.delete(timer); setToasts(prev => prev.filter(x => x.id !== t.id)); }, LIFETIME_MS);
+      const timer = setTimeout(() => { timers.delete(timer); setToasts(prev => prev.filter(x => x.id !== t.id)); }, t.life);
       timers.add(timer);
     });
     return () => { off(); for (const tm of timers) clearTimeout(tm); };
@@ -110,6 +112,7 @@ export function EventBanner({ store }: { store: SceneStore }) {
         const big = t.kind === 'raid';
         return (
           <div key={t.id} className="hw-evb-toast" style={{
+            animation: anim(t.life),
             display: 'flex', alignItems: 'center', gap: 10, maxWidth: 'min(92%, 560px)',
             padding: big ? '10px 18px 10px 12px' : '8px 16px 8px 10px', borderRadius: 999,
             background: big ? 'linear-gradient(90deg, rgba(60,24,96,.78), rgba(18,22,34,.72))' : 'rgba(16,20,28,.66)',

@@ -51,6 +51,15 @@ const NAMEPLATE_MIN_PX = 22;
 const NAMEPLATE_MAX_PX = 30;
 /** Natural world-space pill height (m) between the clamps. */
 const NAMEPLATE_WORLD_H = 0.26;
+/** Max simultaneous nameplates after screen-space declutter (raid chips included). */
+const NAMEPLATE_MAX_VISIBLE = 8;
+/** Raid visitors (ids `raid:<group>:<k>`) within this radius of their group centroid collapse into one chip. */
+const RAID_CLUSTER_RADIUS = 7;
+const RAID_CLUSTER_MIN = 3;
+const RAID_CHIP_SLOTS = 3;
+/** Gift arcs wait until giver and receiver are this close (m), at most GIFT_MAX_WAIT seconds. */
+const GIFT_RANGE = 3;
+const GIFT_MAX_WAIT = 8;
 /** Only residents this close to a confetti burst / raid portal cheer. */
 const CHEER_RADIUS = 12;
 const VIEWER_EMOTE_SCALE = 1.35;
@@ -71,6 +80,23 @@ interface ResidentHandle {
   reaction: Reaction | null;
   faceTarget: { id: string; until: number } | null;
   play(g: GestureName, delay?: number): void;
+  /** Nameplate declutter: candidate state written by the resident each frame, `plateAllowed` by the layer (~10 Hz). */
+  plateCand: boolean;
+  plateAllowed: boolean;
+  platePx: number;
+  plateAspect: number;
+  plateY: number;
+  /** nowS() of the latest event this resident acted in (label priority). */
+  lastActorAt: number;
+  /** Individual label suppressed: member of a clustered raid group shown as one chip. */
+  raidCollapsed: boolean;
+}
+
+interface RaidChip { sprite: THREE.Sprite; mat: THREE.SpriteMaterial; tex: THREE.CanvasTexture | null; text: string; aspect: number; active: boolean; allowed: boolean; px: number; pos: THREE.Vector3 }
+interface PlateCand { h: ResidentHandle | null; chip: RaidChip | null; x: number; y: number; w: number; hh: number; score: number }
+
+function safeIdPart(s: string): string {
+  return s.replace(/[^\w:.@-]/g, '-').slice(0, 56) || 'raid';
 }
 interface BubbleData { key: number; text: string; name: string; start: number; duration: number; sim: boolean }
 
@@ -172,7 +198,7 @@ const _sphere = new THREE.Sphere();
 const _frustum = new THREE.Frustum();
 const _m = new THREE.Matrix4();
 /** Frustum + pixels-per-metre-at-1m shared by all residents, recomputed once per frame. */
-const frameCache = { time: -1, frustum: _frustum, pxk: 600 };
+const frameCache = { time: -1, frustum: _frustum, pxk: 600, layerTime: -1, layerPxk: 600 };
 const nowS = () => performance.now() / 1000;
 
 /** Client rect of a visible ResidentInspector card near this canvas (bubbles avoid it). */
@@ -183,6 +209,16 @@ function findInspectorRect(canvas: HTMLElement): DOMRect | null {
     if (el) { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 ? r : null; }
   }
   return null;
+}
+
+/** Pixels per metre at 1 m for the current camera (perspective), cached per frame. */
+function frameCacheLayer(state: { size: { height: number }; clock: { elapsedTime: number } }, camera: THREE.Camera): number {
+  if (frameCache.layerTime !== state.clock.elapsedTime) {
+    frameCache.layerTime = state.clock.elapsedTime;
+    const fov = (camera as THREE.PerspectiveCamera).isPerspectiveCamera ? (camera as THREE.PerspectiveCamera).fov : 50;
+    frameCache.layerPxk = state.size.height / (2 * Math.tan((fov * Math.PI) / 360));
+  }
+  return frameCache.layerPxk;
 }
 
 function angleLerp(a: number, b: number, t: number) {
@@ -214,7 +250,22 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
   const camera = useThree(s => s.camera);
   const gl = useThree(s => s.gl);
   const scene = useThree(s => s.scene);
-  const clock = useRef({ now: 0, lodTimer: 0, bubbleTimer: 0 });
+  const clock = useRef({ now: 0, lodTimer: 0, bubbleTimer: 0, plateTimer: 0, bubbleCount: 0 });
+  const pendingGifts = useMemo(() => [] as Array<{ actor: string; target: string; until: number }>, []);
+  /** Gift box arc from giver to receiver (+ reactions on landing). */
+  const launchGift = useMemo(() => (h: ResidentHandle, th: ResidentHandle) => {
+    const es = th.id === viewerRef.current ? VIEWER_EMOTE_SCALE : 1;
+    h.faceTarget = { id: th.id, until: nowS() + 4 };
+    th.faceTarget = { id: h.id, until: nowS() + 5 };
+    h.play('give');
+    _v.set(h.pos.x + Math.sin(h.yaw) * 0.35, h.pos.y + h.height * 0.6, h.pos.z + Math.cos(h.yaw) * 0.35);
+    _v2.set(th.pos.x, th.pos.y + th.height * 0.62, th.pos.z);
+    gifts.launch(_v, _v2, () => {
+      emotes.spawn('sparkle', th.pos.x, th.pos.y + th.height * 0.7, th.pos.z, 5, 0.5, es);
+      emotes.spawn('heart', th.pos.x, th.pos.y + th.height + 0.2, th.pos.z, 3, 0.35, es);
+      th.play('cheer'); th.animator?.flashExpression('happy', 1, 4);
+    });
+  }, [emotes, gifts]);
   const viewerRef = useRef(viewerResidentId);
   viewerRef.current = viewerResidentId;
   /** Overlay mode, shared with residents through a ref (no re-render); correct from the first frame. */
@@ -253,6 +304,8 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
     return store.onEvent(({ event }) => {
       const e: WorldEvent = event;
       const actor = e.actorId, target = e.targetId && e.targetId !== e.actorId ? e.targetId : undefined;
+      const ah = registry.get(actor);
+      if (ah) ah.lastActorAt = now();
       const sentiment = typeof e.payload?.sentiment === 'string' ? e.payload.sentiment : undefined;
       const text = sanitizeBubbleText(e.text);
       if (text && (e.kind === 'chat' || e.kind === 'social' || e.kind === 'gift' || e.kind === 'custom' || e.kind === 'wave')) {
@@ -275,19 +328,14 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
           withHandle(actor, h => { h.reaction = { family: 'dance', until: now() + 8 }; emoteAt(h, 'note', 2); });
           break;
         case 'gift':
+          // The arc only flies once the giver has reached the receiver (≤ GIFT_RANGE m), max GIFT_MAX_WAIT s:
+          // matches the sim's "running to X" approach. Launched from the frame loop.
           withHandle(actor, h => {
-            face(h, target, 4); h.play('give');
-            const th = target ? registry.get(target) : undefined;
-            if (th) {
-              _v.set(h.pos.x + Math.sin(h.yaw) * 0.35, h.pos.y + h.height * 0.6, h.pos.z + Math.cos(h.yaw) * 0.35);
-              _v2.set(th.pos.x, th.pos.y + th.height * 0.62, th.pos.z);
-              face(th, actor, 5);
-              gifts.launch(_v, _v2, () => {
-                emotes.spawn('sparkle', th.pos.x, th.pos.y + th.height * 0.7, th.pos.z, 5, 0.5, emScale(th));
-                emotes.spawn('heart', th.pos.x, th.pos.y + th.height + 0.2, th.pos.z, 3, 0.35, emScale(th));
-                th.play('cheer'); th.animator?.flashExpression('happy', 1, 4);
-              });
-            } else emoteAt(h, 'sparkle', 3);
+            face(h, target, GIFT_MAX_WAIT);
+            if (target) {
+              pendingGifts.push({ actor, target, until: now() + GIFT_MAX_WAIT });
+              if (pendingGifts.length > 8) pendingGifts.shift();
+            } else { h.play('give'); emoteAt(h, 'sparkle', 3); }
           });
           break;
         case 'social': {
@@ -328,13 +376,124 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
         default: break;
       }
     });
-  }, [store, registry, pending, hub, emotes, gifts]);
+  }, [store, registry, pending, hub, emotes, gifts, pendingGifts]);
+
+  // Raid chips: one label per clustered raid group ("+7 raiders from CozyStreamer").
+  const raidChips = useMemo<RaidChip[]>(() => Array.from({ length: RAID_CHIP_SLOTS }, () => {
+    const mat = new THREE.SpriteMaterial({ transparent: true, depthWrite: false, depthTest: false, toneMapped: false });
+    const sprite = new THREE.Sprite(mat);
+    sprite.visible = false; sprite.renderOrder = 41; sprite.raycast = () => {};
+    return { sprite, mat, tex: null, text: '', aspect: 4, active: false, allowed: false, px: NAMEPLATE_MIN_PX, pos: new THREE.Vector3() };
+  }), []);
+  useEffect(() => () => { for (const ch of raidChips) { ch.tex?.dispose(); ch.mat.dispose(); } }, [raidChips]);
+  const raidGroups = useMemo(() => new Map<string, ResidentHandle[]>(), []);
+  const raidChannels = useMemo(() => new Map<string, string>(), []);
+  const plateCands = useMemo(() => [] as PlateCand[], []);
+
+  const raidChannel = (group: string): string => {
+    let ch = raidChannels.get(group);
+    if (ch) return ch;
+    for (const e of store.current.eventHistory) {
+      if (e.kind !== 'raid' || `raid:${safeIdPart(e.id)}` !== group) continue;
+      const raw = typeof e.payload?.channel === 'string' && e.payload.channel ? e.payload.channel : e.actorDisplayName;
+      ch = sanitizeBubbleText(raw).slice(0, 24);
+    }
+    ch = ch || 'a raid';
+    raidChannels.set(group, ch);
+    if (raidChannels.size > 32) raidChannels.clear();
+    return ch;
+  };
+
+  const updateRaidGroups = () => {
+    for (const arr of raidGroups.values()) arr.length = 0;
+    for (const h of registry.values()) {
+      h.raidCollapsed = false;
+      if (!h.id.startsWith('raid:')) continue;
+      const k = h.id.lastIndexOf(':');
+      if (k <= 5) continue;
+      const key = h.id.slice(0, k);
+      let arr = raidGroups.get(key);
+      if (!arr) { arr = []; raidGroups.set(key, arr); }
+      arr.push(h);
+    }
+    let slot = 0;
+    for (const [key, arr] of raidGroups) {
+      if (arr.length < RAID_CLUSTER_MIN) { if (!arr.length) raidGroups.delete(key); continue; }
+      let cx = 0, cz = 0;
+      for (const h of arr) { cx += h.pos.x; cz += h.pos.z; }
+      cx /= arr.length; cz /= arr.length;
+      let n = 0, mx = 0, mz = 0, top = 0;
+      for (const h of arr) {
+        if (Math.hypot(h.pos.x - cx, h.pos.z - cz) > RAID_CLUSTER_RADIUS) continue;
+        n++; mx += h.pos.x; mz += h.pos.z; top = Math.max(top, h.height);
+      }
+      if (n < RAID_CLUSTER_MIN || slot >= raidChips.length) continue;
+      mx /= n; mz /= n;
+      for (const h of arr) {
+        if (Math.hypot(h.pos.x - cx, h.pos.z - cz) > RAID_CLUSTER_RADIUS) continue;
+        // Individual labels only when selected / speaking / it's the viewer.
+        h.raidCollapsed = !(h.id === selectedResidentId || h.id === viewerResidentId || hub.shown.has(h.id));
+      }
+      const chip = raidChips[slot++]!;
+      chip.active = true;
+      chip.pos.set(mx, top + 0.75, mz);
+      const text = `+${n} raiders from ${raidChannel(key)}`;
+      if (text !== chip.text) {
+        chip.text = text;
+        chip.tex?.dispose();
+        const t = makeNameplateTexture(text, '#c39bff', 48);
+        chip.tex = t.texture; chip.aspect = t.aspect;
+        chip.mat.map = t.texture; chip.mat.needsUpdate = true;
+      }
+    }
+    for (; slot < raidChips.length; slot++) raidChips[slot]!.active = false;
+  };
+
+  /** Greedy screen-space label selection: viewer > selected > raid chip > recent actor > nearest; shown bubbles block. */
+  const declutterPlates = () => {
+    const cr = gl.domElement.getBoundingClientRect();
+    const W = cr.width, H = cr.height;
+    plateCands.length = 0;
+    const project = (x: number, y: number, z: number) => { _v.set(x, y, z).project(camera); return _v.z <= 1; };
+    for (const h of registry.values()) {
+      if (!h.plateCand) { h.plateAllowed = false; continue; }
+      if (!project(h.pos.x, h.pos.y + h.plateY, h.pos.z)) { h.plateAllowed = false; continue; }
+      const age = clock.current.now - h.lastActorAt;
+      const score = h.id === viewerResidentId ? -1e6 : h.id === selectedResidentId ? -5e5
+        : age < 10 ? -1e4 + age * 100 : h.pos.distanceTo(camera.position);
+      plateCands.push({ h, chip: null, x: cr.left + ((_v.x + 1) / 2) * W, y: cr.top + ((1 - _v.y) / 2) * H, w: h.platePx * h.plateAspect, hh: h.platePx, score });
+    }
+    for (const chip of raidChips) {
+      chip.allowed = false;
+      if (!chip.active || !project(chip.pos.x, chip.pos.y, chip.pos.z)) continue;
+      plateCands.push({ h: null, chip, x: cr.left + ((_v.x + 1) / 2) * W, y: cr.top + ((1 - _v.y) / 2) * H, w: chip.px * chip.aspect, hh: chip.px, score: -2e5 });
+    }
+    plateCands.sort((a, b) => a.score - b.score);
+    let shownPlates = 0;
+    const nb = clock.current.bubbleCount;
+    for (const cnd of plateCands) {
+      const l = cnd.x - cnd.w / 2 - 2, r = cnd.x + cnd.w / 2 + 2, t = cnd.y - cnd.hh / 2 - 1, b = cnd.y + cnd.hh / 2 + 1;
+      let ok = shownPlates < NAMEPLATE_MAX_VISIBLE;
+      for (let k = 0; ok && k < nb; k++) {
+        const o = k * 4;
+        if (r > shownRects[o]! && l < shownRects[o + 1]! && b > shownRects[o + 2]! && t < shownRects[o + 3]!) ok = false;
+      }
+      for (let k = 0; ok && k < shownPlates && k < 16; k++) {
+        const o = k * 4;
+        if (r > plateRects[o]! && l < plateRects[o + 1]! && b > plateRects[o + 2]! && t < plateRects[o + 3]!) ok = false;
+      }
+      if (cnd.h) cnd.h.plateAllowed = ok; else if (cnd.chip) cnd.chip.allowed = ok;
+      if (ok && shownPlates < 16) { const o = shownPlates * 4; plateRects[o] = l; plateRects[o + 1] = r; plateRects[o + 2] = t; plateRects[o + 3] = b; }
+      if (ok) shownPlates++;
+    }
+  };
 
   const ringRef = useRef<THREE.Mesh>(null);
   const markerRef = useRef<THREE.Group>(null);
   const lodRank = useMemo(() => [] as Array<{ id: string; d: number }>, []);
   const bubbleRank = useMemo(() => [] as Array<{ id: string; d: number; score: number }>, []);
   const shownRects = useMemo(() => new Float32Array(4 * 16), []);
+  const plateRects = useMemo(() => new Float32Array(4 * 16), []);
 
   useFrame((state, delta) => {
     const dt = Math.min(delta, 0.1);
@@ -385,6 +544,35 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
     }
 
     // Speech bubbles: expire; keep a readable minimum on-screen size.
+    // Deferred gift arcs: fly when the giver is close enough (or the wait expires).
+    for (let i = pendingGifts.length - 1; i >= 0; i--) {
+      const gft = pendingGifts[i]!;
+      const gh = registry.get(gft.actor), th = registry.get(gft.target);
+      const expired = c.now > gft.until;
+      if (!gh?.animator || !th) { if (expired) pendingGifts.splice(i, 1); continue; }
+      if (Math.hypot(gh.pos.x - th.pos.x, gh.pos.z - th.pos.z) > GIFT_RANGE && !expired) continue;
+      pendingGifts.splice(i, 1);
+      launchGift(gh, th);
+    }
+
+    // Raid chips follow their group; keep their on-screen size readable.
+    for (const chip of raidChips) {
+      chip.sprite.visible = chip.active && chip.allowed;
+      if (!chip.active) continue;
+      const pxPerM = frameCacheLayer(state, camera) / Math.max(1, chip.pos.distanceTo(camera.position));
+      chip.px = Math.min(NAMEPLATE_MAX_PX, Math.max(NAMEPLATE_MIN_PX, NAMEPLATE_WORLD_H * pxPerM));
+      const sc = chip.px / pxPerM;
+      chip.sprite.scale.set(sc * chip.aspect, sc, 1);
+      chip.sprite.position.copy(chip.pos);
+    }
+
+    // Nameplate declutter + raid collapse (~10 Hz).
+    if ((c.plateTimer -= dt) <= 0) {
+      c.plateTimer = 0.1;
+      updateRaidGroups();
+      declutterPlates();
+    }
+
     hub.tick(c.now);
     if (hub.active.size) {
       for (const [id, el] of hub.els) {
@@ -398,6 +586,7 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
     }
     // Rank (viewer, selected, then newest/nearest), cap the count, skip bubbles that
     // would overlap a higher-ranked one; slide (or skip) bubbles under the inspector card.
+    if (!hub.active.size) c.bubbleCount = 0;
     if ((c.bubbleTimer -= dt) <= 0 && hub.active.size) {
       c.bubbleTimer = 0.15;
       const maxVisible = quality === 'low' ? BUBBLE_MAX_VISIBLE_LOW : BUBBLE_MAX_VISIBLE;
@@ -451,6 +640,7 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
           }
         }
         if (show) shown++;
+        c.bubbleCount = Math.min(16, shown);
         const fadingOut = c.now - b.start > b.duration - 0.5;
         el.style.opacity = show && !fadingOut ? '1' : '0';
         if (show && !fadingOut) hub.shown.add(r.id); else hub.shown.delete(r.id);
@@ -470,6 +660,7 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
       isViewer={s.id === viewerResidentId} onSelect={onResidentSelect} />)}
     <primitive object={emotes.group} />
     <primitive object={gifts.group} />
+    {raidChips.map((ch, i) => <primitive key={`raid-chip-${i}`} object={ch.sprite} />)}
     <mesh ref={ringRef} geometry={ringGeo} material={ringMat} rotation-x={-Math.PI / 2} visible={false} renderOrder={5} raycast={() => null} />
     <group ref={markerRef} visible={false}>
       <mesh geometry={markerGeo} material={markerMat} scale={[1, 1.5, 1]} raycast={() => null} />
@@ -511,6 +702,7 @@ const Resident = memo(function Resident(p: ResidentProps) {
     const h: ResidentHandle = {
       id, pos: new THREE.Vector3(r?.location.x ?? 0, 0, r?.location.z ?? 0), yaw: (hashString(id) % 628) / 100, height: 1.7,
       animator: null, visible: true, reaction: null, faceTarget: null,
+      plateCand: false, plateAllowed: false, platePx: NAMEPLATE_MIN_PX, plateAspect: 3, plateY: 2, lastActorAt: -1e9, raidCollapsed: false,
       play(g, delay = 0) {
         if (delay > 0) { setTimeout(() => h.animator?.playGesture(g), delay * 1000); return; }
         h.animator?.playGesture(g);
@@ -550,7 +742,8 @@ const Resident = memo(function Resident(p: ResidentProps) {
 
   const plate = useMemo(() => makeNameplateTexture(p.displayName, p.isViewer ? '#5ef2c6' : undefined), [p.displayName, p.isViewer]);
   useEffect(() => () => plate.texture.dispose(), [plate]);
-  const plateMat = useMemo(() => new THREE.SpriteMaterial({ map: plate.texture, transparent: true, depthWrite: false, opacity: 0.9, toneMapped: false }), [plate]);
+  // Labels draw on top of scenery (lamp posts/umbrellas must not cut names); declutter keeps them few.
+  const plateMat = useMemo(() => new THREE.SpriteMaterial({ map: plate.texture, transparent: true, depthWrite: false, depthTest: false, opacity: 0.9, toneMapped: false }), [plate]);
   useEffect(() => () => plateMat.dispose(), [plateMat]);
 
   useFrame((state, delta) => {
@@ -651,7 +844,8 @@ const Resident = memo(function Resident(p: ResidentProps) {
     const plateS = plateRef.current;
     if (plateS) {
       const fade = 1 - Math.min(1, Math.max(0, (camDist - NAMEPLATE_SOLID) / (NAMEPLATE_FAR - NAMEPLATE_SOLID)));
-      plateS.visible = fade > 0.02 && !hub.shown.has(id);
+      handle.plateCand = fade > 0.02 && handle.visible && !hub.shown.has(id) && !handle.raidCollapsed;
+      plateS.visible = handle.plateCand && handle.plateAllowed;
       plateMat.opacity = fade;
       // Readable in wide shots: clamp the on-screen pill height, keep depth cue in between.
       const pxPerM = frameCache.pxk / Math.max(1, camDist);
@@ -659,6 +853,7 @@ const Resident = memo(function Resident(p: ResidentProps) {
       const sc = px / pxPerM;
       plateS.scale.set(sc * plate.aspect, sc, 1);
       plateS.position.y = handle.height + 0.16 + sc * 0.55;
+      handle.platePx = px; handle.plateAspect = plate.aspect; handle.plateY = plateS.position.y;
     }
 
     const anim = handle.animator;
@@ -700,7 +895,7 @@ const Resident = memo(function Resident(p: ResidentProps) {
   return <group ref={groupRef} name={`resident:${id}`}>
     {rig && <primitive object={rig.root} />}
     <mesh geometry={hit.geo} material={hit.mat} position={[0, 0.85, 0]} onClick={onClick} onPointerOver={onOver} onPointerOut={onOut} />
-    <sprite ref={plateRef} material={plateMat} renderOrder={15} raycast={() => null} />
+    <sprite ref={plateRef} material={plateMat} renderOrder={40} raycast={() => null} />
     <SpeechBubble hub={hub} id={id} height={handle.height} isViewer={p.isViewer} />
   </group>;
 });

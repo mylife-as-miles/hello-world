@@ -86,6 +86,9 @@ export function reactsPositively(w: World, listener: Agent, speaker: Agent, kind
   const t = listener.temperament;
   const f = friendshipOf(w, listener.id, speaker.id) ?? 45;
   let p = 0.62 + t.warmth * 0.35 + listener.mood * 0.3 + ((f - 50) / 100) * 0.5 - (listener.needs.energy < 15 ? 0.2 : 0);
+  // Sulking, exhausted or lonely-and-grumpy residents give short answers and snub more.
+  if (listener.activity.startsWith('sulking') || listener.needs.energy < 20) p -= 0.25;
+  if (listener.needs.social < 25 && t.grumpiness > 0.5) p -= 0.15;
   if (kind === 'gift') p += 0.35;
   else if (kind === 'compliment') p += 0.1;
   else if (kind === 'wave') p += 0.05;

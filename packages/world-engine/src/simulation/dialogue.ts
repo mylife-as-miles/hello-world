@@ -365,8 +365,9 @@ export function pickTopic(ctx: TopicContext): Topic {
   const clock = worldClock(w.simTime);
   const cands: Array<{ w: number; make: () => Topic | null }> = [];
   const fresh = (t: TopicDef, weight: number) => (hasFresh(w, `topic:${t.id}`, t.lines) ? weight : 0);
-  if (friendship >= 65 && memories.length) {
-    cands.push({ w: 2.2, make: () => {
+  if (friendship >= 55 && memories.length) {
+    // Inside jokes grow with friendship.
+    cands.push({ w: 1.4 + (friendship - 55) / 12, make: () => {
       const cb = memoryCallback(w, speaker, listener, memories);
       return cb ? { id: 'memory', label: 'old times', line: cb, reply: fill(choose(w, 'reply:memory', MEMORY_REPLIES, listener.id), vars), joke: false } : null;
     } });

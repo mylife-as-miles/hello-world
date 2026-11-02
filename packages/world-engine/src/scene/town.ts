@@ -129,6 +129,7 @@ interface Ctx {
   P: Prims; r: () => number; space: Space; q: number;
   lamps: THREE.Vector3[]; chimneys: THREE.Vector3[]; signs: SignDef[];
   occ?: Array<{ x: number; z: number; r: number; h: number }>;
+  low?: boolean;
 }
 
 const pick = <T,>(r: () => number, a: readonly T[]): T => a[Math.floor(r() * a.length) % a.length]!;
@@ -140,8 +141,10 @@ function addWindow(c: Ctx, M: THREE.Matrix4, ww: number, wh: number, trim: strin
   const at = (m: THREE.Matrix4) => M.clone().multiply(m);
   c.solid.add(c.P.box(), trim, at(mtx(0, 0, 0.02, 0, ww + 0.2, wh + 0.2, 0.08)));
   c.glass.add(c.P.box(), c.r() < 0.18 ? '#6b5a48' : pick(c.r, GLOW), at(mtx(0, 0, 0.05, 0, ww, wh, 0.04)));
-  c.solid.add(c.P.box(), trim, at(mtx(0, 0, 0.08, 0, 0.06, wh, 0.03)));
-  c.solid.add(c.P.box(), trim, at(mtx(0, wh * 0.08, 0.08, 0, ww, 0.06, 0.03)));
+  if (!c.low) {
+    c.solid.add(c.P.box(), trim, at(mtx(0, 0, 0.08, 0, 0.06, wh, 0.03)));
+    c.solid.add(c.P.box(), trim, at(mtx(0, wh * 0.08, 0.08, 0, ww, 0.06, 0.03)));
+  }
   c.solid.add(c.P.box(), trim, at(mtx(0, -wh / 2 - 0.11, 0.1, 0, ww + 0.36, 0.08, 0.22)));
   if (shutter) for (const s of [-1, 1]) {
     c.solid.add(c.P.box(), shutter, at(mtx(s * (ww / 2 + 0.27), 0, 0.05, 0, 0.3, wh + 0.12, 0.05)));
@@ -244,9 +247,11 @@ function addLamp(c: Ctx, x: number, z: number) {
   c.solid.add(c.P.tcyl(0.65, 8), col, mtx(x, 1.75, z, 0, 0.07, 3.0, 0.07));
   c.solid.add(c.P.box(), col, mtx(x, 3.2, z, Math.PI / 4, 0.34, 0.06, 0.34));
   c.solid.add(c.P.cone(4), col, mtx(x, 3.78, z, Math.PI / 4, 0.32, 0.26, 0.32));
-  for (const [dx, dz] of [[0.14, 0], [-0.14, 0], [0, 0.14], [0, -0.14]] as const) c.solid.add(c.P.box(), col, mtx(x + dx, 3.44, z + dz, Math.PI / 4, 0.03, 0.44, 0.03));
-  c.solid.add(c.P.sphere(8, 6), '#d9b25f', mtx(x, 3.95, z, 0, 0.05, 0.05, 0.05));
-  c.bulbs.add(c.P.sphere(10, 8), '#ffd79a', mtx(x, 3.44, z, 0, 0.12, 0.17, 0.12));
+  if (!c.low) {
+    for (const [dx, dz] of [[0.14, 0], [-0.14, 0], [0, 0.14], [0, -0.14]] as const) c.solid.add(c.P.box(), col, mtx(x + dx, 3.44, z + dz, Math.PI / 4, 0.03, 0.44, 0.03));
+    c.solid.add(c.P.sphere(8, 6), '#d9b25f', mtx(x, 3.95, z, 0, 0.05, 0.05, 0.05));
+  }
+  c.bulbs.add(c.low ? c.P.ico(0) : c.P.sphere(10, 8), '#ffd79a', mtx(x, 3.44, z, 0, 0.12, 0.17, 0.12));
   c.lamps.push(new THREE.Vector3(x, 3.44, z));
   c.occ?.push({ x, z, r: 0.3, h: 4.1 });
   c.space.circle(x, z, 0.35);
@@ -398,13 +403,14 @@ function buildHouse(c: Ctx, b: BuildingDef) {
   // Picket fence around the front yard (skips anything near paths)
   const fenceZ = fz + 3.3;
   const pickets: Array<[number, number]> = [];
-  for (let lx = -w / 2 - 0.9; lx <= w / 2 + 0.9; lx += 0.32) pickets.push([lx, fenceZ]);
-  for (let lz = fz + 0.4; lz < fenceZ; lz += 0.32) { pickets.push([-w / 2 - 0.9, lz]); pickets.push([w / 2 + 0.9, lz]); }
+  const gap = c.low ? 0.5 : 0.32;
+  for (let lx = -w / 2 - 0.9; lx <= w / 2 + 0.9; lx += gap) pickets.push([lx, fenceZ]);
+  for (let lz = fz + 0.4; lz < fenceZ; lz += gap) { pickets.push([-w / 2 - 0.9, lz]); pickets.push([w / 2 + 0.9, lz]); }
   for (const [lx, lz] of pickets) {
     const p = toWorld(b, lx, lz);
     if (c.space.pathDist(p.x, p.z) < 0.35) continue;
     c.solid.add(c.P.box(), '#fbf6ee', mtx(p.x, 0.42, p.z, b.rotation, 0.08, 0.84, 0.05));
-    c.solid.add(c.P.cone(4), '#fbf6ee', mtx(p.x, 0.9, p.z, b.rotation + Math.PI / 4, 0.06, 0.12, 0.06));
+    if (!c.low) c.solid.add(c.P.cone(4), '#fbf6ee', mtx(p.x, 0.9, p.z, b.rotation + Math.PI / 4, 0.06, 0.12, 0.06));
     c.solid.add(c.P.box(), '#efe7da', mtx(p.x, 0.62, p.z, b.rotation + (Math.abs(lz - fenceZ) < 0.01 ? 0 : Math.PI / 2), 0.34, 0.06, 0.03));
   }
   const yard = toWorld(b, 0, (fz + fenceZ) / 2);
@@ -854,9 +860,12 @@ export function buildTown(quality: 'low' | 'high', options: TownOptions = {}): T
   const inFlat = (x: number, z: number) => horizon || Math.hypot(x, z) < 34.5;
   const ctx: Ctx = {
     solid: new Batch(), detail: new Batch(), far: new Batch(), flat: new Batch(), glass: new Batch(), bulbs: new Batch(),
-    P: new Prims(), r: rng(20261102), space: new Space(), q, lamps: [], chimneys: [], signs: [], occ: [],
+    P: new Prims(low), r: rng(20261102), space: new Space(), q, lamps: [], chimneys: [], signs: [], occ: [],
   };
   const c = ctx;
+  c.low = low;
+  // Low quality: small parts (pickets, sills, cups, chair legs, crops…) don't cast shadows.
+  if (low) { c.solid.smallTarget = c.detail; c.solid.smallRadius = 0.36; }
   const reserved = options.reservedTrees ?? [];
   for (const t of reserved) { c.space.circle(t.x, t.z, 1.9 * t.scale); c.occ!.push({ x: t.x, z: t.z, r: 1.3 * t.scale, h: 5.5 * t.scale }); }
   const occupied = options.occupied;
@@ -971,7 +980,7 @@ export function buildTown(quality: 'low' | 'high', options: TownOptions = {}): T
     c.space.circle(x, z, 0.5);
   });
   scatter(2.6, 34, (x, z, r) => {
-    if (r() > 0.4 * q) return;
+    if (r() > (low ? 0.14 : 0.4 * q)) return;
     if (!inFlat(x, z)) return;
     if (!c.space.free(x, z, 0.3)) return;
     const fc = pick(r, FLOWERS);

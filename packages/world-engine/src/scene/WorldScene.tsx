@@ -5,15 +5,15 @@
  * to the render loop; React only re-renders on structure changes. The 3D
  * content is memoised with stable callbacks so host re-renders do not cascade.
  */
-import { Component, lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Canvas, useThree } from '@react-three/fiber';
+import { Component, lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { WorldSceneProps } from '@hello-world/contracts';
 import { SceneStore } from '../core/sceneStore';
 import { SceneStoreContext } from '../core/SceneContext';
 import { ResidentsLayer } from '../interactions/ResidentsLayer';
 import { ResidentInspector } from '../interactions/ResidentInspector';
-import { getPoi } from '../world/layout';
+import { getPoi, POIS } from '../world/layout';
 import { createKit, type SceneKit } from './kit';
 import { KitContext, useKit } from './context';
 import { Town } from './Town';
@@ -198,7 +198,7 @@ const WorldContent = memo(function WorldContent({
     <>
       <Atmosphere transparent={transparent} quality={quality} sky={sky} cloudTint={cloudTint} />
       {!transparent && <SkyDome uniforms={sky} />}
-      {!transparent && <Clouds tint={cloudTint} />}
+      {!transparent && quality === 'high' && <Clouds tint={cloudTint} />}
       {!transparent && (
         <Town quality={quality} onLocationSelect={onLocationSelect} horizon={builtInHorizon && !USE_LANDSCAPE}
           reservedTrees={PARK_TREE_PLACEMENTS} occupied={districtOccupied} terrainAt={USE_LANDSCAPE ? terrainHeightAt : undefined} />
@@ -211,13 +211,15 @@ const WorldContent = memo(function WorldContent({
       {!transparent && <GeneratedTrees quality={quality} placements={quality === 'high' ? TREES_HIGH : TREES_LOW} />}
       {transparent && <ShadowCatcher />}
       {transparent && <OverlaySeating />}
+      {transparent && <OverlayContactShadows />}
+      <RenderStats />
       <Portal quality={quality} overlay={transparent} />
       <Bursts quality={quality} />
       <ResidentsLayer
         selectedResidentId={selectedResidentId} onResidentSelect={onResidentSelect} quality={quality}
         viewerResidentId={viewerResidentId} overlay={transparent}
       />
-      <CameraRig mode={rigMode} selectedResidentId={selectedResidentId} transparent={transparent} />
+      <CameraRig mode={rigMode} selectedResidentId={selectedResidentId} transparent={transparent} quality={quality} />
       {quality === 'high' && !transparent && !webgpu && <PostFX />}
     </>
   );
@@ -237,6 +239,87 @@ function OverlaySeating() {
   const geo = useMemo(() => buildOverlayProps(), []);
   useEffect(() => () => geo.dispose(), [geo]);
   return <mesh geometry={geo} material={kit.solid} castShadow receiveShadow />;
+}
+
+/** Overlay mode: soft contact-shadow patches under the drawn benches, café furniture and stage (1 draw call). */
+function OverlayContactShadows() {
+  const ref = useRef<THREE.InstancedMesh>(null);
+  const res = useMemo(() => {
+    const spots: Array<[number, number, number]> = [];
+    for (const poi of POIS) {
+      if (!poi.seats?.length) continue;
+      if (poi.kind === 'bench') {
+        const x = poi.seats.reduce((a, q) => a + q.x, 0) / poi.seats.length, z = poi.seats.reduce((a, q) => a + q.z, 0) / poi.seats.length;
+        spots.push([x, z, 1.25]);
+      } else if (poi.kind === 'cafe') {
+        for (let i = 0; i + 1 < poi.seats.length; i += 2) spots.push([(poi.seats[i]!.x + poi.seats[i + 1]!.x) / 2, (poi.seats[i]!.z + poi.seats[i + 1]!.z) / 2, 1.45]);
+      }
+    }
+    const st = getPoi('stage');
+    if (st) spots.push([st.position.x, st.position.z, 3.7]);
+    let tex: THREE.CanvasTexture | null = null;
+    if (typeof document !== 'undefined') {
+      const c = document.createElement('canvas');
+      c.width = c.height = 128;
+      const g = c.getContext('2d');
+      if (g) {
+        const grad = g.createRadialGradient(64, 64, 4, 64, 64, 64);
+        grad.addColorStop(0, 'rgba(0,0,0,0.42)'); grad.addColorStop(0.55, 'rgba(0,0,0,0.22)'); grad.addColorStop(1, 'rgba(0,0,0,0)');
+        g.fillStyle = grad; g.fillRect(0, 0, 128, 128);
+        tex = new THREE.CanvasTexture(c);
+      }
+    }
+    const geo = new THREE.PlaneGeometry(2, 2);
+    geo.rotateX(-Math.PI / 2);
+    const mat = new THREE.MeshBasicMaterial({ map: tex, color: tex ? '#ffffff' : '#000000', transparent: true, opacity: tex ? 1 : 0.2, depthWrite: false, toneMapped: false });
+    return { spots, tex, geo, mat };
+  }, []);
+  useEffect(() => () => { res.tex?.dispose(); res.geo.dispose(); res.mat.dispose(); }, [res]);
+  useLayoutEffect(() => {
+    const m = ref.current;
+    if (!m) return;
+    const tmp = new THREE.Matrix4();
+    res.spots.forEach(([x, z, r], i) => m.setMatrixAt(i, tmp.makeScale(r, 1, r).setPosition(x, 0.015, z)));
+    m.instanceMatrix.needsUpdate = true;
+  }, [res]);
+  return <instancedMesh ref={ref} args={[res.geo, res.mat, res.spots.length]} frustumCulled={false} renderOrder={-1} />;
+}
+
+/**
+ * Exposes averaged renderer.info numbers on the canvas element (`data-draw-calls`, `data-triangles`)
+ * for QA/perf budgets. Accumulates across all render calls of a frame (shadow + post passes).
+ */
+function RenderStats() {
+  const gl = useThree(s => s.gl);
+  const scene = useThree(s => s.scene);
+  useEffect(() => {
+    // QA only (?hwdebug): expose the scene on the canvas element for draw-call breakdowns.
+    if (typeof location === 'undefined' || !location.search.includes('hwdebug')) return;
+    (gl.domElement as unknown as { __hwScene?: THREE.Scene }).__hwScene = scene;
+    return () => { delete (gl.domElement as unknown as { __hwScene?: THREE.Scene }).__hwScene; };
+  }, [gl, scene]);
+  const acc = useRef({ frames: 0, calls: 0, tris: 0 });
+  useEffect(() => {
+    const info = (gl as unknown as { info?: { autoReset: boolean } }).info;
+    if (!info) return;
+    const prev = info.autoReset;
+    info.autoReset = false;
+    return () => { info.autoReset = prev; };
+  }, [gl]);
+  useFrame(() => {
+    const info = (gl as unknown as { info?: { reset(): void; render: { calls?: number; drawCalls?: number; triangles?: number } } }).info;
+    if (!info) return;
+    const a = acc.current;
+    a.frames++; a.calls += info.render.calls ?? info.render.drawCalls ?? 0; a.tris += info.render.triangles ?? 0;
+    info.reset();
+    if (a.frames >= 20) {
+      const el = gl.domElement as HTMLElement;
+      el.dataset.drawCalls = String(Math.round(a.calls / a.frames));
+      el.dataset.triangles = String(Math.round(a.tris / a.frames));
+      a.frames = 0; a.calls = 0; a.tris = 0;
+    }
+  }, -50);
+  return null;
 }
 
 const JOIN_COLORS = ['#b98cff', '#6ff3ff', '#ffffff', '#ffd6ff'];

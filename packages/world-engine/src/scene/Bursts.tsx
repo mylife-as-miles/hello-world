@@ -3,7 +3,7 @@
  * and confetti (instanced fluttering quads). Ring-buffer slots, capped counts.
  * Registers emitters on kit.fx so event reactions can trigger them.
  */
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useKit } from './context';
@@ -107,7 +107,7 @@ export function Bursts({ quality }: { quality: 'low' | 'high' }) {
     cg.setAttribute('aOrigin', cOrigin); cg.setAttribute('aVel', cVel); cg.setAttribute('aColor', cColor); cg.setAttribute('aSpin', cSpin); cg.setAttribute('aInfo', cInfo);
     cg.instanceCount = CN;
     const cm = new THREE.ShaderMaterial({ vertexShader: CONF_VERT, fragmentShader: CONF_FRAG, uniforms: { uTime: kit.uniforms.uTime }, side: THREE.DoubleSide });
-    return { sg, sm, sOrigin, sVel, sColor, sInfo, base, cg, cm, cOrigin, cVel, cColor, cSpin, cInfo, sHead: 0, cHead: 0 };
+    return { sg, sm, sOrigin, sVel, sColor, sInfo, base, cg, cm, cOrigin, cVel, cColor, cSpin, cInfo, sHead: 0, cHead: 0, sLive: -1, cLive: -1 };
   }, [kit, S, CN]);
   useEffect(() => () => { res.sg.dispose(); res.sm.dispose(); res.base.dispose(); res.cg.dispose(); res.cm.dispose(); }, [res]);
 
@@ -127,6 +127,7 @@ export function Bursts({ quality }: { quality: 'low' | 'high' }) {
         res.sInfo.setXYZ(j, t + Math.random() * 0.25, 1.1 + Math.random() * 1.2, 0.12 + Math.random() * 0.14);
       }
       for (const a of [res.sOrigin, res.sVel, res.sColor, res.sInfo]) a.needsUpdate = true;
+      res.sLive = Math.max(res.sLive, t + 2.7);
     };
     kit.fx.emitConfetti = (o, count) => {
       const n = Math.min(count, CN);
@@ -144,19 +145,25 @@ export function Bursts({ quality }: { quality: 'low' | 'high' }) {
         res.cInfo.setXY(j, t + Math.random() * 0.15, Math.random() * 6.28);
       }
       for (const a of [res.cOrigin, res.cVel, res.cColor, res.cSpin, res.cInfo]) a.needsUpdate = true;
+      res.cLive = Math.max(res.cLive, t + 6);
     };
     return () => { kit.fx.emitSparkles = () => {}; kit.fx.emitConfetti = () => {}; };
   }, [kit, res, S, CN]);
 
+  const sparkRef = useRef<THREE.Points>(null);
+  const confRef = useRef<THREE.Mesh>(null);
   useFrame(state => {
+    // idle particle systems cost nothing (no draw calls)
+    if (sparkRef.current) sparkRef.current.visible = kit.env.t < res.sLive;
+    if (confRef.current) confRef.current.visible = kit.env.t < res.cLive;
     const cam = state.camera as THREE.PerspectiveCamera;
     res.sm.uniforms.uScale!.value = (state.size.height * state.viewport.dpr) / (2 * Math.tan(THREE.MathUtils.degToRad((cam.fov ?? 45) / 2)));
   });
 
   return (
     <group>
-      <points geometry={res.sg} material={res.sm} frustumCulled={false} renderOrder={10} />
-      <mesh geometry={res.cg} material={res.cm} frustumCulled={false} />
+      <points ref={sparkRef} geometry={res.sg} material={res.sm} frustumCulled={false} renderOrder={10} visible={false} />
+      <mesh ref={confRef} geometry={res.cg} material={res.cm} frustumCulled={false} visible={false} />
     </group>
   );
 }

@@ -9,7 +9,7 @@
  * Rendering (WebGL, MeshStandardMaterial):
  *  - three distance bands, each one InstancedMesh per variant × material (≤ 5 draws/variant):
  *    near  (high only, < min(45 m, 0.6·far)): full leaf-card crown + trunk shadows;
- *    mid   (< farDistance; default 80 m high / 40 m low): 60 % of the cards, enlarged;
+ *    mid   (< farDistance; default 80 m high / 30 m low): 60 % of the cards, enlarged;
  *    far   impostors (2 crossed side cards + 1 canopy card, 6 tris) rendered once at runtime
  *          from the same meshes.
  *    Alpha-tested leaf cards, tiny onBeforeCompile wind sway, mip-aware alpha.
@@ -17,10 +17,11 @@
  * React never re-renders per frame; LOD partitions are recomputed in useFrame only when the
  * camera moved. Everything created here is disposed on unmount.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { KitContext } from '../context';
 
 export type TreeQuality = 'low' | 'high';
 /** `variant` indexes TREE_VARIANTS (wrapped); `rot` is yaw in radians; `y` (ground height) defaults to 0. */
@@ -29,7 +30,7 @@ export interface GeneratedTreesProps {
   quality: TreeQuality;
   placements: ReadonlyArray<TreePlacement>;
   /**
-   * Camera distance (m) beyond which trees become impostor cards. Default 80 (high) / 40 (low).
+   * Camera distance (m) beyond which trees become impostor cards. Default 80 (high) / 30 (low).
    * On 'high', trees within min(45, 0.6 × farDistance) get the full crown + trunk shadows; the
    * band in between (and everything up to farDistance on 'low') uses a sparse crown.
    */
@@ -37,8 +38,9 @@ export interface GeneratedTreesProps {
   /** Soft blob contact shadows under the crowns. Default true. */
   blobShadows?: boolean;
   /**
-   * Budget of non-impostor trees per frame (nearest win). Default 70 (high) / 40 (low); full
+   * Budget of non-impostor trees per frame (nearest win). Default 70 (high) / 24 (low); full
    * crowns are further capped at 16 on 'high'. Bounds worst-case triangles for big forests.
+   * Blob shadows are drawn within 140 m (high) / 45 m (low) of the camera.
    */
   maxDetailed?: number;
 }
@@ -162,8 +164,29 @@ function makeSparseLeaves(leaves: THREE.BufferGeometry, keep: number, grow: numb
  *  - keepNormals: double-sided cards keep their authored (outward / upward) normal on the back
  *    face instead of flipping it, so crowns and impostors shade softly from every side.
  */
-function patchTreeMaterial(material: THREE.Material, key: string, opts: { time?: { value: number }; wind?: number; keepNormals?: boolean; skyLift?: number; mipAlpha?: number }) {
+interface WeatherUniforms { uSnow: { value: number }; uWet: { value: number } }
+function patchTreeMaterial(material: THREE.Material, key: string, opts: { time?: { value: number }; wind?: number; keepNormals?: boolean; skyLift?: number; mipAlpha?: number; weather?: WeatherUniforms; snowScale?: number }) {
   material.onBeforeCompile = (shader) => {
+    if (opts.weather) {
+      // same look as the town's patchWeather (kit.ts): snow settles on up-facing parts, rain darkens + adds sheen
+      shader.uniforms.uSnow = opts.weather.uSnow;
+      shader.uniforms.uWet = opts.weather.uWet;
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying float vTreeUpW;')
+        .replace('#include <defaultnormal_vertex>', `#include <defaultnormal_vertex>
+        vec3 tUpN = objectNormal;
+        #ifdef USE_INSTANCING
+          tUpN = mat3(instanceMatrix) * tUpN;
+        #endif
+        vTreeUpW = normalize(mat3(modelMatrix) * tUpN).y;`);
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', '#include <common>\nvarying float vTreeUpW;\nuniform float uSnow;\nuniform float uWet;')
+        .replace('#include <color_fragment>', `#include <color_fragment>
+        float tSnow = clamp(uSnow * ${(opts.snowScale ?? 1).toFixed(2)}, 0.0, 1.0) * smoothstep(0.1, 0.75, vTreeUpW);
+        diffuseColor.rgb = mix(diffuseColor.rgb * (1.0 - 0.3 * uWet), vec3(0.92, 0.95, 1.0), tSnow);`)
+        .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+        roughnessFactor = mix(roughnessFactor, 0.32, uWet * (1.0 - uSnow));`);
+    }
     if (opts.time && opts.wind) {
       shader.uniforms.uTreeWind = opts.time;
       shader.vertexShader = 'uniform float uTreeWind;\n' + shader.vertexShader.replace(
@@ -215,7 +238,7 @@ function patchTreeMaterial(material: THREE.Material, key: string, opts: { time?:
       );
     }
   };
-  material.customProgramCacheKey = () => key;
+  material.customProgramCacheKey = () => `${key}${opts.weather ? '-weather' : ''}`;
 }
 
 // ---------------------------------------------------------------- impostors
@@ -230,7 +253,10 @@ interface Impostors { target: THREE.WebGLRenderTarget; cards: THREE.BufferGeomet
  */
 function bakeImpostors(gl: THREE.WebGLRenderer, assets: TreeAssets): Impostors {
   const n = assets.variants.length;
-  const target = new THREE.WebGLRenderTarget(TILE * n, TILE * 2, { generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter });
+  const options = { generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter };
+  const target = isWebGPU(gl)
+    ? (new THREE.RenderTarget(TILE * n, TILE * 2, options) as THREE.WebGLRenderTarget)
+    : new THREE.WebGLRenderTarget(TILE * n, TILE * 2, options);
   target.texture.colorSpace = THREE.SRGBColorSpace;
   const scene = new THREE.Scene();
   const camera = new THREE.OrthographicCamera(-1, 1, 1, 0, 0.1, 200);
@@ -304,6 +330,53 @@ function bakeImpostors(gl: THREE.WebGLRenderer, assets: TreeAssets): Impostors {
   return { target, cards, dispose() { target.dispose(); for (const c of cards) c.dispose(); } };
 }
 
+function isWebGPU(gl: unknown): boolean {
+  return (gl as { isWebGPURenderer?: boolean }).isWebGPURenderer === true;
+}
+
+/**
+ * One impostor atlas per renderer, shared by every mounted <GeneratedTrees> (the atlas always
+ * holds the full variant set) and released when the last one unmounts. `null` = baking is not
+ * possible on this renderer; trees then stay on sparse crowns instead of impostors.
+ */
+const impostorCache = new Map<object, { impostors: Impostors | null; refs: number }>();
+function acquireImpostors(gl: THREE.WebGLRenderer, assets: TreeAssets): Impostors | null {
+  let entry = impostorCache.get(gl);
+  if (!entry) {
+    let impostors: Impostors | null = null;
+    try { impostors = bakeImpostors(gl, assets); } catch (error) {
+      console.info('[GeneratedTrees] impostor bake unavailable on this renderer; far trees use sparse crowns', error);
+    }
+    entry = { impostors, refs: 0 };
+    impostorCache.set(gl, entry);
+  }
+  entry.refs++;
+  return entry.impostors;
+}
+function releaseImpostors(gl: THREE.WebGLRenderer): void {
+  const entry = impostorCache.get(gl);
+  if (!entry) return;
+  entry.refs--;
+  if (entry.refs <= 0) { entry.impostors?.dispose(); impostorCache.delete(gl); }
+}
+
+/** How leaf/impostor cutouts are resolved. */
+type AlphaMode = 'coverage' | 'hash' | 'test';
+/** MSAA → alpha-to-coverage (smooth cutout edges); no MSAA → hashed alpha; WebGPU → plain alpha test. */
+function pickAlphaMode(gl: THREE.WebGLRenderer): AlphaMode {
+  if (isWebGPU(gl)) return 'test';
+  try {
+    const attributes = gl.getContext().getContextAttributes();
+    return attributes?.antialias ? 'coverage' : 'hash';
+  } catch { return 'test'; }
+}
+function alphaParams(mode: AlphaMode, cutoff: number): THREE.MeshStandardMaterialParameters {
+  if (mode === 'coverage') return { alphaTest: cutoff, alphaToCoverage: true };
+  // hashed alpha keeps edges dithered instead of stair-stepped; opacity > 1 = slightly lower cutoff
+  if (mode === 'hash') return { alphaHash: true, alphaTest: 0, opacity: 1.15 };
+  return { alphaTest: cutoff };
+}
+
 // ---------------------------------------------------------------- blob shadow texture
 function makeBlobTexture(): THREE.DataTexture {
   const size = 64;
@@ -331,21 +404,30 @@ interface VariantBatch {
   positions: Float32Array; // 3 per tree (LOD distance)
   band: Uint8Array; // current band per tree
   prev: Uint8Array; // band before this update (change detection)
-  meshes: [trunksNear: THREE.InstancedMesh, crownsNear: THREE.InstancedMesh, trunksMid: THREE.InstancedMesh, crownsMid: THREE.InstancedMesh, cards: THREE.InstancedMesh];
+  meshes: [trunksNear: THREE.InstancedMesh, crownsNear: THREE.InstancedMesh, trunksMid: THREE.InstancedMesh, crownsMid: THREE.InstancedMesh, cards: THREE.InstancedMesh | null];
 }
-interface LodStats { near: number; mid: number; far: number }
+/**
+ * Tree counts per band plus what the forest submits this frame (upper bound before frustum
+ * culling): draw calls / triangles of the main pass, and of the shadow pass (near trunks, high).
+ */
+interface LodStats { near: number; mid: number; far: number; calls: number; tris: number; shadowCalls: number; shadowTris: number }
+const trianglesOf = (g: THREE.BufferGeometry) => (g.index ? g.index.count : g.getAttribute('position').count) / 3;
 interface BuiltForest {
   group: THREE.Group;
   wind: { value: number };
   /**
    * Re-partitions trees by camera distance, then enforces budgets: at most `maxNear` full
-   * crowns and `maxDetailed` non-impostor trees (nearest win). Returns per-band counts.
+   * crowns and `maxDetailed` non-impostor trees (nearest win); blob shadows only within
+   * `blobDistance`. Returns per-band counts.
    */
-  updateLod(camera: THREE.Vector3, nearDistance: number, farDistance: number, maxNear: number, maxDetailed: number, force: boolean): LodStats;
+  updateLod(camera: THREE.Vector3, nearDistance: number, farDistance: number, maxNear: number, maxDetailed: number, blobDistance: number, force: boolean): LodStats;
   dispose(): void;
 }
 
-function buildForest(assets: TreeAssets, impostors: Impostors, placements: ReadonlyArray<TreePlacement>, quality: TreeQuality, blobShadows: boolean): BuiltForest {
+function buildForest(
+  assets: TreeAssets, impostors: Impostors | null, placements: ReadonlyArray<TreePlacement>, quality: TreeQuality,
+  blobShadows: boolean, alphaMode: AlphaMode, weather: WeatherUniforms,
+): BuiltForest {
   const group = new THREE.Group();
   group.name = 'generated-trees';
   const wind = { value: 0 };
@@ -364,11 +446,14 @@ function buildForest(assets: TreeAssets, impostors: Impostors, placements: Reado
   const up = new THREE.Vector3(0, 1, 0);
   const tint = new THREE.Color();
 
-  const farMaterial = new THREE.MeshStandardMaterial({
-    map: impostors.target.texture, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.9, metalness: 0,
-  });
-  patchTreeMaterial(farMaterial, 'tree-impostor', { keepNormals: true, skyLift: 1.5, mipAlpha: 0.2 });
-  disposables.push(farMaterial);
+  let farMaterial: THREE.MeshStandardMaterial | null = null;
+  if (impostors) {
+    farMaterial = new THREE.MeshStandardMaterial({
+      map: impostors.target.texture, side: THREE.DoubleSide, roughness: 0.9, metalness: 0, ...alphaParams(alphaMode, 0.5),
+    });
+    patchTreeMaterial(farMaterial, 'tree-impostor', { keepNormals: true, skyLift: 1.5, mipAlpha: 0.2, weather, snowScale: 0.8 });
+    disposables.push(farMaterial);
+  }
 
   const batches: VariantBatch[] = [];
   byVariant.forEach((list, v) => {
@@ -376,11 +461,11 @@ function buildForest(assets: TreeAssets, impostors: Impostors, placements: Reado
     const geo = assets.variants[v]!;
     const bark = new THREE.MeshStandardMaterial({ vertexColors: true, color: BARK_TINT[v], roughness: 0.92, metalness: 0 });
     const leaf = new THREE.MeshStandardMaterial({
-      map: assets.atlas, vertexColors: true, color: LEAF_TINT[v], alphaTest: 0.42, side: THREE.DoubleSide,
-      roughness: 0.8, metalness: 0,
+      map: assets.atlas, vertexColors: true, color: LEAF_TINT[v], side: THREE.DoubleSide,
+      roughness: 0.8, metalness: 0, ...alphaParams(alphaMode, 0.42),
     });
-    patchTreeMaterial(bark, 'tree-bark', { time: wind, wind: 0.0012 });
-    patchTreeMaterial(leaf, 'tree-leaf', { time: wind, wind: 0.0034, keepNormals: true, skyLift: 1.55, mipAlpha: 0.25 });
+    patchTreeMaterial(bark, 'tree-bark', { time: wind, wind: 0.0012, weather, snowScale: 0.5 });
+    patchTreeMaterial(leaf, 'tree-leaf', { time: wind, wind: 0.0034, keepNormals: true, skyLift: 1.55, mipAlpha: 0.25, weather, snowScale: 0.85 });
     disposables.push(bark, leaf);
 
     const count = list.length;
@@ -392,10 +477,11 @@ function buildForest(assets: TreeAssets, impostors: Impostors, placements: Reado
       new THREE.InstancedMesh(geo.leaves, leaf, count),
       new THREE.InstancedMesh(geo.wood, bark, count),
       new THREE.InstancedMesh(geo.sparse, leaf, count),
-      new THREE.InstancedMesh(impostors.cards[v]!, farMaterial, count),
+      impostors && farMaterial ? new THREE.InstancedMesh(impostors.cards[v]!, farMaterial, count) : null,
     ];
     const label = TREE_VARIANTS[v] ?? `v${v}`;
-    ['wood-near', 'leaves-near', 'wood-mid', 'leaves-mid', 'impostor'].forEach((suffix, k) => { meshes[k]!.name = `tree-${label}-${suffix}`; });
+    ['wood-near', 'leaves-near', 'wood-mid', 'leaves-mid', 'impostor'].forEach((suffix, k) => { const m = meshes[k]; if (m) m.name = `tree-${label}-${suffix}`; });
+    const live = meshes.filter((m): m is THREE.InstancedMesh => m !== null);
     list.forEach((p, i) => {
       const k = p.scale > 0 ? p.scale : 1;
       pos.set(p.x, (p.y ?? 0) - 0.06 * k, p.z); // sink a little so root flares never float on slopes
@@ -410,9 +496,9 @@ function buildForest(assets: TreeAssets, impostors: Impostors, placements: Reado
       tint.setRGB(1, 1, 1).offsetHSL((r - 0.5) * 0.04, 0, (r - 0.5) * 0.14);
       tint.toArray(colors, i * 3);
       // full set once so bounding spheres cover every tree (stays conservative for subsets)
-      for (const m of meshes) { m.setMatrixAt(i, matrix); m.setColorAt(i, tint); }
+      for (const m of live) { m.setMatrixAt(i, matrix); m.setColorAt(i, tint); }
     });
-    for (const m of meshes) {
+    for (const m of live) {
       m.computeBoundingSphere();
       m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       m.castShadow = false; m.receiveShadow = false;
@@ -420,27 +506,39 @@ function buildForest(assets: TreeAssets, impostors: Impostors, placements: Reado
     }
     meshes[0].castShadow = quality === 'high';
     meshes[0].receiveShadow = quality === 'high';
-    group.add(...meshes);
-    disposables.push(...meshes);
+    group.add(...live);
+    disposables.push(...live);
     batches.push({ matrices, colors, positions, band: new Uint8Array(count).fill(255), prev: new Uint8Array(count), meshes });
   });
 
+  // blob contact shadows: one instanced mesh, compacted to the trees within blobDistance
+  let blobs: THREE.InstancedMesh | null = null;
+  let blobMatrices = new Float32Array(0);
+  let blobPositions = new Float32Array(0);
+  let blobOn = new Uint8Array(0);
   if (blobShadows) {
     const all = byVariant.flatMap((list, v) => list.map((p) => ({ p, v })));
     if (all.length > 0) {
       const tex = makeBlobTexture();
       const mat = new THREE.MeshBasicMaterial({ color: '#2f4a2a', alphaMap: tex, transparent: true, opacity: 0.3, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
       const plane = new THREE.PlaneGeometry(2, 2).rotateX(-Math.PI / 2);
-      const blobs = new THREE.InstancedMesh(plane, mat, all.length);
+      blobs = new THREE.InstancedMesh(plane, mat, all.length);
       blobs.name = 'tree-blob-shadows';
+      blobMatrices = new Float32Array(all.length * 16);
+      blobPositions = new Float32Array(all.length * 3);
+      blobOn = new Uint8Array(all.length).fill(255);
       all.forEach(({ p, v }, i) => {
         const s = (p.scale > 0 ? p.scale : 1) * BLOB_RADIUS[v]!;
         pos.set(p.x, (p.y ?? 0) + 0.04, p.z);
         quat.identity();
         scl.set(s, 1, s * 0.9);
-        blobs.setMatrixAt(i, matrix.compose(pos, quat, scl));
+        matrix.compose(pos, quat, scl);
+        matrix.toArray(blobMatrices, i * 16);
+        blobs!.setMatrixAt(i, matrix);
+        blobPositions[i * 3] = p.x; blobPositions[i * 3 + 1] = p.y ?? 0; blobPositions[i * 3 + 2] = p.z;
       });
       blobs.computeBoundingSphere();
+      blobs.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       blobs.renderOrder = -1;
       group.add(blobs);
       disposables.push(tex, mat, plane, blobs);
@@ -448,10 +546,14 @@ function buildForest(assets: TreeAssets, impostors: Impostors, placements: Reado
   }
 
   const HYST = 4; // metres of hysteresis so trees on a band edge do not flicker
+  const hasImpostors = impostors !== null;
   return {
     group, wind,
-    updateLod(camera, nearDistance, farDistance, maxNear, maxDetailed, force) {
-      const stats: LodStats = { near: 0, mid: 0, far: 0 };
+    updateLod(camera, nearDistance, farDistance, maxNear, maxDetailed, blobDistance, force) {
+      const stats: LodStats = { near: 0, mid: 0, far: 0, calls: 0, tris: 0, shadowCalls: 0, shadowTris: 0 };
+      // without impostors (renderer could not bake them) everything past the near band stays sparse
+      const farD = hasImpostors ? farDistance : Infinity;
+      const budget = hasImpostors ? maxDetailed : Infinity;
       const detailed: number[] = []; // flat [distance, batch, index] triples of non-impostor trees
       let nearCount = 0;
       batches.forEach((b, bi) => {
@@ -461,12 +563,12 @@ function buildForest(assets: TreeAssets, impostors: Impostors, placements: Reado
           const dx = b.positions[i * 3]! - camera.x, dy = b.positions[i * 3 + 1]! - camera.y, dz = b.positions[i * 3 + 2]! - camera.z;
           const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
           const prev = b.band[i]!;
-          const strict: Band = d < nearDistance ? 0 : d < farDistance ? 1 : 2;
+          const strict: Band = d < nearDistance ? 0 : d < farD ? 1 : 2;
           let next: Band = strict;
           if (!force && prev !== 255 && prev !== strict) {
             // only leave the current band once clearly past its edge
-            const edgeLow = prev === 0 ? -Infinity : prev === 1 ? nearDistance : farDistance;
-            const edgeHigh = prev === 0 ? nearDistance : prev === 1 ? farDistance : Infinity;
+            const edgeLow = prev === 0 ? -Infinity : prev === 1 ? nearDistance : farD;
+            const edgeHigh = prev === 0 ? nearDistance : prev === 1 ? farD : Infinity;
             if (d > edgeLow - HYST && d < edgeHigh + HYST) next = prev as Band;
           }
           b.band[i] = next;
@@ -475,12 +577,12 @@ function buildForest(assets: TreeAssets, impostors: Impostors, placements: Reado
       });
       // budgets: keep the nearest trees detailed, demote the rest (full → sparse → impostor)
       const detailedCount = detailed.length / 3;
-      if (detailedCount > maxDetailed || nearCount > maxNear) {
+      if (detailedCount > budget || nearCount > maxNear) {
         const order = Array.from({ length: detailedCount }, (_, k) => k).sort((x, y) => detailed[x * 3]! - detailed[y * 3]!);
         let keptNear = 0;
         order.forEach((k, rank) => {
           const b = batches[detailed[k * 3 + 1]!]!, i = detailed[k * 3 + 2]!;
-          if (rank >= maxDetailed) { b.band[i] = 2; return; }
+          if (rank >= budget) { b.band[i] = 2; return; }
           if (b.band[i] === 0) { if (keptNear < maxNear) keptNear++; else b.band[i] = 1; }
         });
       }
@@ -490,11 +592,11 @@ function buildForest(assets: TreeAssets, impostors: Impostors, placements: Reado
         for (let i = 0; i < count && !changed; i++) if (b.band[i] !== b.prev[i]) changed = true;
         if (changed) {
           const cursor = [0, 0, 0, 0, 0];
-          const mats = b.meshes.map((m) => m.instanceMatrix.array as Float32Array);
-          const cols = b.meshes.map((m) => m.instanceColor!.array as Float32Array);
           const put = (k: number, i: number) => {
-            mats[k]!.set(b.matrices.subarray(i * 16, i * 16 + 16), cursor[k]! * 16);
-            cols[k]!.set(b.colors.subarray(i * 3, i * 3 + 3), cursor[k]! * 3);
+            const m = b.meshes[k];
+            if (!m) return;
+            (m.instanceMatrix.array as Float32Array).set(b.matrices.subarray(i * 16, i * 16 + 16), cursor[k]! * 16);
+            (m.instanceColor!.array as Float32Array).set(b.colors.subarray(i * 3, i * 3 + 3), cursor[k]! * 3);
             cursor[k]!++;
           };
           for (let i = 0; i < count; i++) {
@@ -502,13 +604,36 @@ function buildForest(assets: TreeAssets, impostors: Impostors, placements: Reado
             if (band === 0) { put(0, i); put(1, i); } else if (band === 1) { put(2, i); put(3, i); } else put(4, i);
           }
           b.meshes.forEach((m, k) => {
+            if (!m) return;
             m.count = cursor[k]!;
             m.instanceMatrix.needsUpdate = true;
             m.instanceColor!.needsUpdate = true;
           });
         }
-        stats.near += b.meshes[0].count; stats.mid += b.meshes[2].count; stats.far += b.meshes[4].count;
+        stats.near += b.meshes[0].count; stats.mid += b.meshes[2].count; stats.far += b.meshes[4]?.count ?? 0;
       }
+      if (blobs) {
+        let changed = force;
+        const total = blobOn.length;
+        for (let i = 0; i < total; i++) {
+          const dx = blobPositions[i * 3]! - camera.x, dy = blobPositions[i * 3 + 1]! - camera.y, dz = blobPositions[i * 3 + 2]! - camera.z;
+          const on = dx * dx + dy * dy + dz * dz < blobDistance * blobDistance ? 1 : 0;
+          if (on !== blobOn[i]) { blobOn[i] = on; changed = true; }
+        }
+        if (changed) {
+          const arr = blobs.instanceMatrix.array as Float32Array;
+          let c = 0;
+          for (let i = 0; i < total; i++) if (blobOn[i]) arr.set(blobMatrices.subarray(i * 16, i * 16 + 16), (c++) * 16);
+          blobs.count = c;
+          blobs.instanceMatrix.needsUpdate = true;
+        }
+      }
+      for (const b of batches) for (const m of b.meshes) {
+        if (!m || m.count === 0) continue;
+        stats.calls++; stats.tris += m.count * trianglesOf(m.geometry);
+        if (m.castShadow) { stats.shadowCalls++; stats.shadowTris += m.count * trianglesOf(m.geometry); }
+      }
+      if (blobs && blobs.count > 0) { stats.calls++; stats.tris += blobs.count * 2; }
       return stats;
     },
     dispose() { for (const d of disposables) d.dispose(); group.clear(); },
@@ -546,38 +671,45 @@ export function GeneratedTrees({ quality, placements, farDistance, blobShadows =
     };
   }, []);
   // Built inside effects (not memo) so StrictMode / remounts never reuse disposed objects.
-  const [impostors, setImpostors] = useState<Impostors | null>(null);
+  const [impostors, setImpostors] = useState<Impostors | null | undefined>(undefined);
   useEffect(() => {
     if (!assets) return;
-    const baked = bakeImpostors(gl, assets);
-    setImpostors(baked);
-    return () => { baked.dispose(); setImpostors(null); };
+    setImpostors(acquireImpostors(gl, assets)); // shared per renderer, ref-counted
+    return () => { releaseImpostors(gl); setImpostors(undefined); };
   }, [assets, gl]);
+  // town weather (snow / rain) when mounted inside WorldScene's kit; inert elsewhere
+  const kit = useContext(KitContext);
+  const fallbackWeather = useMemo<WeatherUniforms>(() => ({ uSnow: { value: 0 }, uWet: { value: 0 } }), []);
+  const weather: WeatherUniforms = kit?.uniforms ?? fallbackWeather;
+  const alphaMode = useMemo(() => pickAlphaMode(gl), [gl]);
   const [built, setBuilt] = useState<BuiltForest | null>(null);
   useEffect(() => {
-    if (!assets || !impostors) return;
-    const forest = buildForest(assets, impostors, stablePlacements, quality, blobShadows);
+    if (!assets || impostors === undefined) return;
+    const forest = buildForest(assets, impostors, stablePlacements, quality, blobShadows, alphaMode, weather);
     setBuilt(forest);
     return () => { forest.dispose(); setBuilt(null); };
-  }, [assets, impostors, stablePlacements, quality, blobShadows]);
+  }, [assets, impostors, stablePlacements, quality, blobShadows, alphaMode, weather]);
 
-  const far = farDistance ?? (quality === 'high' ? 80 : 40);
+  const far = farDistance ?? (quality === 'high' ? 80 : 30);
   // full crowns + trunk shadows only close up on 'high'; 'low' never draws the full crown
   const near = quality === 'high' ? Math.min(45, far * 0.6) : 0;
   const maxNear = quality === 'high' ? 16 : 0;
-  const maxDet = maxDetailed ?? (quality === 'high' ? 70 : 40);
-  const last = useRef({ x: NaN, y: NaN, z: NaN, built: null as BuiltForest | null, far: NaN, near: NaN, budget: NaN, eye: new THREE.Vector3() });
+  const maxDet = maxDetailed ?? (quality === 'high' ? 70 : 24);
+  const blobDistance = quality === 'high' ? 140 : 45;
+  const last = useRef({ x: NaN, y: NaN, z: NaN, built: null as BuiltForest | null, key: '', eye: new THREE.Vector3() });
   useFrame(({ camera }, dt) => {
     if (!built) return;
     built.wind.value += Math.min(dt, 0.1);
     const l = last.current;
     // camera in the forest group's local space (works when mounted under a transformed parent)
     const c = built.group.worldToLocal(camera.getWorldPosition(l.eye));
-    const fresh = l.built !== built || l.far !== far || l.near !== near || l.budget !== maxDet;
+    const settings = `${far}|${near}|${maxDet}|${blobDistance}`;
+    const fresh = l.built !== built || l.key !== settings;
     if (fresh || (c.x - l.x) ** 2 + (c.y - l.y) ** 2 + (c.z - l.z) ** 2 > 1) {
-      const stats = built.updateLod(c, near, far, maxNear, maxDet, fresh);
-      built.group.userData.lod = stats; // { near, mid, far } tree counts, handy for debugging/HUDs
-      l.x = c.x; l.y = c.y; l.z = c.z; l.built = built; l.far = far; l.near = near; l.budget = maxDet;
+      const stats = built.updateLod(c, near, far, maxNear, maxDet, blobDistance, fresh);
+      built.group.userData.lod = stats; // band counts + submitted calls/tris, handy for debugging/HUDs
+      if (import.meta.env.DEV) (globalThis as Record<string, unknown>).__generatedTreesLod = stats;
+      l.x = c.x; l.y = c.y; l.z = c.z; l.built = built; l.key = settings;
     }
   });
   return built ? <primitive object={built.group} /> : null;

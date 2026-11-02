@@ -8,7 +8,7 @@ import type { Affordance, PoiDef, PoiKind, Vec2 } from '../world/layout';
 import { POIS, PLAZA_RADIUS } from '../world/layout';
 import type { WorldClock } from '../world/time';
 import { BOOKS, DRINKS_COLD, DRINKS_HOT, FOODS, GAMES, PLAYGROUND_TOYS } from './dialogue';
-import { isSleeping, lowestNeed, urgency } from './needs';
+import { attention, isSleeping, lowestNeed, urgency } from './needs';
 import { atPlace, freeSeat, hasFreeSeat, pickSpot, placeName, pushOut, SEAT_BY_KEY } from './places';
 import { pathLength, planPath, RUN_SPEED, WALK_SPEED, meetingPoint } from './movement';
 import type { Temperament } from './personality';
@@ -64,7 +64,7 @@ export const ACTION_DEFS: ActionDef[] = [
       : w.weather === 'snow' ? `playing in the snow ${atPlace(p)}`
         : p.kind === 'playground' ? `playing on ${w.rng.pick(PLAYGROUND_TOYS, 'toy', a.id)} ${atPlace(p)}` : `playing frisbee ${atPlace(p)}`),
     available: (_w, a) => a.needs.energy > 18 },
-  { type: 'read', affordance: 'read', kinds: ['park', 'bench'], effects: { energy: 0.1, social: -0.05, fun: 0.45 }, duration: [22, 38], base: 0.12,
+  { type: 'read', affordance: 'read', kinds: ['park', 'bench'], effects: { energy: 0.1, social: -0.1, fun: 0.45 }, duration: [22, 38], base: 0.12,
     needsSeat: p => p.kind === 'bench', groundSit: p => p.kind !== 'bench', pref: t => t.bookish,
     phrase: (w, a, p) => `reading ${w.rng.pick(BOOKS, 'book', a.id)} ${atPlace(p)}`,
     available: (w, a, p) => (p.kind === 'bench' ? hasFreeSeat(w, p, a) : true) },
@@ -169,12 +169,12 @@ export function scoreChoices(w: World, a: Agent, c: WorldClock): Choice[] {
         s = def.base;
         for (const k of ['energy', 'social', 'fun'] as const) {
           const gain = def.effects[k] * dur;
-          const u = urgency(a.needs[k]);
+          const u = urgency(a.needs[k]) * attention(a, k);
           s += gain > 0 ? (Math.min(gain, 40) / 20) * u : -(Math.min(-gain, 30) / 30) * u * 0.8;
         }
         // A low need dominates: actions that fix it get a boost, the rest are damped.
         const low = lowestNeed(a);
-        if (low.value < 32) s *= def.effects[low.key] >= 0.2 ? 1.8 : 0.55;
+        if (low.value < 22 && attention(a, low.key) >= 1) s *= def.effects[low.key] >= 0.2 ? 1.8 : 0.55;
         s *= def.pref(t, p);
         s *= timeFactor(def.type, p, c, t);
         if (a.visitor) s *= def.type === 'dance' ? 1.4 : def.type === 'watch' || def.type === 'admire' || def.type === 'play' ? 1.2 : def.type === 'sit' || def.type === 'rest' || def.type === 'read' ? 0.6 : 1;
@@ -197,7 +197,7 @@ export function socializeCandidate(w: World, a: Agent): { score: number; target:
   let best: Agent | null = null;
   let bs = -Infinity;
   for (const o of w.agents.values()) {
-    if (o === a || o.leaving || isSleeping(o) || (o.action && o.action.priority >= 2)) continue;
+    if (o === a || o.leaving || isSleeping(o) || o.needs.energy < 15 || (o.action && o.action.priority >= 2)) continue;
     const d = dist(a, o);
     if (d > 30 || d < 0.5) continue;
     const f = friendshipOf(w, a.id, o.id) ?? 42;
@@ -206,7 +206,7 @@ export function socializeCandidate(w: World, a: Agent): { score: number; target:
   }
   if (!best) return null;
   const t = a.temperament;
-  return { score: 0.05 + urgency(a.needs.social) * 0.9 * t.sociability * (t.shyness > 0.5 ? 0.6 : 1) + bs * 0.5 + w.rng.float('soc-noise', a.id) * 0.15, target: best };
+  return { score: 0.05 + urgency(a.needs.social) * attention(a, 'social') * 0.9 * t.sociability * (t.shyness > 0.5 ? 0.6 : 1) + bs * 0.5 + w.rng.float('soc-noise', a.id) * 0.15, target: best };
 }
 
 // ---------------------------------------------------------------------------

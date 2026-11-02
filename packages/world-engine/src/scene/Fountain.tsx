@@ -2,6 +2,7 @@
 import { useEffect, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { useKit } from './context';
 import { createWaterMaterial } from './water';
 
@@ -54,13 +55,18 @@ export function Fountain() {
     const basin = createWaterMaterial(kit, { x: 0, z: 0 }, 1.9, 1);
     const bowl = createWaterMaterial(kit, { x: 0, z: 0 }, 0.9, 0.6);
     const top = createWaterMaterial(kit, { x: 0, z: 0 }, 0.45, 0.4);
-    const disc = (r: number) => { const g = new THREE.CircleGeometry(r, 40); g.rotateX(-Math.PI / 2); return g; };
+    const disc = (r: number, y: number) => { const g = new THREE.CircleGeometry(r, 40); g.rotateX(-Math.PI / 2); g.translate(0, y, 0); return g; };
     const sheetMat = new THREE.ShaderMaterial({
       vertexShader: SHEET_VERT, fragmentShader: SHEET_FRAG, transparent: true, depthWrite: false, side: THREE.DoubleSide,
       uniforms: { uTime: kit.uniforms.uTime, uNight: { value: 0 } },
     });
-    const sheet1 = new THREE.CylinderGeometry(1.04, 1.2, 1.12, 40, 1, true);
-    const sheet2 = new THREE.CylinderGeometry(0.52, 0.62, 0.5, 28, 1, true);
+    const sheet1 = new THREE.CylinderGeometry(1.04, 1.2, 1.12, 40, 1, true).translate(0, 0.52 + 0.56, 0);
+    const sheet2 = new THREE.CylinderGeometry(0.52, 0.62, 0.5, 28, 1, true).translate(0, 1.66 + 0.25, 0);
+    const sheets = mergeGeometries([sheet1, sheet2]) ?? sheet1;
+    if (sheets !== sheet1) { sheet1.dispose(); sheet2.dispose(); }
+    const d1 = disc(1.9, 0.5), d2 = disc(0.9, 1.64), d3 = disc(0.46, 2.18);
+    const water = mergeGeometries([d1, d2, d3]) ?? d1;
+    if (water !== d1) { d1.dispose(); d2.dispose(); d3.dispose(); }
     const N = 140;
     const jetGeo = new THREE.BufferGeometry();
     jetGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(N * 3), 3));
@@ -71,10 +77,10 @@ export function Fountain() {
       vertexShader: JET_VERT, fragmentShader: JET_FRAG, transparent: true, depthWrite: false,
       uniforms: { uTime: kit.uniforms.uTime, uScale: { value: 600 }, uNight: { value: 0 } },
     });
-    return { basin, bowl, top, d1: disc(1.9), d2: disc(0.9), d3: disc(0.46), sheetMat, sheet1, sheet2, jetGeo, jetMat };
+    return { basin, bowl, top, water, sheetMat, sheets, jetGeo, jetMat };
   }, [kit]);
   useEffect(() => () => {
-    for (const r of [res.basin, res.bowl, res.top, res.d1, res.d2, res.d3, res.sheetMat, res.sheet1, res.sheet2, res.jetGeo, res.jetMat]) r.dispose();
+    for (const r of [res.basin, res.bowl, res.top, res.water, res.sheetMat, res.sheets, res.jetGeo, res.jetMat]) r.dispose();
   }, [res]);
   useFrame(state => {
     const n = kit.env.lights;
@@ -85,11 +91,8 @@ export function Fountain() {
   });
   return (
     <group>
-      <mesh geometry={res.d1} material={res.basin} position={[0, 0.5, 0]} />
-      <mesh geometry={res.d2} material={res.bowl} position={[0, 1.64, 0]} />
-      <mesh geometry={res.d3} material={res.top} position={[0, 2.18, 0]} />
-      <mesh geometry={res.sheet1} material={res.sheetMat} position={[0, 0.52 + 0.56, 0]} renderOrder={4} />
-      <mesh geometry={res.sheet2} material={res.sheetMat} position={[0, 1.66 + 0.25, 0]} renderOrder={4} />
+      <mesh geometry={res.water} material={res.basin} />
+      <mesh geometry={res.sheets} material={res.sheetMat} renderOrder={4} />
       <points geometry={res.jetGeo} material={res.jetMat} frustumCulled={false} renderOrder={5} />
     </group>
   );

@@ -63,7 +63,7 @@ export function decide(w: World, a: Agent, clock: WorldClock): void {
   if (!a.visitor && w.simTime - a.moodShownAt > 40) {
     const low = lowestNeed(a);
     const sleepyHour = (clock.period === 'evening' || clock.period === 'night') && a.temperament.nightOwl < 0.5;
-    if (low.value < 24 && w.rng.chance(0.7, 'mood-show', a.id)) { a.moodShownAt = w.simTime; showLowNeed(w, a, low.key); return; }
+    if (low.value < 25 && w.rng.chance(0.75, 'mood-show', a.id)) { a.moodShownAt = w.simTime; showLowNeed(w, a, low.key); return; }
     if (sleepyHour && a.needs.energy < 56 && w.rng.chance(0.65, 'mood-tired', a.id)) { a.moodShownAt = w.simTime; showLowNeed(w, a, 'energy'); return; }
   }
   const choices = scoreChoices(w, a, clock).sort((x, y) => y.score - x.score);
@@ -85,8 +85,8 @@ function showLowNeed(w: World, a: Agent, need: NeedKey): void {
     for (const p of POIS) if (p.kind === 'bench') { const d = dist(a, p.position); if (d < bd) { bd = d; bench = p; } }
     if (bench) {
       const spot = spotAround(w, bench.position, 1, 1.5, a, 'lonely');
-      goThen(w, a, spot, `walking to ${placeName(bench)}`, `sulking near ${placeName(bench)}`, 5, { priority: 0, effects: { energy: 0.1, social: 0, fun: 0 } });
-    } else gesture(w, a, `sulking alone ${atPlace(nearestPoi(a.x, a.z))}`, 5, { priority: 0 });
+      goThen(w, a, spot, `walking to ${placeName(bench)}`, `sulking near ${placeName(bench)}`, 9, { priority: 0, effects: { energy: 0.1, social: 0, fun: 0 } });
+    } else gesture(w, a, `sulking alone ${atPlace(nearestPoi(a.x, a.z))}`, 9, { priority: 0 });
     return;
   }
   if (need === 'energy') { gesture(w, a, 'thinking about a nap', 6, { priority: 0, effects: { energy: 0.2, social: 0, fun: 0 } }); return; }
@@ -96,7 +96,7 @@ function showLowNeed(w: World, a: Agent, need: NeedKey): void {
   interrupt(w, a);
   startAction(w, a, {
     type: 'wander', phase: 'travel', travelActivity: 'wandering around looking for fun', activity: 'wandering around looking for fun', poiId: place.id,
-    spot: pickSpot(w, place, a), remaining: 9, effects: { energy: -0.03, social: 0, fun: 0.1 }, speed: STROLL_SPEED, priority: 0, travelTimeout: 30, anchored: false,
+    spot: pickSpot(w, place, a), remaining: 12, effects: { energy: -0.03, social: 0, fun: 0.08 }, speed: STROLL_SPEED, priority: 0, travelTimeout: 30, anchored: false,
     hop: { center: place.position, radius: place.radius, next: w.simTime + 4, poiId: place.id },
   });
 }
@@ -115,7 +115,11 @@ export function ambientCompany(w: World, dt: number): void {
   }
   for (let i = 0; i < list.length; i++) {
     const a = list[i]!;
-    if (near[i]! > 0 && a.action?.type !== 'sleep') applyEffects(a, { energy: 0, social: 0.025 * Math.min(3, near[i]!), fun: 0 }, dt);
+    if (!near[i] || a.action?.type === 'sleep') continue;
+    // Shy residents find crowds draining — they come out of a busy plaza feeling lonely.
+    if (a.temperament.shyness > 0.5 && near[i]! >= 2) a.needs.social = Math.max(0, a.needs.social - 0.12 * dt);
+    // Grumps aren't comforted by crowds; everyone else enjoys a little people-watching.
+    else if (a.temperament.grumpiness < 0.5) applyEffects(a, { energy: 0, social: 0.025 * Math.min(3, near[i]!), fun: 0 }, dt);
   }
 }
 

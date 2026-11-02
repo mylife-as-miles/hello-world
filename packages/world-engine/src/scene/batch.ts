@@ -48,9 +48,17 @@ export class Batch {
   private nor = new FloatBuf();
   private col = new FloatBuf();
   private parts = 0;
+  /** Parts smaller than `smallRadius` (bounding radius, m) are routed to this batch instead. */
+  smallTarget: Batch | null = null;
+  smallRadius = 0;
 
   /** @param flat recompute normals per face (faceted low-poly look) */
   add(src: THREE.BufferGeometry, color: THREE.ColorRepresentation, matrix: THREE.Matrix4, flat = false): void {
+    if (this.smallTarget && this.smallRadius > 0) {
+      if (!src.boundingSphere) src.computeBoundingSphere();
+      const r = (src.boundingSphere?.radius ?? 1) * matrix.getMaxScaleOnAxis();
+      if (r < this.smallRadius) { this.smallTarget.add(src, color, matrix, flat); return; }
+    }
     tmpColor.set(color);
     this.push(src, matrix, flat, null);
   }
@@ -111,6 +119,8 @@ export class Batch {
 /** Cached primitive geometries for one build pass (dispose afterwards). */
 export class Prims {
   private cache = new Map<string, THREE.BufferGeometry>();
+  /** Low quality: chamfered (1-segment) rounded boxes everywhere. */
+  constructor(readonly low = false) {}
   private get(key: string, make: () => THREE.BufferGeometry): THREE.BufferGeometry {
     let g = this.cache.get(key);
     if (!g) { g = make(); this.cache.set(key, g); }
@@ -121,7 +131,7 @@ export class Prims {
   /** Real-size rounded box (bevel radius stays round). */
   rbox(w: number, h: number, d: number, r = 0.06): THREE.BufferGeometry {
     const k = `rb${w.toFixed(2)}_${h.toFixed(2)}_${d.toFixed(2)}_${r.toFixed(2)}`;
-    const seg = Math.max(w, h, d) < 1.3 ? 1 : 2;
+    const seg = this.low || Math.max(w, h, d) < 1.3 ? 1 : 2;
     return this.get(k, () => new RoundedBoxGeometry(w, h, d, seg, Math.min(r, w / 2 - 0.001, h / 2 - 0.001, d / 2 - 0.001)));
   }
   /** Unit cylinder radius 1 height 1. */

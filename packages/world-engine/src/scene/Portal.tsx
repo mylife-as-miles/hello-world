@@ -49,11 +49,12 @@ void main() {
 const BEAM_FRAG = /* glsl */ `
 uniform float uTime;
 uniform float uRaid;
+uniform float uBeamGain;
 varying vec2 vUv;
 void main() {
   float fade = smoothstep(1.0, 0.25, vUv.y) * smoothstep(0.0, 0.04, vUv.y);
   float bands = 0.6 + 0.4 * sin(vUv.y * 40.0 - uTime * 8.0 + sin(vUv.x * 31.4) * 2.0);
-  float I = uRaid * fade * bands * 1.3;
+  float I = uRaid * fade * bands * 1.3 * uBeamGain;
   gl_FragColor = vec4(vec3(0.7, 0.55, 1.0) * max(I, 1.0), min(I, 1.0));
 }`;
 const MOTE_VERT = /* glsl */ `
@@ -107,7 +108,7 @@ export function Portal({ quality, overlay = false }: { quality: 'low' | 'high'; 
     const uniforms = { uTime: kit.uniforms.uTime, uRaid: { value: 0 } };
     const discMat = new THREE.ShaderMaterial({ vertexShader: DISC_VERT, fragmentShader: DISC_FRAG, uniforms, transparent: true, depthWrite: false, side: THREE.DoubleSide, toneMapped: false });
     const haloMat = new THREE.ShaderMaterial({ vertexShader: DISC_VERT, fragmentShader: HALO_FRAG, uniforms, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false });
-    const beamMat = new THREE.ShaderMaterial({ vertexShader: DISC_VERT, fragmentShader: BEAM_FRAG, uniforms, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false });
+    const beamMat = new THREE.ShaderMaterial({ vertexShader: DISC_VERT, fragmentShader: BEAM_FRAG, uniforms: { ...uniforms, uBeamGain: { value: overlay ? 0.38 : 1 } }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false });
     const runeMat = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
     const discGeo = new THREE.CircleGeometry(2.05, 48);
     const haloGeo = new THREE.PlaneGeometry(7.4, 7.4);
@@ -128,7 +129,7 @@ export function Portal({ quality, overlay = false }: { quality: 'low' | 'high'; 
     const plinthGeo = plinth.build();
     P2.dispose();
     return { stoneGeo, runeGeo, discMat, haloMat, beamMat, runeMat, discGeo, haloGeo, beamGeo, moteGeo, moteMat, uniforms, plinthGeo };
-  }, [kit, quality]);
+  }, [kit, quality, overlay]);
   useEffect(() => () => {
     for (const r of [res.stoneGeo, res.runeGeo, res.discMat, res.haloMat, res.beamMat, res.runeMat, res.discGeo, res.haloGeo, res.beamGeo, res.moteGeo, res.moteMat, res.plinthGeo]) r.dispose();
   }, [res]);
@@ -169,7 +170,7 @@ export function Portal({ quality, overlay = false }: { quality: 'low' | 'high'; 
         <mesh geometry={res.haloGeo} material={res.haloMat} position={[0, 0, 0.05]} renderOrder={8} />
         <points geometry={res.moteGeo} material={res.moteMat} frustumCulled={false} renderOrder={9} />
       </group>
-      <mesh ref={beam} geometry={res.beamGeo} material={res.beamMat} position={[0, 30, 0]} visible={false} renderOrder={9} />
+      <mesh ref={beam} geometry={res.beamGeo} material={res.beamMat} position={overlay ? [0, 9, 0] : [0, 30, 0]} scale={overlay ? [0.42, 0.3, 0.42] : [1, 1, 1]} visible={false} renderOrder={9} />
       <pointLight ref={light} position={[0, 2.6, 1.6]} color="#b28cff" intensity={2} distance={16} decay={1.5} />
     </group>
   );

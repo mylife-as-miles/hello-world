@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { getPoi } from '../world/layout';
 import { useKit } from './context';
 import { stageStringCurves } from './town';
+import { patchCutout } from './kit';
 
 const BULB_COLORS = ['#ffd166', '#ef476f', '#06d6a0', '#4cc9f0', '#f78c6b', '#c792ea'];
 
@@ -17,13 +18,14 @@ export function StageLights() {
       const n = Math.max(4, Math.round(curve.getLength() / 0.42));
       for (let i = 1; i < n; i++) pts.push(curve.getPoint(i / n));
     }
-    const geo = new THREE.SphereGeometry(0.075, 8, 6);
+    const geo = new THREE.IcosahedronGeometry(0.08, 0);
     const mat = new THREE.MeshBasicMaterial({ toneMapped: false });
+    patchCutout(mat, kit.uniforms, 'stage-bulbs');
     const spotGeo = new THREE.CircleGeometry(0.85, 28);
     spotGeo.rotateX(-Math.PI / 2);
     const spotMats = ['#ff5fa2', '#4cc9f0', '#ffd166', '#7dffb2'].map(c => new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }));
     return { pts, geo, mat, spotGeo, spotMats };
-  }, []);
+  }, [kit]);
   useEffect(() => () => { res.geo.dispose(); res.mat.dispose(); res.spotGeo.dispose(); res.spotMats.forEach(m => m.dispose()); }, [res]);
   useLayoutEffect(() => {
     const m = bulbs.current;

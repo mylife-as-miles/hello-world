@@ -208,19 +208,23 @@ function Swings() {
   const kit = useKit();
   const geo = useMemo(() => swingGeometry(), []);
   useEffect(() => () => geo.dispose(), [geo]);
-  const a = useRef<THREE.Mesh>(null), b = useRef<THREE.Mesh>(null);
+  const ref = useRef<THREE.InstancedMesh>(null);
+  const tmp = useMemo(() => ({ base: new THREE.Matrix4(), m: new THREE.Matrix4(), r: new THREE.Matrix4() }), []);
   useFrame(() => {
+    const m = ref.current;
+    if (!m) return;
     const t = kit.env.t;
-    if (a.current) a.current.rotation.x = Math.sin(t * 1.9) * 0.36;
-    if (b.current) b.current.rotation.x = Math.sin(t * 1.65 + 1.3) * 0.18;
+    const S = PLAYGROUND_SWINGS;
+    tmp.base.makeRotationY(S.yaw).setPosition(S.x, 2.42, S.z);
+    const angles = [Math.sin(t * 1.9) * 0.36, Math.sin(t * 1.65 + 1.3) * 0.18];
+    for (let i = 0; i < 2; i++) {
+      tmp.m.copy(tmp.base).multiply(tmp.r.makeTranslation(i ? 0.72 : -0.72, 0, 0)).multiply(tmp.r.makeRotationX(angles[i]!));
+      m.setMatrixAt(i, tmp.m);
+    }
+    m.instanceMatrix.needsUpdate = true;
   });
-  const S = PLAYGROUND_SWINGS;
-  return (
-    <group position={[S.x, 2.42, S.z]} rotation={[0, S.yaw, 0]}>
-      <mesh ref={a} geometry={geo} material={kit.solid} position={[-0.72, 0, 0]} castShadow />
-      <mesh ref={b} geometry={geo} material={kit.solid} position={[0.72, 0, 0]} castShadow />
-    </group>
-  );
+  // one instanced draw (+ one shadow draw) for both swings
+  return <instancedMesh ref={ref} args={[geo, kit.solid, 2]} castShadow frustumCulled={false} />;
 }
 
 /* ------------------------------------------------------------------ pond */

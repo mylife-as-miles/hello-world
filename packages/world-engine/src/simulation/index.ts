@@ -46,6 +46,8 @@ function createWorld(opts: Parameters<CreateSimulation>[0]): World {
     agents: new Map(),
     relationships: new Map(),
     memoryAt: new Map(),
+    bestFriends: new Set(),
+    giftAt: new Map(),
     seats: new Map(),
     encounters: new Map(),
     scheduled: [],
@@ -60,7 +62,7 @@ function createWorld(opts: Parameters<CreateSimulation>[0]): World {
     scheduleSeq: 0,
     nextSocialAt: 3,
     lineUsedAt: new Map(),
-    facts: { raidAt: -1e9, raidChannel: '', confettiAt: -1e9, newcomer: null, lastGrumbleAt: -1e9, lastAmbientAt: -1e9, lastChatReplyAt: -1e9, lastWelcomeAt: -1e9 },
+    facts: { raidAt: -1e9, raidChannel: '', confettiAt: -1e9, newcomer: null, lastGrumbleAt: -1e9, lastAmbientAt: -1e9, lastChatReplyAt: -1e9, lastWelcomeAt: -1e9, lastGiftAt: -1e9 },
     llm: { provider: null, inFlight: 0, ready: [], nextAt: 0 },
   };
 }
@@ -108,6 +110,7 @@ function restore(w: World, snap: WorldSnapshot): void {
       residentA: ra, residentB: rb, friendship: Math.min(100, Math.max(0, r.friendship)),
       lastInteractionAt: r.lastInteractionAt, memories: r.memories.slice(-MAX_MEMORIES),
     });
+    if (r.friendship >= 80) w.bestFriends.add(key);
     if (w.relationships.size >= MAX_RELATIONSHIPS) break;
   }
   // Never reuse simulation event ids already present in the restored history.

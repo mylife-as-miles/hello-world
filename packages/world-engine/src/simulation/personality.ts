@@ -39,12 +39,12 @@ const BASE: Temperament = {
 
 export const TRAIT_EFFECTS: Readonly<Record<string, Partial<Temperament>>> = {
   friendly: { sociability: 0.55, warmth: 0.4, socialDecay: 0.3, friendshipRate: 0.35 },
-  shy: { sociability: -0.45, shyness: 0.7, socialDecay: -0.35, friendshipRate: -0.25, warmth: 0.1, speed: -0.05 },
+  shy: { sociability: -0.45, shyness: 0.7, socialDecay: -0.22, friendshipRate: -0.25, warmth: 0.1, speed: -0.05 },
   playful: { playfulness: 0.7, funDecay: 0.3, chaos: 0.1, warmth: 0.15 },
-  grumpy: { grumpiness: 0.75, warmth: -0.65, sociability: -0.25, friendshipRate: -0.3 },
+  grumpy: { grumpiness: 0.75, warmth: -0.65, sociability: -0.25, friendshipRate: -0.3, socialDecay: 0.05 },
   curious: { curiosity: 0.7, sociability: 0.1 },
   energetic: { energyDecay: -0.3, restLove: -0.5, playfulness: 0.3, speed: 0.15 },
-  lazy: { restLove: 0.9, energyDecay: 0.3, speed: -0.15, playfulness: -0.25 },
+  lazy: { restLove: 0.9, energyDecay: 0.3, speed: -0.15, playfulness: -0.25, funDecay: 0.35 },
   romantic: { romance: 1, warmth: 0.2 },
   creative: { creative: 0.8, curiosity: 0.15 },
   chaotic: { chaos: 0.45, playfulness: 0.2 },

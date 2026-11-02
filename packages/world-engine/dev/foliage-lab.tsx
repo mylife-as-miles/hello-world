@@ -3,6 +3,7 @@
  *   default: the variants side by side in front of a ≈400-tree forest (near meshes + far impostors)
  *   ?view=world (game-like camera: park stand + ≈400-tree belt) · ?view=row (variants only)
  *   ?view=park (PARK_TREE_PLACEMENTS close-up) · ?view=forest · ?q=low · ?far=<m>
+ *   &snow=<0..1> · &wet=<0..1> — town weather uniforms via a local kit (as WorldScene provides)
  *   &measure=1 — renders high, records GPU triangle/draw counts, switches to low, records,
  *   then returns to high (one page load measures both qualities; numbers shown in the HUD).
  */
@@ -11,12 +12,17 @@ import { createRoot } from 'react-dom/client';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { GeneratedTrees, PARK_TREE_PLACEMENTS, TREE_VARIANTS, type TreePlacement } from '../src/scene/foliage';
+import { KitContext } from '../src/scene/context';
+import { createKit } from '../src/scene/kit';
 
 const params = new URLSearchParams(location.search);
 const quality = (params.get('q') === 'low' ? 'low' : 'high') as 'low' | 'high';
 const view = params.get('view') ?? 'combo';
 const farParam = params.get('far');
 const measure = params.get('measure') === '1';
+const kit = createKit();
+kit.uniforms.uSnow.value = Number(params.get('snow') ?? 0);
+kit.uniforms.uWet.value = Number(params.get('wet') ?? 0);
 
 function rowPlacements(): TreePlacement[] {
   return TREE_VARIANTS.map((_, i) => ({ x: (i - (TREE_VARIANTS.length - 1) / 2) * 7.5, z: 0, scale: 1, rot: i * 0.9, variant: i }));
@@ -66,9 +72,9 @@ function Stats({ q }: { q: string }) {
   useFrame(() => {
     if (++n % 10 !== 0) return;
     const el = document.getElementById('stats');
-    const lod = scene.getObjectByName('generated-trees')?.userData.lod as { near: number; mid: number; far: number } | undefined;
+    const lod = scene.getObjectByName('generated-trees')?.userData.lod as { near: number; mid: number; far: number; calls: number; tris: number } | undefined;
     if (el) el.textContent = `calls ${gl.info.render.calls} · tris ${gl.info.render.triangles} · q=${q} · view=${view}` +
-      (lod ? ` · trees near ${lod.near} / mid ${lod.mid} / impostor ${lod.far}` : '');
+      (lod ? ` · trees near ${lod.near} / mid ${lod.mid} / impostor ${lod.far} · forest ${lod.calls} calls / ${lod.tris} tris` : '');
   });
   return null;
 }
@@ -129,7 +135,7 @@ function App() {
     : view === 'world' ? [...PARK_TREE_PLACEMENTS, ...beltPlacements()]
     : view === 'combo' ? [...rowPlacements(), ...forestPlacements()] : rowPlacements()), []);
   return (
-    <>
+    <KitContext.Provider value={kit}>
       <Canvas shadows={quality === 'high'} dpr={[1, 1.5]} camera={{ fov: 42, near: 0.1, far: 800 }} gl={{ antialias: true }}
         onCreated={({ scene, gl }) => {
           scene.background = new THREE.Color('#cfe6f3');
@@ -150,7 +156,7 @@ function App() {
         <span id="stats" />
         <div id="measure" />
       </div>
-    </>
+    </KitContext.Provider>
   );
 }
 

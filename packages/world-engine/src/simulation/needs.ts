@@ -25,7 +25,7 @@ export function urgency(value: number): number {
   const v = clampNeed(value);
   const d = 1 - v / 100;
   // Steep below 35 so low needs dominate goal selection.
-  return 0.05 + d * d * 1.5 + (v < 35 ? ((35 - v) / 35) * 1.6 : 0);
+  return 0.05 + d * d * 1.5 + (v < 25 ? ((25 - v) / 25) * 1.6 : 0);
 }
 
 export function isSleeping(a: Agent): boolean {
@@ -37,7 +37,8 @@ export function decayNeeds(a: Agent, dt: number, clock: WorldClock): void {
   const sleeping = isSleeping(a);
   const owl = t.nightOwl > 0.5;
   // Evenings make (non night-owl) residents visibly tired; owls fade in the morning instead.
-  const tiredness = clock.period === 'night' ? (owl ? 0.6 : 1.7) : clock.period === 'evening' ? (owl ? 0.8 : 1.8) : owl && clock.period === 'morning' ? 1.3 : 1;
+  // Night owls run on fumes in the late morning instead.
+  const tiredness = clock.period === 'night' ? (owl ? 0.45 : 1.7) : clock.period === 'evening' ? (owl ? 0.7 : 1.8) : owl && clock.period === 'morning' ? 2.4 : owl && clock.period === 'afternoon' ? 1.4 : 1;
   if (!sleeping) a.needs.energy = clampNeed(a.needs.energy - BASE_DECAY.energy * t.energyDecay * tiredness * dt);
   a.needs.social = clampNeed(a.needs.social - BASE_DECAY.social * t.socialDecay * (sleeping ? 0.25 : 1) * dt);
   a.needs.fun = clampNeed(a.needs.fun - BASE_DECAY.fun * t.funDecay * (sleeping ? 0.2 : 1) * dt);
@@ -59,6 +60,20 @@ export function bump(a: Agent, e: Partial<Needs>): void {
 }
 
 export type NeedKey = keyof Needs;
+
+/**
+ * Personality blind spots: how much a resident *notices* a need when choosing what to do.
+ * Competitive/playful gamers skip meals and naps, bookish/shy folks forget to socialise,
+ * lazy ones ignore boredom — until it gets really bad. This is what produces drama.
+ */
+export function attention(a: Agent, k: NeedKey): number {
+  const v = a.needs[k];
+  const p = a.personality;
+  if (k === 'energy' && p.includes('competitive') && v > 14) return p.includes('playful') || p.includes('chaotic') ? 0.4 : 0.55;
+  if (k === 'social' && (p.includes('bookish') || p.includes('shy') || p.includes('grumpy')) && v > 12) return 0.45;
+  if (k === 'fun' && (p.includes('lazy') || p.includes('bookish')) && v > 12) return 0.35;
+  return 1;
+}
 
 /** The need an activity mainly serves (used for satiation: stop when it is full). */
 export function primaryNeed(type: string): NeedKey | null {

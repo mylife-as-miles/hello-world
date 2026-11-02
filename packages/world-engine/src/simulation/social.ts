@@ -15,9 +15,11 @@ import { addMemory, adjustFriendship, friendshipOf, getRel, pairKey, reactsPosit
 import { cleanText, dist, emit, schedule, type Agent, type Encounter, type EncounterKind, type PlannedLine, type World } from './state';
 
 const CHAT_EFFECTS = { energy: 0, social: 1.2, fun: 0.12 };
+/** A snub doesn't fill anyone's social bar. */
+const COLD_EFFECTS = { energy: 0, social: 0.1, fun: -0.1 };
 
 export function socialAvailable(w: World, a: Agent): boolean {
-  if (a.leaving || w.simTime < a.socialReadyAt) return false;
+  if (a.leaving || w.simTime < a.socialReadyAt || a.needs.energy < 15) return false;
   const act = a.action;
   if (!act) return true;
   if (act.type === 'sleep' || act.type === 'converse' || act.priority > 0) return false;
@@ -51,6 +53,11 @@ function planLines(w: World, kind: EncounterKind, A: Agent, B: Agent, positive: 
       : { speaker: 'b', kind: 'social', text: lines.complimentReply(w, B, false, varsB), payload: { action: 'compliment', sentiment } });
     return { lines: out, topicLabel: thing, quote: out[0]!.text, thing };
   }
+  if (kind === 'befriend') {
+    out.push({ speaker: 'a', kind: 'social', text: lines.befriendAsk(w, A, varsA), payload: { action: 'befriend', sentiment: 'positive' }, speakerActivity: `befriending ${B.displayName}` });
+    out.push({ speaker: 'b', kind: 'social', text: lines.befriendReply(w, B, positive, varsB), payload: { action: 'befriend', sentiment }, ...(positive ? { speakerActivity: `celebrating with ${A.displayName}`, listenerActivity: `celebrating with ${B.displayName}` } : {}) });
+    return { lines: out, topicLabel: 'friendship', quote: out[1]!.text };
+  }
   if (kind === 'gift') {
     const item = w.rng.pick(GIFT_ITEMS, 'gift-item', A.id);
     out.push({ speaker: 'a', kind: 'gift', text: lines.gift(w, A, { ...varsA, item }), payload: { item, sentiment: 'positive' }, speakerActivity: `gifting ${item} to ${B.displayName}`, listenerActivity: `thanking ${A.displayName}` });
@@ -80,6 +87,7 @@ export function startEncounter(w: World, A: Agent, B: Agent, kind: EncounterKind
   const place = nearestPoi(B.x, B.z);
   const at = atPlace(place);
   const positive = kind === 'gift' ? true : reactsPositively(w, B, A, kind === 'chat' ? 'chat' : kind);
+  if (kind === 'gift') { w.giftAt.set(pairKey(A.id, B.id), w.simTime); w.facts.lastGiftAt = w.simTime; }
   const planned = planLines(w, kind, A, B, positive, place, at);
   const id = w.nextEncounterId++;
   const enc: Encounter = {
@@ -92,11 +100,11 @@ export function startEncounter(w: World, A: Agent, B: Agent, kind: EncounterKind
   const prio = autonomous ? 0.5 : 1;
   startAction(w, B, {
     type: 'converse', phase: 'perform', travelActivity: `waving at ${A.displayName}`, activity: dist(A, B) > 1.8 ? `waving at ${A.displayName}` : `chatting with ${A.displayName}`,
-    spot: null, remaining: 1, effects: CHAT_EFFECTS, speed: 0, priority: prio, travelTimeout: 0, anchored: true, hold: true, encounterId: id, partnerId: A.id,
+    spot: null, remaining: 1, effects: positive ? CHAT_EFFECTS : COLD_EFFECTS, speed: 0, priority: prio, travelTimeout: 0, anchored: true, hold: true, encounterId: id, partnerId: A.id,
   });
   startAction(w, A, {
     type: 'converse', phase: 'travel', travelActivity: `walking to ${B.displayName}`, activity: `chatting with ${B.displayName}`,
-    spot: meet, remaining: 1, effects: CHAT_EFFECTS, speed: WALK_SPEED * A.temperament.speed, priority: prio, travelTimeout: 14, anchored: true, hold: true, encounterId: id, partnerId: B.id,
+    spot: meet, remaining: 1, effects: positive ? CHAT_EFFECTS : COLD_EFFECTS, speed: WALK_SPEED * A.temperament.speed, priority: prio, travelTimeout: 14, anchored: true, hold: true, encounterId: id, partnerId: B.id,
   });
   return enc;
 }
@@ -116,7 +124,7 @@ function finishEncounter(w: World, enc: Encounter, A: Agent, B: Agent): void {
   w.encounters.delete(enc.id);
   const r = (lo: number, hi: number) => w.rng.range(lo, hi, 'enc-delta', `${A.id}|${B.id}`);
   const delta = !enc.positive ? -r(1.5, 4)
-    : enc.kind === 'gift' ? r(7, 11) : enc.kind === 'compliment' ? r(4, 7) : enc.kind === 'greet' ? r(2.5, 5) : r(1.5, 3.5);
+    : enc.kind === 'gift' ? r(7, 11) : enc.kind === 'befriend' ? r(4, 7) : enc.kind === 'compliment' ? r(4, 7) : enc.kind === 'greet' ? r(2.5, 5) : r(1.5, 3.5);
   const { before, after } = adjustFriendship(w, A, B, delta);
   const a = A.displayName, b = B.displayName;
   const recent = w.simTime - (w.memoryAt.get(pairKey(A.id, B.id)) ?? -1e9) < 60;
@@ -126,7 +134,9 @@ function finishEncounter(w: World, enc: Encounter, A: Agent, B: Agent): void {
   else if (enc.kind === 'greet') memory = memoryLine(w, 'met', true, mv);
   else if (enc.kind === 'compliment') memory = memoryLine(w, 'compliment', true, mv);
   else if (enc.kind === 'gift') memory = memoryLine(w, 'gift', true, mv);
+  else if (enc.kind === 'befriend') { memory = memoryLine(w, 'friends', true, mv); w.bestFriends.add(pairKey(A.id, B.id)); }
   else if (!recent) memory = memoryLine(w, 'chat', true, mv, cleanText(enc.quote, 80));
+  if (!enc.positive && enc.kind === 'befriend') memory = memoryLine(w, 'declined', false, mv);
   if (memory) addMemory(w, A, B, memory);
   feel(A, enc.positive ? 0.25 : -0.15);
   feel(B, enc.positive ? 0.2 : -0.1);
@@ -136,7 +146,11 @@ function finishEncounter(w: World, enc: Encounter, A: Agent, B: Agent): void {
     if (enc.positive) bump(p, { social: 3 });
     p.socialReadyAt = w.simTime + w.rng.range(22, 40, 'social-cd', p.id) * (t.shyness > 0.5 ? 1.6 : 1) * (p.needs.social < 30 ? 0.35 : 1);
   }
-  if (enc.positive && before < 70 && after >= 70) {
+  if (enc.positive && enc.kind === 'befriend') {
+    gesture(w, A, `celebrating with ${b}`, 3, { priority: 0.5 });
+    gesture(w, B, `celebrating with ${a}`, 3, { priority: 0.5 });
+  } else if (enc.positive && before < 70 && after >= 70 && !w.bestFriends.has(pairKey(A.id, B.id))) {
+    w.bestFriends.add(pairKey(A.id, B.id));
     emit(w, 'social', A, { target: B, text: lines.milestone(w, A, placeVars(w, A, B, enc.placeAt)), payload: { action: 'befriend', sentiment: 'positive' } });
     addMemory(w, A, B, memoryLine(w, 'friends', true, { a, b, at: enc.placeAt }));
     gesture(w, A, `celebrating with ${b}`, 3, { priority: 0.5 });
@@ -189,6 +203,12 @@ function idHash(a: Agent): number {
 export function directSocial(w: World): void {
   if (w.simTime < w.nextSocialAt) return;
   const list = [...w.agents.values()].filter(a => socialAvailable(w, a) && !isSleeping(a));
+  // First meetings taper once most pairs in town have met.
+  let pairsMet = 0;
+  for (const r of w.relationships.values()) if (w.agents.has(r.residentA) && w.agents.has(r.residentB)) pairsMet++;
+  const n = w.agents.size;
+  const metShare = n > 1 ? pairsMet / ((n * (n - 1)) / 2) : 1;
+  const novelty = metShare < 0.3 ? 0.08 : metShare < 0.5 ? -0.05 : -0.18;
   let best: { a: Agent; b: Agent; score: number } | null = null;
   for (let i = 0; i < list.length; i++) {
     const a = list[i]!;
@@ -200,9 +220,11 @@ export function directSocial(w: World): void {
       const f = friendshipOf(w, a.id, b.id);
       const seeking = a.action?.seekingId === b.id || b.action?.seekingId === a.id;
       let s = (urgency(a.needs.social) * a.temperament.sociability + urgency(b.needs.social) * b.temperament.sociability) * 0.5
-        + ((f ?? 45) - 45) / 100 * 0.4 + (seeking ? 0.6 : 0) + (f === undefined ? 0.1 : 0) - d * 0.04
+        + ((f ?? 45) - 45) / 100 * 0.7 + (seeking ? 0.6 : 0) + (f === undefined ? novelty : 0) - d * 0.04
         + pairNoise(w, a, b) * 0.15;
       if (a.temperament.shyness > 0.5 && b.temperament.shyness > 0.5 && !seeking) s *= 0.5;
+      // Shy and grumpy residents are rarely drawn into chats by acquaintances (they have to seek company).
+      if (!seeking && (f ?? 45) < 55 && (a.temperament.shyness > 0.5 || b.temperament.shyness > 0.5 || a.temperament.grumpiness > 0.5 || b.temperament.grumpiness > 0.5)) s *= 0.6;
       if (!best || s > best.score) best = { a, b, score: s };
     }
   }
@@ -215,8 +237,19 @@ export function directSocial(w: World): void {
   const f = friendshipOf(w, A.id, B.id);
   let kind: EncounterKind = 'chat';
   if (f === undefined) kind = 'greet';
-  else if (f >= 60 && w.rng.chance(0.06 * A.temperament.kindness + 0.03 * A.temperament.romance, 'kind-gift', A.id)) kind = 'gift';
-  else if (w.rng.chance(0.08 + 0.08 * A.temperament.romance, 'kind-compliment', A.id)) kind = 'compliment';
+  else {
+    // As friendship grows, exchanges shift toward compliments, inside jokes, gifts and best-friend moments.
+    const key = pairKey(A.id, B.id);
+    const giftOk = w.simTime - w.facts.lastGiftAt > 45 && w.simTime - (w.giftAt.get(key) ?? -1e9) > 300;
+    const t = A.temperament;
+    const r = w.rng.float('kind', A.id);
+    const pBefriend = f >= 70 && !w.bestFriends.has(key) ? 0.35 : 0;
+    const pGift = giftOk ? (f >= 70 ? 0.22 : f >= 55 ? 0.13 : 0.03) * Math.min(1.6, 0.5 * t.kindness + 0.4 * t.romance) : 0;
+    const pCompliment = (f >= 70 ? 0.3 : f >= 55 ? 0.27 : 0.16) + 0.04 * t.romance;
+    if (r < pBefriend) kind = 'befriend';
+    else if (r < pBefriend + pGift) kind = 'gift';
+    else if (r < pBefriend + pGift + pCompliment) kind = 'compliment';
+  }
   startEncounter(w, A, B, kind, true);
   w.nextSocialAt = w.simTime + w.rng.range(6, 12, 'social-gap', A.id);
 }

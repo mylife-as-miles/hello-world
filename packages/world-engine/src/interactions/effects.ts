@@ -260,8 +260,8 @@ export class GiftSystem {
 }
 
 /** Small rounded name label texture. */
-export function makeNameplateTexture(name: string, accent?: string): { texture: THREE.CanvasTexture; aspect: number } {
-  const label = name.length > 22 ? `${name.slice(0, 21)}…` : name;
+export function makeNameplateTexture(name: string, accent?: string, maxChars = 26): { texture: THREE.CanvasTexture; aspect: number } {
+  const label = name.length > maxChars ? `${name.slice(0, maxChars - 1)}…` : name;
   const scale = 2;
   const [, measure] = canvas(4, 4);
   measure.font = `600 ${22 * scale}px system-ui, -apple-system, 'Segoe UI', sans-serif`;

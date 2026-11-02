@@ -280,15 +280,28 @@ function overlayPose(store: SceneStore, f: OverlayFit, cam: THREE.PerspectiveCam
   outLook.set(cx, H - D * Math.tan(OVERLAY_PITCH), cz);
 }
 
-interface OrbitState { pos: THREE.Vector3; look: THREE.Vector3; clusterS: THREE.Vector3; orbit: number }
+interface OrbitState { pos: THREE.Vector3; look: THREE.Vector3; clusterS: THREE.Vector3; orbit: number; blockedFor: number }
 
-/** Slow orbit around the smoothed cluster centre; skips ahead past occluded angles. */
+/** Camera must stay outside the stage's string-light ring (plus margin). */
+const outsideStageRing = (x: number, z: number) => Math.hypot(x - STAGE_POS.x, z - STAGE_POS.z) > 4.4;
+
+/**
+ * Slow orbit around the smoothed cluster centre. Small props are dissolved by the see-through
+ * cone; if the subject stays blocked for > 0.5 s the camera swings along the orbit until clear.
+ */
+function orbitClear(o: OrbitState, a: number, dist: number, h: number, lookY: number): boolean {
+  const cx = o.clusterS.x + Math.sin(a) * dist, cz = o.clusterS.z + Math.cos(a) * dist;
+  return outsideStageRing(cx, cz) && !blocked(cx, h, cz, o.clusterS.x, lookY, o.clusterS.z);
+}
+
 function orbitShot(o: OrbitState, dt: number, speed: number, dist: number, h: number, lookY: number) {
-  o.orbit += dt * speed;
-  for (let i = 0; i < 10; i++) {
-    const cx = o.clusterS.x + Math.sin(o.orbit) * dist, cz = o.clusterS.z + Math.cos(o.orbit) * dist;
-    if (!blocked(cx, h, cz, o.clusterS.x, lookY, o.clusterS.z)) break;
-    o.orbit += 0.33;
+  if (orbitClear(o, o.orbit, dist, h, lookY)) {
+    o.blockedFor = 0;
+    o.orbit += dt * speed;
+  } else {
+    o.blockedFor += dt;
+    // swing smoothly along the orbit once the block persists (> 0.5 s)
+    o.orbit += dt * (o.blockedFor > 0.5 ? 0.9 : speed);
   }
   o.pos.set(o.clusterS.x + Math.sin(o.orbit) * dist, h, o.clusterS.z + Math.cos(o.orbit) * dist);
   o.look.set(o.clusterS.x, lookY, o.clusterS.z);
@@ -354,7 +367,7 @@ export function overlayFitDistance(
   return distance;
 }
 
-export function CameraRig({ mode, selectedResidentId, transparent = false }: { mode: RigMode; selectedResidentId?: string; transparent?: boolean }) {
+export function CameraRig({ mode, selectedResidentId, transparent = false, quality = 'high' }: { mode: RigMode; selectedResidentId?: string; transparent?: boolean; quality?: 'low' | 'high' }) {
   const camera = useThree(s => s.camera) as THREE.PerspectiveCamera;
   const store = useSceneStore();
   const kit = useKit();
@@ -366,7 +379,8 @@ export function CameraRig({ mode, selectedResidentId, transparent = false }: { m
     follow: newFramer(), actor: newFramer(),
     cluster: new THREE.Vector3(), clusterS: new THREE.Vector3(), clusterInit: false, clusterAt: -1, orbit: 0.4,
     overlay: newOverlayFit(),
-    estAt: -1e9, estNext: 25, estCount: 0,
+    estAt: -1e9, estNext: 25, estCount: 0, blockedFor: 0,
+    cut: new THREE.Vector3(), cutWant: 0, cutR0: 0.35, cutR1: 0.95,
   }), []);
   const cine = useMemo(() => ({
     pos: new THREE.CatmullRomCurve3(CINE_POS.map(p => new THREE.Vector3(...p)), true, 'centripetal'),
@@ -392,7 +406,8 @@ export function CameraRig({ mode, selectedResidentId, transparent = false }: { m
       return;
     }
     // coalesce bursts: one transition per window (raids may pre-empt after 1 s, others after 3.5 s)
-    if (now - d.lastCut < (event.kind === 'raid' ? 1 : 3.5)) return;
+    if (event.kind !== 'join' && now - d.lastCut < (event.kind === 'raid' ? 1 : 3.5)) return;
+    if (event.kind === 'join' && now - d.lastCut < 0.8) return; // joins always get their portal shot (bursts: once per 0.8 s)
     const isPortal = event.kind === 'raid' || event.kind === 'join';
     d.kind = isPortal ? 'portal' : 'actor';
     d.actorId = event.actorId;
@@ -407,6 +422,7 @@ export function CameraRig({ mode, selectedResidentId, transparent = false }: { m
     const t = state.clock.elapsedTime;
     EXTRA = kit.occluders;
     if (mode === 'orbit') {
+      kit.uniforms.uCutOn.value = Math.max(0, kit.uniforms.uCutOn.value - dt * 3);
       if (first.current) {
         poseFor('orbit', t, s.pos, s.look);
         camera.position.copy(s.pos); look.current.copy(s.look); camera.lookAt(look.current);
@@ -456,7 +472,7 @@ export function CameraRig({ mode, selectedResidentId, transparent = false }: { m
       else if (transparent) overlayPose(store, s.overlay, camera, t, dt, s.pos, s.look);
       else poseFor('neighborhood', t, s.pos, s.look);
       rate = 2.4;
-    } else if (mode === 'cinematic' && (t >= s.estNext || t - s.estAt < 8)) {
+    } else if (mode === 'cinematic' && quality === 'high' && (t >= s.estNext || t - s.estAt < 8)) {
       // occasional wide establishing pass: plaza + downtown skyline ring + mountains
       if (t >= s.estNext) { s.estAt = t; s.estNext = t + 60 + (s.estCount % 3) * 15; s.estCount++; snap = true; }
       const a = s.estCount * 1.9 + (t - s.estAt) * 0.025;
@@ -495,6 +511,12 @@ export function CameraRig({ mode, selectedResidentId, transparent = false }: { m
         s.pos.x += bx * 0.6; s.pos.z += bz * 0.6;
       }
     }
+    // See-through cone (WebGL): dissolve props between the camera and the subject in close shots.
+    let cutWant = 0;
+    if (directed && d.kind === 'portal') { s.cut.set(PORTAL_POS.x, 1.7, PORTAL_POS.z + 2.8); cutWant = 1; s.cutR0 = 0.5; s.cutR1 = d.raid ? 2.2 : 1.6; }
+    else if (directed && d.until > 0) { s.cut.set(s.actor.pos.x, 1.25, s.actor.pos.z); cutWant = 1; s.cutR0 = 0.35; s.cutR1 = 0.95; }
+    else if (!directed && mode === 'follow' && selectedResidentId && s.follow.init) { s.cut.set(s.follow.pos.x, 1.25, s.follow.pos.z); cutWant = 1; s.cutR0 = 0.35; s.cutR1 = 0.95; }
+    else if (!directed && (mode === 'street' || (mode === 'cinematic' && t - s.estAt >= 8)) && s.clusterInit) { s.cut.set(s.clusterS.x, 1.15, s.clusterS.z); cutWant = 1; s.cutR0 = 0.45; s.cutR1 = 1.5; }
     if (first.current || snap) {
       camera.position.copy(s.pos);
       look.current.copy(s.look);
@@ -515,6 +537,11 @@ export function CameraRig({ mode, selectedResidentId, transparent = false }: { m
       if (camera.far < farNeeded) { camera.far = farNeeded; camera.updateProjectionMatrix(); }
     }
     camera.lookAt(look.current);
+    const u = kit.uniforms;
+    u.uCutA.value.copy(camera.position);
+    if (snap || u.uCutOn.value < 0.01) u.uCutB.value.copy(s.cut); else u.uCutB.value.lerp(s.cut, Math.min(1, dt * 6));
+    u.uCutR.value.set(s.cutR0, s.cutR1);
+    u.uCutOn.value += (cutWant - u.uCutOn.value) * Math.min(1, dt * 3.5);
   });
 
   if (mode !== 'orbit') return null;

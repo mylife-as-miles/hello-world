@@ -67,6 +67,20 @@ export const CREATOR_CSS = /* css */ `
 .hwc-hint { margin-top: 4px; font-size: 11px; color: var(--hwc-faint); pointer-events: none; }
 .hwc-loading { position: absolute; left: 50%; top: 46%; transform: translate(-50%, -50%); display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 999px; background: rgba(14, 12, 25, 0.7); border: 1px solid var(--hwc-line); font-size: 12px; color: var(--hwc-muted); opacity: 0; transition: opacity .25s; pointer-events: none; z-index: 3; }
 .hwc-loading.is-on { opacity: 1; }
+.hwc-stage.is-loading-heavy .hwc-loading { border-color: rgba(255, 214, 150, 0.4); color: #ffe6c4; background: rgba(28, 20, 14, 0.72); }
+.hwc-stage.is-loading-heavy .hwc-loading i { border-top-color: #ffd29a; }
+.hwc-stage.is-loading-heavy::after { content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 1;
+  background: linear-gradient(105deg, transparent 35%, rgba(255, 236, 210, 0.08) 50%, transparent 65%); background-size: 250% 100%;
+  animation: hwc-shimmer 1.5s ease-in-out infinite; }
+@keyframes hwc-shimmer { from { background-position: 130% 0; } to { background-position: -130% 0; } }
+
+.hwc-real { margin-top: 14px; padding: 12px; border-radius: 16px; border: 1px solid rgba(255, 214, 150, 0.24);
+  background: linear-gradient(160deg, rgba(255, 214, 150, 0.08), rgba(162, 143, 255, 0.05)); }
+.hwc-real-head { display: flex; flex-direction: column; gap: 2px; margin-bottom: 10px; }
+.hwc-real-title { font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 700; color: #ffdcae; }
+.hwc-real-sub { font-size: 11.5px; color: var(--hwc-faint); }
+.hwc-base .hwc-realtag { display: inline-block; margin-top: 4px; padding: 1px 6px; border-radius: 6px; font-size: 9.5px; font-weight: 700; letter-spacing: 0.04em; background: rgba(255, 214, 150, 0.16); color: #ffd9a6; }
+.hwc-base-real.is-on { border-color: #ffd29a; background: rgba(255, 210, 154, 0.12); }
 .hwc-loading i { width: 12px; height: 12px; border-radius: 50%; border: 2px solid rgba(255,255,255,.2); border-top-color: var(--hwc-accent); animation: hwc-spin .8s linear infinite; }
 
 /* ---------------- panel ---------------- */

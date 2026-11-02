@@ -13,7 +13,8 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { ContactShadows, Environment, Lightformer, OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import type { AvatarAppearance } from '@hello-world/contracts';
-import { createAvatarRig, loadAvatarRig, type ExpressionName, type HumanoidRig } from '../avatars';
+import { createAvatarRig, isVrmBase, loadAvatarRig, type ExpressionName, type HumanoidRig } from '../avatars';
+import { isRealisticBase } from '../avatars/realistic';
 import { AvatarAnimator, type GestureName } from '../interactions/animation/AvatarAnimator';
 import type { AnimationFamily } from '../world/activities';
 
@@ -49,11 +50,12 @@ const REBUILD_MS = 70;
  * Per-preset framing: fit a body span into the free band between the UI
  * overlays (top bar / bottom dock) and centre it there.
  */
-function presetGoal(preset: CameraPreset, h: number, fovDeg: number, width: number, height: number, insets: { top: number; bottom: number }) {
+function presetGoal(preset: CameraPreset, h: number, fovDeg: number, width: number, height: number, insets: { top: number; bottom: number }, stylised = true) {
   const tan = Math.tan(THREE.MathUtils.degToRad(fovDeg) / 2);
   const s = h / 1.75;
   const spec = preset === 'face'
-    ? { span: 0.5 * s, center: h * 0.91, phi: 1.5, theta: 0.06, width: 0.5 }
+    // Townies have big stylised heads; realistic/VRM humans ~1/7.5 head ratio
+    ? stylised ? { span: 0.5 * s, center: h * 0.91, phi: 1.5, theta: 0.06, width: 0.5 } : { span: 0.4 * s, center: h * 0.93, phi: 1.52, theta: 0.06, width: 0.4 }
     : preset === 'upper'
       ? { span: 0.98 * s, center: h * 0.72, phi: 1.47, theta: 0.14, width: 0.95 }
       : { span: h * 1.06 + 0.16, center: h * 0.5, phi: 1.44, theta: 0.22, width: 1.3 };
@@ -98,6 +100,7 @@ function Studio(props: CreatorPreviewProps) {
   const baseRef = useRef<PreviewBase>(base);
   const autoRef = useRef(autoRotate);
   const rigHeight = useRef(1.75);
+  const rigStylised = useRef(true);
   const camAnim = useRef(true);
   const presetRef = useRef<CameraPreset>(preset);
   const elapsed = useRef(0);
@@ -134,13 +137,28 @@ function Studio(props: CreatorPreviewProps) {
   useEffect(() => {
     const first = !rigRef.current && buildSeq.current === 0;
     const wait = first ? 0 : Math.max(0, lastBuildAt.current + REBUILD_MS - performance.now());
-    const showLoading = window.setTimeout(() => loadingEl?.current?.classList.add('is-on'), first ? 0 : 260);
+    // Photoreal GLBs (~1 MB) and VRMs load slowly: show a labelled badge + shimmer quickly;
+    // the previous rig stays on the turntable until the new one is ready.
+    const baseId = appearanceRef.current.baseModelId;
+    const heavy = isRealisticBase(baseId) ? 'photoreal' : isVrmBase(baseId) ? 'vrm' : '';
+    const showLoading = window.setTimeout(() => {
+      const el = loadingEl?.current;
+      if (!el) return;
+      const label = el.querySelector('span');
+      if (label) label.textContent = heavy === 'photoreal' ? 'Loading photoreal body…' : heavy === 'vrm' ? 'Loading avatar…' : first ? 'Loading…' : 'Updating…';
+      el.classList.add('is-on');
+      el.parentElement?.classList.toggle('is-loading-heavy', heavy !== '');
+    }, first ? 0 : heavy ? 90 : 260);
     const timer = window.setTimeout(() => {
       lastBuildAt.current = performance.now();
       const seq = ++buildSeq.current;
       const requested = appearanceRef.current;
       void loadAvatarRig(requested, { lod: 'high' }).catch(() => createAvatarRig(requested, { lod: 'high' })).then(rig => {
-        if (seq === buildSeq.current) { window.clearTimeout(showLoading); loadingEl?.current?.classList.remove('is-on'); }
+        if (seq === buildSeq.current) {
+          window.clearTimeout(showLoading);
+          loadingEl?.current?.classList.remove('is-on');
+          loadingEl?.current?.parentElement?.classList.remove('is-loading-heavy');
+        }
         if (!alive.current || !holder.current || seq < shownSeq.current) { rig.dispose(); return; }
         shownSeq.current = seq;
         const old = rigRef.current;
@@ -149,6 +167,7 @@ function Studio(props: CreatorPreviewProps) {
         holder.current.add(rig.root);
         rigRef.current = rig;
         rigHeight.current = Number.isFinite(rig.height) && rig.height > 0.3 ? rig.height : 1.75;
+        rigStylised.current = rig.kind === 'procedural' && !isRealisticBase(requested.baseModelId);
         const anim = new AvatarAnimator(rig, 7);
         anim.setBase(baseRef.current);
         const g = gestureRef.current;
@@ -199,7 +218,7 @@ function Studio(props: CreatorPreviewProps) {
     const c = controls.current;
     if (c) {
       const persp = camera as THREE.PerspectiveCamera;
-      const goal = presetGoal(presetRef.current, rigHeight.current, persp.fov ?? 28, size.width, size.height, insets?.current ?? NO_INSETS);
+      const goal = presetGoal(presetRef.current, rigHeight.current, persp.fov ?? 28, size.width, size.height, insets?.current ?? NO_INSETS, rigStylised.current);
       const k = 1 - Math.exp(-dt * 5.5);
       const dy = (goal.targetY - c.target.y) * k;
       c.target.y += dy;

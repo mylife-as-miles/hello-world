@@ -4,6 +4,7 @@
  * Node/server code must import from '@hello-world/world-engine/runtime'.
  */
 export { WorldScene } from './scene/WorldScene';
+export type { WorldSceneExtraProps } from './scene/WorldScene';
 export { AvatarCreator } from './creator/AvatarCreator';
 export type { AvatarCreatorExtraProps, SavedCharacter } from './creator/AvatarCreator';
 export * from './runtime/index';

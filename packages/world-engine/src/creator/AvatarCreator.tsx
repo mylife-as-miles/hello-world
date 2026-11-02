@@ -369,7 +369,7 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
               </button>
             </div>
           </div>
-          <div className="hwc-loading" ref={loadingEl} aria-hidden="true"><i />Loading model…</div>
+          <div className="hwc-loading" ref={loadingEl} aria-hidden="true" data-testid="creator-loading"><i /><span>Loading…</span></div>
           <div className="hwc-dock" ref={dockRef}>
             <div className="hwc-dock-row" role="group" aria-label="Preview expression">
               <span className="hwc-dock-label">Expression</span>

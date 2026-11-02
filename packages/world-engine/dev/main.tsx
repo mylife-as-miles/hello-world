@@ -97,6 +97,7 @@ function App() {
       <button onClick={() => send('social', { action: 'befriend' })}>befriend</button>
       <button onClick={() => { const order = ['sunny', 'sunset', 'rain', 'snow'] as const; const next = order[(order.indexOf(snap.weather) + 1) % order.length]!; send('weather', { weather: next }); }}>weather: {snap.weather}</button>
       <button onClick={() => send('confetti')}>confetti</button>
+      <button title="Fast-forward the world clock 3 game hours (small fixed steps, deterministic)" onClick={() => { for (let i = 0; i < 90; i++) runtime.tick(2); }}>+3h</button>
       <button onClick={() => send('raid', { amount: 42, channel: 'CozyStreamer' })}>raid</button>
       <input value={chat} onChange={e => setChat(e.target.value)} style={{ width: 160 }} />
       <button onClick={() => send('chat', undefined, { text: chat })}>chat</button>

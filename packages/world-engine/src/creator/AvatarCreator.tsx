@@ -225,7 +225,7 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
   const realBases = realisticBases();
   const baseEntry = BASE_MODELS.find(m => m.id === appearance.baseModelId) ?? realBases.find(m => m.id === appearance.baseModelId);
   const support = appearanceSupportFor(appearance.baseModelId);
-  const baseName = baseEntry?.label ?? 'This body';
+  const baseName = baseEntry?.label.replace(/\s*\([^)]*\)\s*$/, '') || 'This body';
   const fixedWhy = realistic ? 'a photoreal body with its own authored look' : vrm ? 'a VRM avatar with its own authored look' : 'a fixed-look body';
 
   // ---- edits
@@ -350,7 +350,7 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
             <div className="hwc-brand">
               <span className="hwc-eyebrow">Hello World</span>
               <span className="hwc-title">Character Studio</span>
-              <span className="hwc-badge"><i />{baseEntry ? `${baseEntry.label}${realistic ? '' : ' body'}` : 'Custom body'}{realistic ? ' · Photoreal' : vrm ? ' · VRM' : ''}</span>
+              <span className="hwc-badge"><i />{baseEntry ? baseName : 'Custom'}{realistic ? ' · Photoreal' : vrm ? ' · VRM guest' : ' body'}</span>
               <span className="hwc-hint" aria-hidden="true">Drag to rotate · scroll or pinch to zoom</span>
             </div>
             <div className="hwc-tools">
@@ -478,7 +478,7 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
                 : <Note>{baseName} is {fixedWhy}; its skin is part of the model. Skin tones apply to Townie bodies.</Note>}
             </Section>
 
-            <Section id="face" domId={secId('face')} title="Face" sub="Eyes and features" onEngage={frameFace}>
+            <Section id="face" domId={secId('face')} title="Face" sub={support.face ? 'Eyes and features' : 'Fixed by this body'} onEngage={frameFace}>
               {support.face ? (
                 <>
                   <div className="hwc-label" style={{ marginTop: 0 }}>Eye colour</div>
@@ -491,7 +491,7 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
               ) : <Note>{baseName} is {fixedWhy}, so eye colour and face shape stay as authored. Try the expression buttons on the preview.</Note>}
             </Section>
 
-            <Section id="hair" domId={secId('hair')} title="Hair" sub={`${HAIR_STYLES.length} styles · any colour`}>
+            <Section id="hair" domId={secId('hair')} title="Hair" sub={support.hair ? `${HAIR_STYLES.length} styles · any colour` : 'Fixed by this body'}>
               {support.hair ? (
                 <>
               <div className="hwc-grid" role="group" aria-label="Hairstyle">
@@ -509,7 +509,7 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
               ) : <Note>{baseName} is {fixedWhy}; its hair is part of the model. Hairstyles and hair colours apply to Townie bodies.</Note>}
             </Section>
 
-            <Section id="outfit" domId={secId('outfit')} title="Outfit" sub="Mix pieces, then pick a colour">
+            <Section id="outfit" domId={secId('outfit')} title="Outfit" sub={support.outfitPieces ? 'Mix pieces, then pick a colour' : support.outfitColor ? 'Pick a colour' : 'Fixed by this body'}>
               {support.outfitPieces ? (
                 <>
               <div className="hwc-label" style={{ marginTop: 0 }}>Top</div>

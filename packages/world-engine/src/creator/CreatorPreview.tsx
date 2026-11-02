@@ -50,12 +50,17 @@ const REBUILD_MS = 70;
  * Per-preset framing: fit a body span into the free band between the UI
  * overlays (top bar / bottom dock) and centre it there.
  */
-function presetGoal(preset: CameraPreset, h: number, fovDeg: number, width: number, height: number, insets: { top: number; bottom: number }, stylised = true) {
+export type RigFamily = 'townie' | 'vrm' | 'real';
+
+function presetGoal(preset: CameraPreset, h: number, fovDeg: number, width: number, height: number, insets: { top: number; bottom: number }, family: RigFamily = 'townie') {
   const tan = Math.tan(THREE.MathUtils.degToRad(fovDeg) / 2);
   const s = h / 1.75;
   const spec = preset === 'face'
-    // Townies have big stylised heads; realistic/VRM humans ~1/7.5 head ratio
-    ? stylised ? { span: 0.5 * s, center: h * 0.91, phi: 1.5, theta: 0.06, width: 0.5 } : { span: 0.4 * s, center: h * 0.93, phi: 1.52, theta: 0.06, width: 0.4 }
+    // Head proportions differ: Townies have big stylised heads, VRM guests can be
+    // huge-headed mascots (head & shoulders framing), realistic humans ~1/7.5.
+    ? family === 'real' ? { span: 0.42 * s, center: h * 0.93, phi: 1.52, theta: 0.06, width: 0.42 }
+      : family === 'vrm' ? { span: 0.8 * s, center: h * 0.84, phi: 1.5, theta: 0.06, width: 0.8 }
+        : { span: 0.5 * s, center: h * 0.91, phi: 1.5, theta: 0.06, width: 0.5 }
     : preset === 'upper'
       ? { span: 0.98 * s, center: h * 0.72, phi: 1.47, theta: 0.14, width: 0.95 }
       : { span: h * 1.06 + 0.16, center: h * 0.5, phi: 1.44, theta: 0.22, width: 1.3 };
@@ -100,7 +105,7 @@ function Studio(props: CreatorPreviewProps) {
   const baseRef = useRef<PreviewBase>(base);
   const autoRef = useRef(autoRotate);
   const rigHeight = useRef(1.75);
-  const rigStylised = useRef(true);
+  const rigFamily = useRef<RigFamily>('townie');
   const camAnim = useRef(true);
   const presetRef = useRef<CameraPreset>(preset);
   const elapsed = useRef(0);
@@ -167,7 +172,7 @@ function Studio(props: CreatorPreviewProps) {
         holder.current.add(rig.root);
         rigRef.current = rig;
         rigHeight.current = Number.isFinite(rig.height) && rig.height > 0.3 ? rig.height : 1.75;
-        rigStylised.current = rig.kind === 'procedural' && !isRealisticBase(requested.baseModelId);
+        rigFamily.current = isRealisticBase(requested.baseModelId) && rig.kind !== 'procedural' ? 'real' : rig.kind === 'vrm' ? 'vrm' : 'townie';
         const anim = new AvatarAnimator(rig, 7);
         anim.setBase(baseRef.current);
         const g = gestureRef.current;
@@ -218,7 +223,7 @@ function Studio(props: CreatorPreviewProps) {
     const c = controls.current;
     if (c) {
       const persp = camera as THREE.PerspectiveCamera;
-      const goal = presetGoal(presetRef.current, rigHeight.current, persp.fov ?? 28, size.width, size.height, insets?.current ?? NO_INSETS, rigStylised.current);
+      const goal = presetGoal(presetRef.current, rigHeight.current, persp.fov ?? 28, size.width, size.height, insets?.current ?? NO_INSETS, rigFamily.current);
       const k = 1 - Math.exp(-dt * 5.5);
       const dy = (goal.targetY - c.target.y) * k;
       c.target.y += dy;

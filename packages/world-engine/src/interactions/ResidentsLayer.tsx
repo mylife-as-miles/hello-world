@@ -17,7 +17,15 @@ import { hashString } from '../avatars/catalog';
 import { animationForVerb, parseActivityVerb, type AnimationFamily } from '../world/activities';
 import { findSeatNear, getPoi } from '../world/layout';
 import { AvatarAnimator, RUN_SPEED, WALK_SPEED, type GestureName } from './animation/AvatarAnimator';
-import { EmoteSystem, GiftSystem, makeNameplateTexture, type EmoteKind } from './effects';
+import { EmoteSystem, GiftSystem, InstancedEmoteSystem, makeBlobTexture, makeNameplateTexture, type EmoteKind } from './effects';
+
+/** Common surface of the sprite (high) and instanced (low) emote pools. */
+interface EmotePool {
+  readonly group: THREE.Group;
+  spawn(kind: EmoteKind, x: number, y: number, z: number, count?: number, spread?: number, scale?: number): void;
+  update(dt: number, camera?: THREE.Camera): void;
+  dispose(): void;
+}
 
 export interface ResidentsLayerProps {
   selectedResidentId?: string;
@@ -53,6 +61,10 @@ const NAMEPLATE_MAX_PX = 30;
 const NAMEPLATE_WORLD_H = 0.26;
 /** Max simultaneous nameplates after screen-space declutter (raid chips included). */
 const NAMEPLATE_MAX_VISIBLE = 8;
+/** quality 'low' draw-call budget: fewer labels, real shadows only for the nearest few (others get blob discs). */
+const NAMEPLATE_MAX_VISIBLE_LOW = 6;
+const SHADOW_CASTERS_LOW = 5;
+const BLOB_CAPACITY = 64;
 /** Raid visitors (ids `raid:<group>:<k>`) within this radius of their group centroid collapse into one chip. */
 const RAID_CLUSTER_RADIUS = 7;
 const RAID_CLUSTER_MIN = 3;
@@ -94,6 +106,10 @@ interface ResidentHandle {
   lastActorAt: number;
   /** Individual label suppressed: member of a clustered raid group shown as one chip. */
   raidCollapsed: boolean;
+  /** Rig root (for the shadow budget) and whether it currently casts real shadows. */
+  rigRoot: THREE.Object3D | null;
+  shadowOn: boolean;
+  shadowApplied: boolean | null;
 }
 
 interface RaidChip { sprite: THREE.Sprite; mat: THREE.SpriteMaterial; tex: THREE.CanvasTexture | null; text: string; aspect: number; active: boolean; allowed: boolean; px: number; pos: THREE.Vector3 }
@@ -198,6 +214,10 @@ function releaseHit() {
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
+const _bm = new THREE.Matrix4();
+const _bp = new THREE.Vector3();
+const _bs = new THREE.Vector3();
+const _bq = new THREE.Quaternion();
 const _sphere = new THREE.Sphere();
 const _frustum = new THREE.Frustum();
 const _m = new THREE.Matrix4();
@@ -245,7 +265,21 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
   const pending = useMemo(() => new Map<string, Array<(h: ResidentHandle) => void>>(), []);
   const hub = useMemo(() => new BubbleHub(), []);
   const lodBus = useMemo(() => new LodBus(), []);
-  const emotes = useMemo(() => new EmoteSystem(quality === 'low' ? 40 : 80), [quality]);
+  // quality 'low': instanced emotes (≤ 1 draw call per visible kind) instead of one sprite per particle.
+  const emotes = useMemo<EmotePool>(() => (quality === 'low' ? new InstancedEmoteSystem(12) : new EmoteSystem(80)), [quality]);
+  // quality 'low': soft blob discs (1 instanced draw) under residents without real shadows.
+  const blob = useMemo(() => {
+    if (quality !== 'low') return null;
+    const geo = new THREE.CircleGeometry(0.42, 20);
+    geo.rotateX(-Math.PI / 2);
+    const tex = makeBlobTexture();
+    const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, opacity: 0.42, toneMapped: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    const mesh = new THREE.InstancedMesh(geo, mat, BLOB_CAPACITY);
+    mesh.count = 0; mesh.visible = false; mesh.frustumCulled = false; mesh.renderOrder = 1; mesh.raycast = () => {};
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    return { mesh, geo, mat, tex };
+  }, [quality]);
+  useEffect(() => () => { if (blob) { blob.geo.dispose(); blob.mat.dispose(); blob.tex.dispose(); blob.mesh.dispose(); } }, [blob]);
   const gifts = useMemo(() => new GiftSystem(6), []);
   useEffect(() => () => emotes.dispose(), [emotes]);
   useEffect(() => () => gifts.dispose(), [gifts]);
@@ -493,7 +527,7 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
     const nb = clock.current.bubbleCount;
     for (const cnd of plateCands) {
       const l = cnd.x - cnd.w / 2 - 2, r = cnd.x + cnd.w / 2 + 2, t = cnd.y - cnd.hh / 2 - 1, b = cnd.y + cnd.hh / 2 + 1;
-      let ok = shownPlates < NAMEPLATE_MAX_VISIBLE;
+      let ok = shownPlates < (quality === 'low' ? NAMEPLATE_MAX_VISIBLE_LOW : NAMEPLATE_MAX_VISIBLE);
       for (let k = 0; ok && k < nb; k++) {
         const o = k * 4;
         if (r > shownRects[o]! && l < shownRects[o + 1]! && b > shownRects[o + 2]! && t < shownRects[o + 3]!) ok = false;
@@ -508,6 +542,18 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
     }
   };
 
+  const applyShadow = (h: ResidentHandle) => {
+    if (!h.rigRoot || h.shadowApplied === h.shadowOn) return;
+    const on = h.shadowOn;
+    h.rigRoot.traverse(o => {
+      const mesh = o as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      if (mesh.userData.hwCast === undefined) mesh.userData.hwCast = mesh.castShadow;
+      mesh.castShadow = on && !!mesh.userData.hwCast;
+    });
+    h.shadowApplied = on;
+  };
+
   const ringRef = useRef<THREE.Mesh>(null);
   const markerRef = useRef<THREE.Group>(null);
   const lodRank = useMemo(() => [] as Array<{ id: string; d: number }>, []);
@@ -519,7 +565,22 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
     const dt = Math.min(delta, 0.1);
     const c = clock.current;
     c.now = nowS();
-    emotes.update(dt);
+    emotes.update(dt, camera);
+    // Blob shadows (quality 'low') for residents without real shadows.
+    if (blob) {
+      let n = 0;
+      for (const h of registry.values()) {
+        if (h.shadowOn || !h.visible || n >= BLOB_CAPACITY) continue;
+        const k = h.height / 1.7;
+        _bp.set(h.pos.x, h.pos.y + 0.025, h.pos.z); _bs.set(k, 1, k);
+        _bm.compose(_bp, _bq, _bs);
+        blob.mesh.setMatrixAt(n++, _bm);
+      }
+      blob.mesh.count = n;
+      blob.mesh.visible = n > 0;
+      if (n > 0) blob.mesh.instanceMatrix.needsUpdate = true;
+      blob.mat.opacity = overlayRef.current ? 0.26 : 0.42;
+    }
     gifts.update(dt);
     const t = state.clock.elapsedTime;
 
@@ -560,6 +621,9 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
         const limit = cur === 'high' ? highDist + 3 : highDist - 3;
         const forced = r.id === selectedResidentId || r.id === viewerResidentId;
         lodBus.set(r.id, forced || (i < maxHigh && r.d < limit) ? 'high' : 'low');
+        // Shadow budget: at 'low' only the nearest few cast real shadows (others: blob discs).
+        const h = registry.get(r.id);
+        if (h) { h.shadowOn = quality !== 'low' || i < SHADOW_CASTERS_LOW; applyShadow(h); }
       });
     }
 
@@ -680,6 +744,7 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
       store={store} registry={registry} pending={pending} hub={hub} lodBus={lodBus} emotes={emotes} overlayRef={overlayRef}
       isViewer={s.id === viewerResidentId} onSelect={onResidentSelect} />)}
     <primitive object={emotes.group} />
+    {blob && <primitive object={blob.mesh} />}
     <primitive object={gifts.group} />
     {raidChips.map((ch, i) => <primitive key={`raid-chip-${i}`} object={ch.sprite} />)}
     <mesh ref={ringRef} geometry={ringGeo} material={ringMat} rotation-x={-Math.PI / 2} visible={false} renderOrder={5} raycast={() => null} />
@@ -701,7 +766,7 @@ interface ResidentProps {
   pending: Map<string, Array<(h: ResidentHandle) => void>>;
   hub: BubbleHub;
   lodBus: LodBus;
-  emotes: EmoteSystem;
+  emotes: EmotePool;
   overlayRef: { readonly current: boolean };
   isViewer: boolean;
   onSelect?: (id: string) => void;
@@ -724,6 +789,7 @@ const Resident = memo(function Resident(p: ResidentProps) {
       id, pos: new THREE.Vector3(r?.location.x ?? 0, 0, r?.location.z ?? 0), yaw: (hashString(id) % 628) / 100, height: 1.7,
       animator: null, visible: true, reaction: null, faceTarget: null,
       plateCand: false, plateAllowed: false, platePx: NAMEPLATE_MIN_PX, plateAspect: 3, plateY: 2, lastActorAt: -1e9, raidCollapsed: false,
+      rigRoot: null, shadowOn: true, shadowApplied: null,
       play(g, delay = 0) {
         if (delay > 0) { setTimeout(() => h.animator?.playGesture(g), delay * 1000); return; }
         h.animator?.playGesture(g);
@@ -755,10 +821,14 @@ const Resident = memo(function Resident(p: ResidentProps) {
     for (let i = 0; i < 30; i++) anim.update(1 / 30);
     handle.animator = anim;
     handle.height = rig.height > 0.3 ? rig.height : 1.7;
+    handle.rigRoot = rig.root;
+    handle.shadowApplied = null;
+    if (!handle.shadowOn) rig.root.traverse(o => { const mesh = o as THREE.Mesh; if (mesh.isMesh) { mesh.userData.hwCast = mesh.castShadow; mesh.castShadow = false; } });
+    handle.shadowApplied = handle.shadowOn ? null : false;
     rig.root.traverse(o => { o.raycast = () => {}; });
     const queued = pending.get(id);
     if (queued) { pending.delete(id); for (const fn of queued) fn(handle); }
-    return () => { if (handle.animator === anim) handle.animator = null; };
+    return () => { if (handle.animator === anim) { handle.animator = null; handle.rigRoot = null; } };
   }, [rig, id, handle, pending, overlayRef]);
 
   const plate = useMemo(() => makeNameplateTexture(p.displayName, p.isViewer ? '#5ef2c6' : undefined), [p.displayName, p.isViewer]);

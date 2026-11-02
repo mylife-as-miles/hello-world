@@ -181,7 +181,7 @@ export class EmoteSystem {
     }
   }
 
-  update(dt: number): void {
+  update(dt: number, _camera?: THREE.Camera): void {
     for (let i = 0; i < this.parts.length; i++) {
       const p = this.parts[i]!;
       if (!p.active) continue;
@@ -207,6 +207,96 @@ export class EmoteSystem {
     for (const s of this.sprites) (s.material as THREE.Material).dispose();
     for (const t of this.textures.values()) t.dispose();
   }
+}
+
+/**
+ * Draw-call-lean emote pool for quality 'low': one InstancedMesh per emote kind
+ * (≤ 1 call per kind currently on screen, 0 when idle). Billboarded on the CPU
+ * with standard materials (no custom shaders → WebGL + WebGPU safe). Fades by
+ * scaling out instead of opacity.
+ */
+export class InstancedEmoteSystem {
+  readonly group = new THREE.Group();
+  private readonly geo = new THREE.PlaneGeometry(1, 1);
+  private readonly kinds = new Map<EmoteKind, { mesh: THREE.InstancedMesh; mat: THREE.MeshBasicMaterial; tex: THREE.CanvasTexture; parts: Array<Particle & { x: number; y: number; z: number }>; cursor: number }>();
+  private readonly _m = new THREE.Matrix4();
+  private readonly _p = new THREE.Vector3();
+  private readonly _s = new THREE.Vector3();
+
+  constructor(perKind = 12) {
+    this.group.name = 'resident-emotes-instanced';
+    for (const k of EMOTE_KINDS) {
+      const tex = new THREE.CanvasTexture(drawEmote(k));
+      tex.colorSpace = THREE.SRGBColorSpace;
+      const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, toneMapped: false });
+      const mesh = new THREE.InstancedMesh(this.geo, mat, perKind);
+      mesh.count = 0; mesh.visible = false; mesh.frustumCulled = false; mesh.renderOrder = 20;
+      mesh.raycast = () => {};
+      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      this.group.add(mesh);
+      const parts = Array.from({ length: perKind }, () => ({ life: 0, max: 1, vx: 0, vy: 0, vz: 0, size: 0.3, wob: 0, active: false, x: 0, y: 0, z: 0 }));
+      this.kinds.set(k, { mesh, mat, tex, parts, cursor: 0 });
+    }
+  }
+
+  spawn(kind: EmoteKind, x: number, y: number, z: number, count = 1, spread = 0.35, scale = 1): void {
+    const K = this.kinds.get(kind);
+    if (!K) return;
+    for (let n = 0; n < count; n++) {
+      const p = K.parts[K.cursor]!; K.cursor = (K.cursor + 1) % K.parts.length;
+      const a = Math.random() * Math.PI * 2, r = spread * Math.sqrt(Math.random());
+      p.x = x + Math.cos(a) * r * 0.6; p.y = y + Math.random() * 0.15; p.z = z + Math.sin(a) * r * 0.6;
+      p.active = true; p.life = -n * 0.12;
+      p.max = kind === 'zzz' ? 2.6 : kind === 'hello' ? 1.15 : kind === 'gift' ? 1.4 : kind === 'cloud' || kind === 'anger' ? 1.9 : 1.6 + Math.random() * 0.5;
+      p.vx = Math.cos(a) * r * 0.5 + (kind === 'zzz' ? 0.12 : 0); p.vz = Math.sin(a) * r * 0.5;
+      p.vy = kind === 'zzz' ? 0.32 : kind === 'cloud' ? 0.12 : kind === 'hello' || kind === 'gift' ? 0.35 : 0.55 + Math.random() * 0.3;
+      p.size = (kind === 'sparkle' ? 0.22 + Math.random() * 0.14 : kind === 'cloud' ? 0.5 : kind === 'bang' ? 0.17 : kind === 'hello' || kind === 'gift' ? 0.19 : 0.27 + Math.random() * 0.08) * scale;
+      p.wob = Math.random() * 6;
+    }
+  }
+
+  update(dt: number, camera?: THREE.Camera): void {
+    for (const K of this.kinds.values()) {
+      let n = 0;
+      for (const p of K.parts) {
+        if (!p.active) continue;
+        p.life += dt;
+        if (p.life >= p.max) { p.active = false; continue; }
+        if (p.life < 0) continue;
+        const u = p.life / p.max;
+        p.x += (p.vx + Math.sin(p.life * 4 + p.wob) * 0.12) * dt;
+        p.y += p.vy * dt;
+        p.z += p.vz * dt;
+        p.vy *= 1 - dt * 0.6;
+        const pop = u < 0.15 ? 0.4 + 0.6 * (u / 0.15) : u > 0.72 ? Math.max(0, (1 - u) / 0.28) : 1 + 0.05 * Math.sin(p.life * 9 + p.wob);
+        const sc = p.size * pop;
+        this._p.set(p.x, p.y, p.z); this._s.set(sc, sc, sc);
+        this._m.compose(this._p, camera ? camera.quaternion : IDENTITY_Q, this._s);
+        K.mesh.setMatrixAt(n++, this._m);
+      }
+      K.mesh.count = n;
+      K.mesh.visible = n > 0;
+      if (n > 0) K.mesh.instanceMatrix.needsUpdate = true;
+    }
+  }
+
+  dispose(): void {
+    this.geo.dispose();
+    for (const K of this.kinds.values()) { K.mat.dispose(); K.tex.dispose(); K.mesh.dispose(); }
+  }
+}
+
+const IDENTITY_Q = new THREE.Quaternion();
+
+/** Soft round contact-shadow texture (blob shadows for quality 'low'). */
+export function makeBlobTexture(): THREE.CanvasTexture {
+  const [c, g] = canvas(64, 64);
+  const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  gr.addColorStop(0, 'rgba(0,0,0,0.9)'); gr.addColorStop(0.55, 'rgba(0,0,0,0.45)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
 }
 
 interface GiftFlight { obj: THREE.Group; t: number; dur: number; from: THREE.Vector3; to: THREE.Vector3; active: boolean; onLand: (() => void) | null }

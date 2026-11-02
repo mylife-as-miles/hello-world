@@ -11,6 +11,10 @@ import type { AvatarLod, HumanBoneName, HumanoidRig } from './rig';
 import { HUMAN_BONES } from './rig';
 import { BASE_MODELS, normalizeAppearance } from './catalog';
 import { createTownieRig } from './procedural/townie';
+import { REALISTIC_SUPPORT, isRealisticBase, type AppearanceSupport } from './realistic/catalog';
+
+export type { AppearanceSupport } from './realistic/catalog';
+export { isRealisticBase } from './realistic/catalog';
 
 export type { HumanoidRig, HumanBoneName, ExpressionName, AttachSlot, AvatarLod } from './rig';
 export { HUMAN_BONES, EXPRESSIONS } from './rig';
@@ -50,6 +54,16 @@ export function isVrmBase(baseModelId: string): boolean {
 /** Async loader: VRM when the base model is a VRM, else procedural. Never rejects. */
 export async function loadAvatarRig(appearance: AvatarAppearance, opts: AvatarRigOptions = {}): Promise<HumanoidRig> {
   const a = normalizeAppearance(appearance);
+  if (isRealisticBase(a.baseModelId)) {
+    try {
+      const mod = await import('./realistic');
+      const r = await mod.loadRealisticRig(a, opts);
+      if (r) return track(r);
+    } catch (err) {
+      console.warn('[avatars] realistic load failed, falling back to procedural Townie', err);
+    }
+    return createAvatarRig({ ...a, baseModelId: 'townie-classic' }, opts);
+  }
   if (!isVrmBase(a.baseModelId)) return createAvatarRig(a, opts);
   try {
     const mod = await import('./vrm/vrmRig');
@@ -63,6 +77,16 @@ export async function loadAvatarRig(appearance: AvatarAppearance, opts: AvatarRi
   }
 }
 
+/** Which appearance fields visibly apply to a base model (creator greys out the rest). */
+export function getAppearanceSupport(baseModelId: string): AppearanceSupport {
+  if (isRealisticBase(baseModelId)) return { ...REALISTIC_SUPPORT };
+  if (isVrmBase(baseModelId)) return { skinTone: false, hair: false, outfitColor: false, outfitPieces: false, face: false, body: true, accessories: true };
+  return { skinTone: true, hair: true, outfitColor: true, outfitPieces: true, face: true, body: true, accessories: true };
+}
+
+/** Bases loaded asynchronously (VRM guest skins, realistic scans). */
+function isAsyncBase(id: string): boolean { return isVrmBase(id) || isRealisticBase(id); }
+
 function appearanceKey(a: AvatarAppearance): string {
   try { return JSON.stringify(normalizeAppearance(a)); } catch { return 'invalid'; }
 }
@@ -70,7 +94,7 @@ function appearanceKey(a: AvatarAppearance): string {
 /** React hook: returns a rig for the appearance, swapping + disposing when it changes. */
 export function useAvatarRig(appearance: AvatarAppearance, lod: AvatarLod = 'high'): HumanoidRig | null {
   const key = appearanceKey(appearance) + '|' + lod;
-  const vrm = isVrmBase(normalizeAppearance(appearance).baseModelId);
+  const vrm = isAsyncBase(normalizeAppearance(appearance).baseModelId);
   // Instant procedural rig (also used as a placeholder while a VRM loads).
   const initial = useMemo(() => ({ key, rig: createAvatarRig(vrm ? { ...normalizeAppearance(appearance), baseModelId: 'townie-classic' } : appearance, { lod }) }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -85,10 +109,9 @@ export function useAvatarRig(appearance: AvatarAppearance, lod: AvatarLod = 'hig
     if (vrm) {
       void loadAvatarRig(appearance, { lod }).then(r => {
         if (!alive) { r.dispose(); return; }
-        if (r.kind === 'vrm') {
-          active = r; setCurrent({ key, rig: r });
-          setTimeout(() => proc.dispose(), 60);
-        } else r.dispose();
+        // swap the placeholder for the loaded rig (or its procedural fallback)
+        active = r; setCurrent({ key, rig: r });
+        setTimeout(() => proc.dispose(), 60);
       });
     }
     return () => { alive = false; active.dispose(); if (active !== proc) proc.dispose(); };

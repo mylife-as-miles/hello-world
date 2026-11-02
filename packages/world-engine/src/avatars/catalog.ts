@@ -5,6 +5,7 @@
  * Renderers MUST treat unknown identifiers as the default entry.
  */
 import type { AvatarAppearance } from '@hello-world/contracts';
+import { REALISTIC_BASE_MODELS } from './realistic/catalog';
 
 export interface CatalogEntry { id: string; label: string }
 export interface BaseModelEntry extends CatalogEntry {
@@ -28,6 +29,7 @@ export const BASE_MODELS: BaseModelEntry[] = [
   { id: 'vrm-astrodisco', label: 'Astrodisco (100Avatars, CC0)', kind: 'vrm', file: 'astrodisco.vrm', credit: 'Astrodisco by Polygonal Mind (100Avatars), CC0', description: 'Disco-ball astronaut guest' },
   { id: 'vrm-coffee', label: 'Coffee (100Avatars, CC0)', kind: 'vrm', file: 'coffee.vrm', credit: 'Coffee by Polygonal Mind (100Avatars), CC0', description: 'Walking coffee cup guest' },
   { id: 'vrm-chill', label: 'Chill (100Avatars, CC0)', kind: 'vrm', file: 'chill.vrm', credit: 'Chill by Polygonal Mind (100Avatars), CC0', description: 'Laid-back hoodie guest' },
+  ...REALISTIC_BASE_MODELS,
 ];
 
 export const HAIR_STYLES: CatalogEntry[] = [

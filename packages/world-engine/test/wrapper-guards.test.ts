@@ -77,3 +77,16 @@ describe('runtime wrapper guards', () => {
     expect(rt.getSnapshot().simulationTime).toBe(t1);
   });
 });
+
+describe('auto tick catch-up', () => {
+  it('keeps simulation time close to wall time when the host blocks', async () => {
+    const rt = createWorldRuntime({ worldId: 'g6', seedResidents: true, autoTick: true, tickIntervalMs: 50 });
+    const t0 = Date.now();
+    while (Date.now() - t0 < 300) { /* block the event loop like a busy server */ }
+    await new Promise(r => setTimeout(r, 260));
+    const simulated = rt.getSnapshot().simulationTime;
+    rt.dispose();
+    // ~560 ms of wall time at 50 ms/step ≈ 11 steps; without catch-up only ~5 run.
+    expect(simulated).toBeGreaterThanOrEqual(0.4);
+  });
+});

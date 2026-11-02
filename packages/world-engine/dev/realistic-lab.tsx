@@ -25,7 +25,7 @@ document.getElementById('root')!.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x26313a);
 const camera = new THREE.PerspectiveCamera(32, innerWidth / innerHeight, 0.1, 100);
-camera.position.set(0, 2.2, 10.5);
+camera.position.set(0, 2.0, +(params.get('z') ?? 10.5));
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.target.set(0, 0.95, -1.2);
 controls.update();
@@ -84,6 +84,7 @@ async function main() {
 }
 
 let phase = -1;
+let applied = 0;
 let clock = 0;
 function setPhase(p: number) {
   phase = p;
@@ -104,7 +105,7 @@ renderer.setAnimationLoop(() => {
   clock += dt;
   if (entries.length) {
     const p = Math.floor(clock / 4);
-    if (p !== phase || phase < 0) setPhase(p);
+    if (p !== phase || phase < 0 || applied !== entries.length) { applied = entries.length; setPhase(p); }
     for (const e of entries) { e.anim.update(dt); e.rig.update(dt); }
   }
   renderer.render(scene, camera);

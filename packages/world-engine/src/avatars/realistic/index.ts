@@ -122,7 +122,13 @@ function buildPart(mesh: THREE.Mesh, data: RealisticBodyData): PartGeo | null {
   pos.applyMatrix4(mesh.matrixWorld);
   geo.setAttribute('position', pos);
   const nrm = src.getAttribute('normal');
-  if (nrm) { const n = toFloat(nrm, 3); n.applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(mesh.matrixWorld)); n.normalize?.(); geo.setAttribute('normal', n); }
+  if (nrm) {
+    const n = toFloat(nrm, 3);
+    n.applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(mesh.matrixWorld));
+    const a = n.array as Float32Array;
+    for (let i = 0; i < a.length; i += 3) { const l = Math.hypot(a[i]!, a[i + 1]!, a[i + 2]!) || 1; a[i]! /= l; a[i + 1]! /= l; a[i + 2]! /= l; }
+    geo.setAttribute('normal', n);
+  }
   geo.setAttribute('uv', toFloat(uvA, 2));
   geo.setAttribute('skinIndex', src.getAttribute('skinIndex'));
   geo.setAttribute('skinWeight', src.getAttribute('skinWeight'));

@@ -20,6 +20,8 @@ export const QUEUE_LIMIT = 200;
 /** Events applied per dispatch/tick before the rest wait for the next tick. */
 export const EVENTS_PER_DRAIN = 40;
 export const DEFAULT_TICK_MS = 500;
+/** Max extra fixed steps per timer callback when the host fell behind. */
+export const MAX_CATCHUP_STEPS = 4;
 
 /** Minimum spacing (ms, by event timestamp) between same-kind events from one actor. */
 const ACTOR_COOLDOWN_MS: Record<WorldEvent['kind'], number> = {
@@ -199,7 +201,21 @@ export function createWorldRuntime(options: WorldEngineRuntimeOptions = {}): Wor
   }
 
   if (options.autoTick) {
-    timer = setInterval(() => { if (!paused) tick(); }, tickMs);
+    // Fixed-size steps scheduled against a monotonic clock: when the host is busy and
+    // intervals fire late, run a bounded number of catch-up steps instead of drifting.
+    // (Each step is still exactly tickMs, so results stay deterministic per step count.)
+    const mono = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+    let baseline = mono();
+    let done = 0;
+    timer = setInterval(() => {
+      if (paused || disposed) { baseline = mono(); done = 0; return; }
+      const due = Math.floor((mono() - baseline) / tickMs);
+      let behind = due - done;
+      if (behind > MAX_CATCHUP_STEPS * 8) { baseline = mono(); done = 0; behind = 1; } // long suspension: resync, don't spiral
+      const steps = Math.max(1, Math.min(MAX_CATCHUP_STEPS, behind));
+      for (let i = 0; i < steps; i++) tick();
+      done += steps;
+    }, tickMs);
     (timer as unknown as { unref?: () => void }).unref?.();
   }
 

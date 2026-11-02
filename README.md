@@ -1,5 +1,7 @@
 # HELLO WORLD
 
+> Integration in progress: the application shell and server are published. Claude’s complete world-engine package is not merged yet, so the full web build is pending that handoff. Server checks can run now.
+
 **Your community. A life of its own.** A livestream-powered 3D neighborhood where viewers become residents, meet their neighbors, and make a little history together.
 
 This is an independent vertical slice of a persistent virtual society. All residents, interactions, demonstration events, Twitch actions, and OBS sessions use the same world runtime. No source or assets are borrowed from the owner's other projects.
@@ -82,7 +84,7 @@ flowchart LR
 - `packages/contracts/`: stable versioned shared event, resident, appearance, scene, and runtime types.
 - `packages/world-engine/`: Claude-owned 3D world, avatar creator, and life simulation.
 
-The Node process owns the simulation. Multiple browsers receive the same authoritative state. The server saves snapshots atomically to its `.data` directory (by default `apps/server/.data` when launched by pnpm); the signing key and Twitch token file live there too. Keep this directory private, writable, and backed up. IndexedDB stores a read-only reconnect cache; it never overrides the server after a reset. Do not commit `.env` or `.data`.
+The Node process owns the simulation. Multiple browsers receive the same authoritative state. The server saves snapshots atomically to its `.data` directory (by default the repository-root `.data` directory); the signing key and Twitch token file live there too. Keep this directory private, writable, and backed up. IndexedDB stores a read-only reconnect cache; it never overrides the server after a reset. Do not commit `.env` or `.data`.
 
 This slice does not claim distributed scaling, cloud-hosted durability, or simulation while the server is stopped. A future Colyseus room can own the same runtime without changing normalized events or the scene interface. See [transport notes](docs/TRANSPORT.md).
 

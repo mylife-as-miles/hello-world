@@ -400,24 +400,14 @@ export default function App() {
   function enterWorld() {
     navigate("world");
   }
-  function saveAppearance(appearance: AvatarAppearance) {
+  function saveAppearance(appearance: AvatarAppearance, personality: string[]) {
     const displayName = (name.trim() || me?.displayName || "Neighbor").slice(
       0,
       25,
     );
     saveDisplayName(displayName);
-    if (me)
-      sendEvent(
-        "custom",
-        { action: "update-avatar", appearance },
-        { displayName },
-      );
-    else
-      sendEvent(
-        "join",
-        { appearance, personality: ["friendly", "curious"] },
-        { displayName },
-      );
+    // A stable-ID join updates appearance and personality while preserving relationships.
+    sendEvent("join", { appearance, personality }, { displayName });
     setModal(null);
     navigate("world");
     setLocalNotice(
@@ -1599,7 +1589,11 @@ export default function App() {
               <AvatarCreator
                 initialAppearance={me?.appearance}
                 displayName={name || me?.displayName}
-                onSave={saveAppearance}
+                initialPersonality={me?.personality}
+                onSave={() => undefined}
+                onSaveCharacter={({ appearance, personality }) =>
+                  saveAppearance(appearance, personality)
+                }
                 onCancel={closeModal}
               />
             </div>

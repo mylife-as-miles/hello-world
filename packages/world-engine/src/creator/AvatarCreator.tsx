@@ -60,9 +60,11 @@ const cls = (...xs: Array<string | false | null | undefined>) => xs.filter(Boole
 const keyOf = (a: AvatarAppearance) => JSON.stringify(a);
 
 // ---------------------------------------------------------------- controls
-function Section({ id, domId, title, sub, action, children }: { id: SectionId; domId: string; title: string; sub?: ReactNode; action?: ReactNode; children: ReactNode }) {
+function Section({ id, domId, title, sub, action, children, onEngage }: {
+  id: SectionId; domId: string; title: string; sub?: ReactNode; action?: ReactNode; children: ReactNode; onEngage?: () => void;
+}) {
   return (
-    <section className="hwc-sec" id={domId} data-section={id} aria-labelledby={`${domId}-t`}>
+    <section className="hwc-sec" id={domId} data-section={id} aria-labelledby={`${domId}-t`} onFocusCapture={onEngage} onPointerDownCapture={onEngage}>
       <div className="hwc-sec-head">
         <div><h3 className="hwc-sec-title" id={`${domId}-t`}>{title}</h3>{sub && <div className="hwc-sec-sub">{sub}</div>}</div>
         {action}
@@ -223,6 +225,9 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
     setBase(name);
   };
   const pickCamera = (id: CameraPreset) => { setCamera(id); setCameraNonce(n => n + 1); };
+  // Smart framing (inZOI-style): face edits are tiny at full-body zoom, so engaging
+  // the Face section frames the face — only from the default full-body view.
+  const frameFace = () => { if (camera === 'full') pickCamera('face'); };
 
   // ---- category nav + scroll spy
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -378,7 +383,7 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
               <Swatches label="Skin tone" colors={SKIN_TONES} value={appearance.skinTone} testIdPrefix="skin" onChange={c => edit(a => ({ ...a, skinTone: c }))} />
             </Section>
 
-            <Section id="face" domId={secId('face')} title="Face" sub="Eyes and features">
+            <Section id="face" domId={secId('face')} title="Face" sub="Eyes and features" onEngage={frameFace}>
               <div className="hwc-label" style={{ marginTop: 0 }}>Eye colour</div>
               <Swatches label="Eye colour" colors={EYE_COLORS} value={appearance.face.eyeColor} testIdPrefix="eye" onChange={c => setFace({ eyeColor: c })} />
               {vrm ? (
@@ -398,7 +403,7 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
                 {HAIR_STYLES.map(h => (
                   <button key={h.id} type="button" className={cls('hwc-tile', appearance.hairStyle === h.id && 'is-on')} aria-pressed={appearance.hairStyle === h.id}
                     aria-label={`Hairstyle ${h.label}`} data-testid={`hair-${h.id}`} onClick={() => edit(a => ({ ...a, hairStyle: h.id }))}>
-                    <Bust hair={h.id} hairColor={appearance.hairColor} skin={appearance.skinTone} outfit="rgba(255,255,255,.14)" eye={appearance.face.eyeColor} size={44} />
+                    <Bust hair={h.id} hairColor={appearance.hairColor} skin={appearance.skinTone} outfit="rgba(255,255,255,.14)" eye={appearance.face.eyeColor} size={50} />
                     {h.label}
                   </button>
                 ))}

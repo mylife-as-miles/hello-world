@@ -102,7 +102,7 @@ function ensureStyles() {
   const s = document.createElement('style');
   s.dataset.helloWorld = 'residents';
   s.textContent = `
-.hw-bubble{position:relative;transform:translateY(-100%);max-width:230px;min-width:60px;padding:8px 12px 9px;border-radius:16px;
+.hw-bubble{position:relative;transform:translateY(-100%);width:max-content;max-width:220px;min-width:48px;padding:8px 12px 9px;border-radius:16px;
 background:linear-gradient(180deg,rgba(255,255,255,.97),rgba(244,247,250,.95));color:#1d2329;box-shadow:0 6px 22px rgba(10,20,30,.28),0 1px 0 rgba(255,255,255,.6) inset;
 font:500 13px/1.32 ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;letter-spacing:.005em;white-space:normal;word-wrap:break-word;overflow-wrap:anywhere;
 pointer-events:none;user-select:none;animation:hw-bubble-in .32s cubic-bezier(.2,1.4,.4,1) backwards;transition:opacity .45s ease}

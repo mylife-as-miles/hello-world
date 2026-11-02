@@ -5,7 +5,7 @@
  */
 import { StrictMode, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Canvas, useFrame } from '@react-three/fiber';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Html, OrbitControls } from '@react-three/drei';
 import type { WorldEvent } from '@hello-world/contracts';
 import { createAvatarRig, type HumanoidRig } from '../src/avatars/index';
@@ -37,6 +37,7 @@ function LabRig({ item, index, x, z }: { item: Item; index: number; x: number; z
   const frozen = useRef(false);
   useEffect(() => () => rig.dispose(), [rig]);
   useEffect(() => {
+    if (params.get('seat')) anim.setSeatHeight(Number(params.get('seat')));
     anim.setBase(item.family);
     if (freeze !== null) {
       // Deterministic still: advance to `time`.
@@ -54,7 +55,7 @@ function LabRig({ item, index, x, z }: { item: Item; index: number; x: number; z
   });
   return <group position={[x, 0, z]}>
     <primitive object={rig.root} />
-    {item.family === 'sit' || item.family === 'sleep' ? <mesh position={[0, 0.225, -0.05]}><boxGeometry args={[0.6, 0.45, 0.45]} /><meshStandardMaterial color="#8b6a4f" /></mesh> : null}
+    {(item.family === 'sit' || item.family === 'sleep') && !params.get('seat') ? <mesh position={[0, 0.225, -0.05]}><boxGeometry args={[0.6, 0.45, 0.45]} /><meshStandardMaterial color="#8b6a4f" /></mesh> : null}
     <Html position={[0, 2.05, 0]} center style={{ pointerEvents: 'none', whiteSpace: 'nowrap', font: '600 12px system-ui', color: '#fff', background: 'rgba(0,0,0,.55)', padding: '2px 6px', borderRadius: 6 }}>{item.label}</Html>
   </group>;
 }
@@ -80,6 +81,12 @@ function Lab() {
   </Canvas>;
 }
 
+function Expose() {
+  const { scene, camera, size } = useThree();
+  useEffect(() => { (window as unknown as { __lab: unknown }).__lab = { scene, camera, size }; }, [scene, camera, size]);
+  return null;
+}
+
 function World() {
   const runtime = useMemo(() => createWorldRuntime({ worldId: 'lab', seedResidents: true, autoTick: true }), []);
   const store = useMemo(() => new SceneStore(runtime), [runtime]);
@@ -89,21 +96,28 @@ function World() {
     (window as unknown as { __rt: typeof runtime }).__rt = runtime;
     let n = 0;
     const ev = (e: Partial<WorldEvent>): WorldEvent => ({ id: `lab-${Date.now()}-${n++}`, kind: 'chat', source: 'demo', actorId: 'seed:nova', actorDisplayName: 'Nova', timestamp: Date.now(), ...e }) as WorldEvent;
-    const timers = [
-      setTimeout(() => runtime.dispatch(ev({ kind: 'chat', text: 'Hi everyone! Lovely evening at the plaza 🌇' })), 600),
-      setTimeout(() => runtime.dispatch(ev({ kind: 'wave', actorId: 'seed:mochi', actorDisplayName: 'Mochi', targetId: 'seed:nova' })), 900),
-      setTimeout(() => runtime.dispatch(ev({ kind: 'gift', actorId: 'seed:rex', actorDisplayName: 'Rex', targetId: 'seed:lumi', payload: { item: 'flowers' } })), 1200),
-      setTimeout(() => runtime.dispatch(ev({ kind: 'social', actorId: 'seed:lumi', actorDisplayName: 'Lumi', targetId: 'seed:rex', payload: { action: 'befriend', sentiment: 'positive' }, text: 'Aww, thank you Rex!' })), 1500),
-      setTimeout(() => runtime.dispatch(ev({ kind: 'dance', actorId: 'seed:pixelcat', actorDisplayName: 'PixelCat' })), 700),
+    if (params.get('paused') === '1') runtime.setPaused(true);
+    const script = () => [
+      ev({ kind: 'chat', text: 'Hi everyone! Lovely evening at the plaza — who wants coffee?' }),
+      ev({ kind: 'wave', actorId: 'seed:mochi', actorDisplayName: 'Mochi', targetId: 'seed:nova' }),
+      ev({ kind: 'gift', actorId: 'seed:rex', actorDisplayName: 'Rex', targetId: 'seed:lumi', payload: { item: 'flowers' } }),
+      ev({ kind: 'social', actorId: 'seed:lumi', actorDisplayName: 'Lumi', targetId: 'seed:rex', source: 'simulation', payload: { action: 'befriend', sentiment: 'positive' }, text: 'Aww, thank you Rex! These are beautiful.' }),
+      ev({ kind: 'dance', actorId: 'seed:pixelcat', actorDisplayName: 'PixelCat' }),
+      ev({ kind: 'social', actorId: 'seed:bram', actorDisplayName: 'Bram', targetId: 'seed:pixelcat', payload: { action: 'greet', sentiment: 'negative' }, source: 'simulation', text: 'Hmph. Not now, PixelCat.' }),
     ];
-    return () => timers.forEach(clearTimeout);
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    script().forEach((e, i) => timers.push(setTimeout(() => runtime.dispatch(e), 400 + i * 250)));
+    const iv = setInterval(() => script().forEach((e, i) => timers.push(setTimeout(() => runtime.dispatch({ ...e, id: `${e.id}-${Date.now()}` }), i * 250))), 4000);
+    timers.push(iv as unknown as ReturnType<typeof setTimeout>);
+    return () => { timers.forEach(clearTimeout); clearInterval(iv); };
   }, [runtime]);
   return <>
-    <Canvas dpr={1} camera={{ position: [0, 9, 14], fov: 45 }} style={{ position: 'fixed', inset: 0 }}>
+    <Canvas dpr={1} camera={{ position: [0, 6, 11], fov: 45 }} style={{ position: 'fixed', inset: 0 }}>
       <color attach="background" args={['#24313a']} />
       <hemisphereLight args={['#dfefff', '#3a2f28', 1.2]} />
       <directionalLight position={[4, 8, 6]} intensity={2.2} />
       <mesh rotation-x={-Math.PI / 2}><planeGeometry args={[80, 80]} /><meshStandardMaterial color="#4c6152" /></mesh>
+      <Expose />
       <SceneStoreContext.Provider value={store}>
         <ResidentsLayer selectedResidentId={sel} onResidentSelect={setSel} viewerResidentId="seed:bram" quality="high" />
       </SceneStoreContext.Provider>

@@ -7,7 +7,7 @@
  */
 import * as THREE from 'three';
 import type { ExpressionName } from '../rig';
-import { clamp, lerp, sphereG, type V3 } from './geom';
+import { clamp, lerp, type V3 } from './geom';
 import { RX, RY, headPoint, headStrip, headNormal } from './head';
 
 export function withColor(g: THREE.BufferGeometry, rgb: V3 | ((i: number, x: number, y: number, z: number) => V3)): THREE.BufferGeometry {
@@ -27,6 +27,10 @@ export interface FaceParams { eyeScale: number; noseScale: number; mouthScale: n
 const geoCache = new Map<string, THREE.BufferGeometry>();
 function cached(key: string, make: () => THREE.BufferGeometry): THREE.BufferGeometry {
   let g = geoCache.get(key); if (!g) { g = make(); geoCache.set(key, g); } return g;
+}
+/** Unit sphere with a white colour attribute (all Townie materials use vertex colours). */
+export function unitSphere(ws: number, hs: number): THREE.BufferGeometry {
+  return cached(`usphere:${ws}:${hs}`, () => { const g = new THREE.SphereGeometry(1, ws, hs); g.deleteAttribute('uv'); return withColor(g, [1, 1, 1]); });
 }
 
 /** Unit eyeball (radius 1) with iris/pupil vertex colours; front = +Z. */
@@ -59,7 +63,7 @@ function eyeballGeometry(eyeHex: string): THREE.BufferGeometry {
 /** Hemisphere shell lid (unit radius). upper: +Y half. Edge ring darkened as a lash line. */
 function lidGeometry(upper: boolean): THREE.BufferGeometry {
   return cached(`lid:${upper}`, () => {
-    const g = new THREE.SphereGeometry(1, 28, 10, 0, Math.PI * 2, upper ? 0 : Math.PI / 2, Math.PI / 2 + (upper ? 0.04 : 0.02));
+    const g = upper ? new THREE.SphereGeometry(1, 28, 10, 0, Math.PI * 2, 0, Math.PI / 2 + 0.04) : new THREE.SphereGeometry(1, 28, 8, 0, Math.PI * 2, Math.PI / 2 - 0.03, Math.PI / 2 + 0.03);
     g.deleteAttribute('uv');
     return withColor(g, (_i, _x, y, z) => {
       const edge = Math.abs(y); // near equator => near the lid edge
@@ -124,8 +128,7 @@ function mouthGeometry(mouthScale: number, teeth: boolean): THREE.BufferGeometry
     if (n.getZ(Math.floor(n.count / 2)) < 0) { for (let k = 0; k < idx.length; k += 3) { const t = idx[k + 1]!; idx[k + 1] = idx[k + 2]!; idx[k + 2] = t; } g.setIndex(idx); g.computeVertexNormals(); }
     g.morphAttributes.position = shapes.slice(1).map(s => new THREE.Float32BufferAttribute(build(s), 3));
     g.morphTargetsRelative = false;
-    if (teeth) withColor(g, [1, 1, 1]);
-    else withColor(g, (_i, _x, y) => { const t = clamp((y - (0.106 - 0.07)) / 0.02, 0, 1); return [0.85 + t * 0.15, 0.85 + t * 0.15, 0.85 + t * 0.15]; });
+    withColor(g, [1, 1, 1]);
     return g;
   });
 }
@@ -136,8 +139,8 @@ function browGeometry(side: 1 | -1, lod: 'high' | 'low'): { g: THREE.BufferGeome
   const g = cached(`brow:${side}:${lod}`, () => {
     const gg = headStrip(
       (s) => [lerp(phi0, phi1, s), el0 + 0.055 * Math.sin(s * Math.PI * 0.9) - 0.03 * s],
-      (s) => lerp(0.05, 0.02, s) * (s < 0.12 ? 0.6 + s * 3.3 : 1),
-      0.0008, (s) => 0.0032 * (1 - s * 0.5), lod === 'high' ? 14 : 6, 4, 'el');
+      (s) => lerp(0.036, 0.015, s) * (s < 0.12 ? 0.6 + s * 3.3 : 1),
+      0.0008, (s) => 0.0026 * (1 - s * 0.5), lod === 'high' ? 14 : 6, 4, 'el');
     gg.translate(-center[0], -center[1], -center[2]);
     return withColor(gg, [1, 1, 1]);
   });
@@ -193,7 +196,7 @@ export class TownieFace {
       const n = headNormal(ph, el);
       const c = headPoint(ph, el, -eyeR * (lod === 'high' ? 0.5 : 0.75));
       if (lod === 'low') {
-        const dot = new THREE.Mesh(sphereG(10, 8), m.dark);
+        const dot = new THREE.Mesh(unitSphere(10, 8), m.dark);
         dot.position.set(c[0], c[1], c[2]);
         dot.scale.set(eyeR * 0.7, eyeR * 0.95, eyeR * 0.6);
         dot.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3(n[0] * 0.5, 0, 1).normalize());
@@ -206,9 +209,9 @@ export class TownieFace {
       this.group.add(pivot);
       const look = new THREE.Object3D(); pivot.add(look); this.eyes.push(look);
       const ball = new THREE.Mesh(eyeballGeometry(p.eyeColor), m.eye); ball.scale.setScalar(eyeR); look.add(ball);
-      const hl = new THREE.Mesh(sphereG(8, 6), m.highlight);
+      const hl = new THREE.Mesh(unitSphere(8, 6), m.highlight);
       hl.position.set(eyeR * 0.3, eyeR * 0.36, eyeR * 0.9); hl.scale.setScalar(eyeR * 0.15); look.add(hl);
-      const hl2 = new THREE.Mesh(sphereG(6, 4), m.highlight);
+      const hl2 = new THREE.Mesh(unitSphere(6, 4), m.highlight);
       hl2.position.set(-eyeR * 0.2, -eyeR * 0.26, eyeR * 0.95); hl2.scale.setScalar(eyeR * 0.07); look.add(hl2);
       const up = new THREE.Object3D(); pivot.add(up); this.upperLids.push(up);
       const ul = new THREE.Mesh(lidGeometry(true), m.skin); ul.scale.setScalar(eyeR * 1.09); up.add(ul);
@@ -225,7 +228,7 @@ export class TownieFace {
     }
     // nose
     const np = headPoint(0, -0.29, -0.006);
-    const nose = new THREE.Mesh(sphereG(16, 12), m.skin);
+    const nose = new THREE.Mesh(unitSphere(16, 12), m.skin);
     const ns = p.noseScale;
     nose.position.set(np[0], np[1], np[2]);
     nose.scale.set(0.02 * ns, 0.017 * ns, 0.019 * ns);

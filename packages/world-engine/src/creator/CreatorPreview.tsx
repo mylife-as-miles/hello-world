@@ -43,6 +43,7 @@ export interface CreatorPreviewProps {
 
 const EXPRESSION_HOLD = 1.8;
 const NO_INSETS = { top: 0, bottom: 0 };
+const REBUILD_MS = 70;
 
 /**
  * Per-preset framing: fit a body span into the free band between the UI
@@ -111,18 +112,37 @@ function Studio(props: CreatorPreviewProps) {
   autoRef.current = autoRotate;
 
   // ---- rig lifecycle -------------------------------------------------------
+  // Throttled rebuild (≤ 1 per REBUILD_MS while a slider is dragged, trailing
+  // edge guaranteed). Builds are sequence-numbered: a result is shown only if
+  // it is newer than the rig on screen, so the previous rig stays visible until
+  // a newer one is ready and slow (VRM) loads never overwrite newer looks.
   const appearanceRef = useRef(appearance);
   appearanceRef.current = appearance;
+  const alive = useRef(true);
+  const buildSeq = useRef(0);
+  const shownSeq = useRef(0);
+  const lastBuildAt = useRef(-1e9);
   useEffect(() => {
-    let cancelled = false;
-    const first = !rigRef.current;
-    const showLoading = window.setTimeout(() => loadingEl?.current?.classList.add('is-on'), first ? 0 : 220);
+    alive.current = true;
+    return () => {
+      alive.current = false;
+      rigRef.current?.dispose();
+      rigRef.current = null;
+      animRef.current = null;
+    };
+  }, []);
+  useEffect(() => {
+    const first = !rigRef.current && buildSeq.current === 0;
+    const wait = first ? 0 : Math.max(0, lastBuildAt.current + REBUILD_MS - performance.now());
+    const showLoading = window.setTimeout(() => loadingEl?.current?.classList.add('is-on'), first ? 0 : 260);
     const timer = window.setTimeout(() => {
+      lastBuildAt.current = performance.now();
+      const seq = ++buildSeq.current;
       const requested = appearanceRef.current;
       void loadAvatarRig(requested, { lod: 'high' }).catch(() => createAvatarRig(requested, { lod: 'high' })).then(rig => {
-        if (cancelled || !holder.current) { rig.dispose(); return; }
-        window.clearTimeout(showLoading);
-        loadingEl?.current?.classList.remove('is-on');
+        if (seq === buildSeq.current) { window.clearTimeout(showLoading); loadingEl?.current?.classList.remove('is-on'); }
+        if (!alive.current || !holder.current || seq < shownSeq.current) { rig.dispose(); return; }
+        shownSeq.current = seq;
         const old = rigRef.current;
         if (old) { holder.current.remove(old.root); old.dispose(); }
         rig.root.traverse(o => { const m = o as THREE.Mesh; if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } });
@@ -133,22 +153,16 @@ function Studio(props: CreatorPreviewProps) {
         anim.setBase(baseRef.current);
         const g = gestureRef.current;
         if (g && g.until > elapsed.current) anim.playGesture(g.name, { duration: g.until - elapsed.current });
-        anim.update(1 / 60); // pose before first paint (no T-pose flash)
-        animRef.current = anim;
-        // re-apply live expression weights on the fresh rig
+        // re-apply live expression weights on the fresh rig, then pose before first paint (no T-pose flash)
         for (const [name, e] of exprs.current) anim.setExpression(name, e.w);
+        anim.update(1 / 60);
+        animRef.current = anim;
         onRigReady?.(rig);
       });
-    }, first ? 0 : 60);
-    return () => { cancelled = true; window.clearTimeout(timer); window.clearTimeout(showLoading); };
+    }, wait);
+    return () => { window.clearTimeout(timer); window.clearTimeout(showLoading); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appearanceKey]);
-
-  useEffect(() => () => {
-    rigRef.current?.dispose();
-    rigRef.current = null;
-    animRef.current = null;
-  }, []);
 
   // ---- animation commands --------------------------------------------------
   useEffect(() => { baseRef.current = base; animRef.current?.setBase(base); }, [base]);

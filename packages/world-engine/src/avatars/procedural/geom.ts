@@ -128,6 +128,8 @@ export interface SweepOpts {
   endPole?: V3 | null;
   /** partial sweep: theta range (radians, 0 = +v, +pi/2 = +u). Open surface. */
   theta0?: number; theta1?: number;
+  /** radius multiplier per (theta, ring index) — pleats, ribbing */
+  mod?: (theta: number, ring: number) => number;
 }
 
 /** Tube through rings. Normals are smooth; winding is outward. */
@@ -137,13 +139,15 @@ export function sweep(rings: Ring[], o: SweepOpts): THREE.BufferGeometry {
   const cols = partial ? segs + 1 : segs;
   const pos: number[] = [];
   const u = o.u, v = o.v;
-  for (const r of rings) {
+  for (let ri = 0; ri < rings.length; ri++) {
+    const r = rings[ri]!;
     const n = r.n ?? 2, p = 2 / n;
     for (let j = 0; j < cols; j++) {
       const th = partial ? lerp(o.theta0!, o.theta1!, j / segs) : (j / segs) * Math.PI * 2;
       const s = Math.sin(th), c = Math.cos(th);
-      const ea = r.a * spow(s, p);
-      const eb = (c >= 0 ? r.b : (r.bb ?? r.b)) * spow(c, p);
+      const mm = o.mod ? o.mod(th, ri) : 1;
+      const ea = r.a * spow(s, p) * mm;
+      const eb = (c >= 0 ? r.b : (r.bb ?? r.b)) * spow(c, p) * mm;
       pos.push(r.c[0] + u[0] * ea + v[0] * eb, r.c[1] + u[1] * ea + v[1] * eb, r.c[2] + u[2] * ea + v[2] * eb);
     }
   }
@@ -286,4 +290,55 @@ export function roundBoxG(w: number, h: number, d: number, r: number, seg = 3): 
     g.computeVertexNormals();
     return g;
   });
+}
+
+// ---------------------------------------------------------------- path tube
+/**
+ * Tube along a smooth path through control points. prof(s) -> [a (side), b (up/normal)] half extents.
+ * `up(p, s)` gives the preferred "b" direction (e.g. head normal so locks lie flat on the head).
+ */
+export function pathTube(ctrl: V3[], prof: (s: number) => [number, number], segs: number, steps: number,
+  o: { up?: (p: V3, s: number) => V3; n?: number; caps?: boolean } = {}): THREE.BufferGeometry {
+  const curve = new THREE.CatmullRomCurve3(ctrl.map(p => new THREE.Vector3(...p)), false, 'centripetal');
+  const pts = curve.getSpacedPoints(steps);
+  const pos: number[] = [];
+  const T = new THREE.Vector3(), N = new THREE.Vector3(), B = new THREE.Vector3(), U = new THREE.Vector3();
+  let prevN: THREE.Vector3 | null = null;
+  const nexp = 2 / (o.n ?? 2);
+  for (let i = 0; i <= steps; i++) {
+    const s = i / steps;
+    const p = pts[i]!;
+    T.copy(pts[Math.min(steps, i + 1)]!).sub(pts[Math.max(0, i - 1)]!).normalize();
+    if (o.up) U.set(...o.up([p.x, p.y, p.z], s)); else if (prevN) U.copy(prevN); else U.set(0, 1, 0);
+    if (Math.abs(U.dot(T)) > 0.98) U.set(1, 0, 0);
+    B.crossVectors(T, U).normalize();
+    N.crossVectors(B, T).normalize();
+    prevN = N.clone();
+    const [a, b] = prof(s);
+    for (let j = 0; j < segs; j++) {
+      const th = (j / segs) * Math.PI * 2;
+      const sa = spow(Math.sin(th), nexp) * a, cb = spow(Math.cos(th), nexp) * b;
+      pos.push(p.x + B.x * sa + N.x * cb, p.y + B.y * sa + N.y * cb, p.z + B.z * sa + N.z * cb);
+    }
+  }
+  const idx: number[] = [];
+  for (let i = 0; i < steps; i++) for (let j = 0; j < segs; j++) {
+    const j1 = (j + 1) % segs;
+    const a = i * segs + j, b = i * segs + j1, c = (i + 1) * segs + j, d = (i + 1) * segs + j1;
+    idx.push(a, b, c, b, d, c);
+  }
+  if (o.caps !== false) {
+    const p0 = pts[0]!, p1 = pts[steps]!;
+    const t0 = pts[1]!.clone().sub(p0).normalize(), t1 = p1.clone().sub(pts[steps - 1]!).normalize();
+    const s0 = pos.length / 3; pos.push(p0.x - t0.x * 0.002, p0.y - t0.y * 0.002, p0.z - t0.z * 0.002);
+    for (let j = 0; j < segs; j++) idx.push(s0, (j + 1) % segs, j);
+    const s1 = pos.length / 3; pos.push(p1.x + t1.x * 0.002, p1.y + t1.y * 0.002, p1.z + t1.z * 0.002);
+    const last = steps * segs;
+    for (let j = 0; j < segs; j++) idx.push(last + j, last + (j + 1) % segs, s1);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return g;
 }

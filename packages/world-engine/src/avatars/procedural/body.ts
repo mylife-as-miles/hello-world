@@ -30,6 +30,7 @@ export interface TorsoShellOpts {
   theta0?: number; theta1?: number;
   /** squash depth factor */
   depthMul?: number;
+  mod?: (theta: number, ring: number) => number;
 }
 export function torsoRing(d: Dims, y: number, off: number, depthMul = 1): Ring {
   const [w, df, db, n, zc] = torsoAt(d, y);
@@ -48,7 +49,7 @@ export function torsoShell(d: Dims, lod: LodCfg, o: TorsoShellOpts): THREE.Buffe
   let startPole: V3 | null = null, endPole: V3 | null = null;
   if (o.capBottom) { const r0 = rings[0]!; startPole = [0, r0.c[1] - 0.025, r0.c[2]]; }
   if (o.capTop) { const r1 = rings[rings.length - 1]!; endPole = [0, r1.c[1] + 0.012, r1.c[2]]; }
-  return sweep(rings, { u: X, v: Z, segs: lod.torsoRadial, startPole, endPole, theta0: o.theta0, theta1: o.theta1 });
+  return sweep(rings, { u: X, v: Z, segs: lod.torsoRadial, startPole, endPole, theta0: o.theta0, theta1: o.theta1, mod: o.mod });
 }
 
 // ---------------------------------------------------------------- arms
@@ -59,6 +60,8 @@ export interface LimbOpts {
   ringCount?: number;
   /** multiply radius (puff sleeves etc.) */
   shape?: (t: number) => number;
+  theta0?: number; theta1?: number;
+  mod?: (theta: number, ring: number) => number;
 }
 export function armShell(d: Dims, lod: LodCfg, side: 1 | -1, o: LimbOpts): THREE.BufferGeometry {
   const count = Math.max(4, Math.round((o.ringCount ?? 16) * lod.rings));
@@ -93,7 +96,7 @@ export function armShell(d: Dims, lod: LodCfg, side: 1 | -1, o: LimbOpts): THREE
     rings.push({ c: cen(t), a: r * 0.94, b: r * 1.0 });
   }
   const endPole: V3 | null = o.capEnd ? cen(o.t1 + 0.012) : null;
-  return sweep(rings, { u: Y, v: Z, segs: lod.radial, startPole, endPole });
+  return sweep(rings, { u: Y, v: Z, segs: lod.radial, startPole, endPole, theta0: o.theta0, theta1: o.theta1, mod: o.mod });
 }
 
 // ---------------------------------------------------------------- legs
@@ -113,7 +116,7 @@ export function legShell(d: Dims, lod: LodCfg, side: 1 | -1, o: LimbOpts): THREE
   }
   const startPole: V3 | null = o.capStart ? cen(o.t0 - rad(o.t0) * 0.6) : null;
   const endPole: V3 | null = o.capEnd ? cen(o.t1 + 0.01) : null;
-  return sweep(rings, { u: X, v: Z, segs: lod.radial, startPole, endPole });
+  return sweep(rings, { u: X, v: Z, segs: lod.radial, startPole, endPole, theta0: o.theta0, theta1: o.theta1, mod: o.mod });
 }
 
 // ---------------------------------------------------------------- hands & feet
@@ -136,7 +139,7 @@ export function handGeometry(lod: LodCfg): Array<{ g: THREE.BufferGeometry; m: T
 }
 
 /** Foot sweep (foot-bone local; heel at -z, toes +z). Used for bare feet and shoe uppers. */
-export function footGeometry(d: Dims, lod: LodCfg, o: { grow?: number; heightMul?: number; toeRound?: number; lenMul?: number } = {}): THREE.BufferGeometry {
+export function footGeometry(d: Dims, lod: LodCfg, o: { grow?: number; heightMul?: number; toeRound?: number; lenMul?: number; z0?: number; z1?: number; flatBottom?: number } = {}): THREE.BufferGeometry {
   const gr = o.grow ?? 0, hm = o.heightMul ?? 1, L = d.footLen * (o.lenMul ?? 1);
   const W = d.footW / 2;
   const keys = [
@@ -150,14 +153,16 @@ export function footGeometry(d: Dims, lod: LodCfg, o: { grow?: number; heightMul
     [L - 0.055, W * 0.7, 0.017, 0.022, -0.054],
   ];
   const rings: Ring[] = [];
-  const n = lod.high ? 10 : 5;
+  const band = o.z0 !== undefined && o.z1 !== undefined;
+  const n = band ? 3 : lod.high ? 10 : 5;
   for (let i = 0; i <= n; i++) {
-    const z = lerp(keys[0]![0]!, keys[keys.length - 1]![0]!, i / n);
+    const z = band ? lerp(o.z0!, o.z1!, i / n) : lerp(keys[0]![0]!, keys[keys.length - 1]![0]!, i / n);
     const f = (c: number) => { let k = 0; while (k < keys.length - 2 && z > keys[k + 1]![0]!) k++; const a = keys[k]!, b = keys[k + 1]!; const t = smooth(a[0]!, b[0]!, z); return lerp(a[c]!, b[c]!, t); };
     const top = f(2) * hm + gr, bot = f(3) + gr * 0.5;
     rings.push({ c: [0, f(4) + (top - bot) * 0.5 * 0 + 0.0, z], a: f(1) + gr, b: top, bb: bot, n: 2.6 });
   }
   const first = rings[0]!, last = rings[rings.length - 1]!;
+  if (band) return sweep(rings, { u: X, v: Y, segs: lod.radial });
   return sweep(rings, { u: X, v: Y, segs: lod.radial, startPole: [0, first.c[1], first.c[2] - 0.012 - gr], endPole: [0, last.c[1] - 0.004, last.c[2] + 0.014 + gr] });
 }
 

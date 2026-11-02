@@ -509,8 +509,11 @@ export class AvatarAnimator {
     // Tilt thighs so shins can hang vertical with feet on the ground.
     const delta = Math.asin(clamp((hipSit - this.kneeH) / thigh, -0.45, 0.6));
     const flex = Math.PI / 2 - delta;
-    leg(p, 1, flex, 0.1, flex - 0.08, 0.08);
-    leg(p, -1, flex, 0.1, flex - 0.08, 0.08);
+    // Shin tilts forward just enough for the feet to reach the ground (low seats / ground).
+    const kneeY = hipSit - thigh * Math.sin(delta);
+    const shinFwd = Math.acos(clamp(kneeY / Math.max(0.1, this.kneeH), -1, 1)) + 0.06;
+    leg(p, 1, flex, 0.1, flex - shinFwd, 0.04 + shinFwd * 0.85);
+    leg(p, -1, flex, 0.1, flex - shinFwd, 0.04 + shinFwd * 0.85);
     A(p, 'leftUpperLeg', 0, -0.06, 0); A(p, 'rightUpperLeg', 0, 0.06, 0);
     hipsOff(p, 0, hipSit - this.hipH, -0.06 * k);
     if (!sleep) {
@@ -654,8 +657,8 @@ export class AvatarAnimator {
       }
       case 'clap': {
         const c = 0.5 + 0.5 * Math.sin(t * TAU * 3);
-        armBL(p, 1, -0.75, 1.0, 0, 0.95 + 0.15 * c, 1.45 + 0.15 * c, w);
-        armBL(p, -1, -0.75, 1.0, 0, 0.95 + 0.15 * c, 1.45 + 0.15 * c, w);
+        armBL(p, 1, -1.05, 1.05, 0, 1.05 + 0.18 * c, 1.7 + 0.2 * c, w);
+        armBL(p, -1, -1.05, 1.05, 0, 1.05 + 0.18 * c, 1.7 + 0.2 * c, w);
         BL(p, 'leftHand', 0, 0, 0.2, 0, w); BL(p, 'rightHand', 0, 0, -0.2, 0, w);
         A(p, 'head', -0.05 * w, 0, 0);
         break;

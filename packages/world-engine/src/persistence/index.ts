@@ -96,15 +96,17 @@ export async function createPersistentWorldRuntime(options: PersistentRuntimeOpt
   const onHide = () => { if (timer) { clearTimeout(timer); saveNow(); } };
   if (typeof window !== 'undefined') window.addEventListener('pagehide', onHide);
   saveNow();
+  const baseDispose = runtime.dispose.bind(runtime);
   return Object.assign(runtime, {
     storage,
     restored: Boolean(saved),
-    flush: async () => { if (timer) { clearTimeout(timer); saveNow(); } await pending; },
+    flush: async () => { if (timer) clearTimeout(timer); saveNow(); await pending; },
     dispose: () => {
       unsub();
       if (typeof window !== 'undefined') window.removeEventListener('pagehide', onHide);
-      if (timer) { clearTimeout(timer); saveNow(); }
-      runtime.dispose();
+      if (timer) clearTimeout(timer);
+      saveNow();
+      baseDispose();
     },
   });
 }

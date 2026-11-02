@@ -114,10 +114,16 @@ export class SceneStore {
     }
 
     if (!initial) {
+      // A remote adapter starts from an empty bootstrap snapshot; on (re)connect a
+      // full history arrives at once. Only react to events that are genuinely recent
+      // relative to the newest one; mark the rest as seen silently.
+      const unseen = snapshot.eventHistory.filter(e => !this.seenEvents.has(e.id));
+      const bulk = unseen.length > 12 || (this.previous !== null && this.previous.residents.length === 0 && this.previous.eventHistory.length === 0);
+      const newest = unseen.reduce((m, e) => Math.max(m, e.timestamp), 0);
       const fresh: FreshEvent[] = [];
-      for (const e of snapshot.eventHistory) {
-        if (this.seenEvents.has(e.id)) continue;
+      for (const e of unseen) {
         this.markSeen(e.id);
+        if (bulk && newest - e.timestamp > REPLAY_WINDOW_MS) continue;
         fresh.push({ event: e, receivedAt: t });
       }
       if (fresh.length) {

@@ -47,6 +47,21 @@ function eventId() {
     value.toString(16).padStart(2, "0"),
   ).join("");
 }
+function validatedTwitchAuthorizeUrl(value: string): string {
+  const target = new URL(value);
+  if (
+    target.protocol !== "https:" ||
+    target.hostname !== "id.twitch.tv" ||
+    target.pathname !== "/oauth2/authorize" ||
+    target.username ||
+    target.password ||
+    target.port ||
+    target.hash
+  )
+    throw new Error("Unexpected Twitch authorization destination.");
+  return target.href;
+}
+
 class HttpWorldConnection {
   private state: HttpWorldState = {
     snapshot: {
@@ -361,7 +376,7 @@ class HttpWorldConnection {
     if (!this.state.oauthConfigured) {
       this.patch({
         error:
-          "Live Twitch is unavailable on this hosted Demo Mode world. Use the Node server to connect Twitch.",
+          "Twitch is not configured for this world yet. Add the Twitch app credentials to the hosted server to enable connection.",
       });
       return;
     }
@@ -383,10 +398,7 @@ class HttpWorldConnection {
         throw new Error(
           result.error || "Twitch authorization could not start.",
         );
-      const target = new URL(result.authorizeUrl);
-      if (target.protocol !== "https:" || target.hostname !== "id.twitch.tv")
-        throw new Error("Unexpected Twitch authorization destination.");
-      window.location.assign(target.href);
+      window.location.assign(validatedTwitchAuthorizeUrl(result.authorizeUrl));
     } catch (error) {
       this.patch({
         error:

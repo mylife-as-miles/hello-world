@@ -2,7 +2,7 @@
 
 Repository: https://github.com/mylife-as-miles/hello-world
 
-Implementation started2026-11-02 19:15:37UTC. Core integrated source was verified before the original21:15:37UTC deadline. The user requested Sites hosting at21:07; a Cloudflare/D1 transport adapter and publication continue as the additional hosting step.
+Implementation started 2026-11-02 19:15:37 UTC. Core integrated source was verified before the original 21:15:37 UTC deadline. The user requested Sites hosting at 21:07; hosted deployment and the subsequent server-side Twitch request continued as additional work.
 
 Genuine environment-reported Codex session/thread ID: `01a19db0-26bd-7783-a872-516b88a37070`.
 
@@ -26,3 +26,12 @@ See [QA](QA.md), [release checks](RELEASE.md), [critique](CRITIQUE.md), [runtime
 No Twitch app credentials/authorization were available, so no live Twitch event reception is claimed. Browser-source rendering is verified; native OBS and hardware-GPU performance were not tested. Hosted CI was prevented from starting by GitHub's account billing lock. The complete corebrowserflow and finalfocusedHUDpass are separate recorded runs; a single complete final-HUDrun was interrupted by later deployment work.
 
 The Node implementation uses real WebSockets/local-disk persistence. The Sites adapter uses real shared D1 snapshots/HTTPpolling and request-time bounded simulation advancement; it does not claim simulation while the site is idle or live Twitch connectivity.
+
+## Hosted release
+
+The owner-private Site was successfully published on 2026-11-02 at 21:37 UTC:
+https://hello-world-miles-society.myles4miles.chatgpt.site
+
+The hosted adapter runs the same engine with a provisioned D1 database and HTTP polling. No local Node process is required. Server OAuth and webhook support use encrypted D1 token storage, owner-bound single-use state, app-token EventSub subscriptions, signature verification, durable delivery receipts, approval checks and rate limits. An API-only public relay preserves the private world audience. Twitch app ID/secret and a real broadcaster grant remain unavailable; Demo Mode is accurate.
+
+Hosted checks: all workspace TypeScript, 80 existing tests, 22 SQLite-backed shared-world assertions, 58 mocked-Twitch OAuth/webhook assertions and 31 relay security assertions pass. Native production D1 tables and protected API rejection were verified. These checks do not establish a live broadcaster grant, real Twitch delivery or a signed-in hosted browser acceptance pass. See [hosted Twitch setup](HOSTED_TWITCH.md) for exact callbacks.

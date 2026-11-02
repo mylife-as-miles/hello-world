@@ -2,6 +2,13 @@
  * DEMO_DIRECTOR must only be enabled behind the owner-private Sites access gate.
  * Simulation advances during active requests; no always-on or live Twitch claim.
  */
+import {
+  handleHostedTwitch,
+  hostedTwitchStatus,
+  maintainHostedTwitch,
+  twitchOwnerAllowed,
+  type HostedTwitchEnv,
+} from "./sites-twitch.js";
 import { createWorldRuntime } from "@hello-world/world-engine/runtime";
 import type {
   ClientMessage,
@@ -25,7 +32,7 @@ interface D1Statement {
 interface D1Database {
   prepare(query: string): D1Statement;
 }
-interface WorkerEnv {
+interface WorkerEnv extends HostedTwitchEnv {
   WORLD_DB: D1Database;
   ASSETS: { fetch(request: Request): Promise<Response> };
   DEMO_DIRECTOR?: string;
@@ -214,6 +221,7 @@ async function mutate(
   viewerId: string,
   director: boolean,
   message?: ClientMessage,
+  trusted?: { event: WorldEvent; system: boolean },
 ) {
   for (let attempt = 0; attempt < 3; attempt++) {
     const row = await getWorld(env);
@@ -291,21 +299,32 @@ async function mutate(
             director &&
             submitted.source === "demo" &&
             /^demo:[\w-]{1,40}$/.test(submitted.actorId);
-          const event = parseEvent({
-            ...submitted,
-            id: `browser:${crypto.randomUUID()}`,
-            timestamp: now,
-            source: director && submitted.source === "demo" ? "demo" : "viewer",
-            actorId: demoActor ? submitted.actorId : viewerId,
-            actorDisplayName:
-              demoActor || submitted.kind === "join"
-                ? cleanText(submitted.actorDisplayName)
-                : existing?.displayName || "Visitor",
-            text:
-              submitted.text === undefined
-                ? undefined
-                : cleanText(submitted.text),
-          });
+          const event = trusted
+            ? parseEvent(trusted.event)
+            : parseEvent({
+                ...submitted,
+                id: `browser:${crypto.randomUUID()}`,
+                timestamp: now,
+                source:
+                  director && submitted.source === "demo" ? "demo" : "viewer",
+                actorId: demoActor ? submitted.actorId : viewerId,
+                actorDisplayName:
+                  demoActor || submitted.kind === "join"
+                    ? cleanText(submitted.actorDisplayName)
+                    : existing?.displayName || "Visitor",
+                text:
+                  submitted.text === undefined
+                    ? undefined
+                    : cleanText(submitted.text),
+              });
+          if (trusted && trusted.event.source !== "twitch")
+            throw new ApiError("Untrusted adapter source.", 403);
+          if (
+            trusted &&
+            (data.snapshot.eventHistory.some((item) => item.id === event.id) ||
+              data.pending.some((item) => item.id === event.id))
+          )
+            return { row, data };
           const previous = data.limits[viewerId];
           const limit =
             previous && now - previous.window < 60000
@@ -375,18 +394,62 @@ async function mutate(
 export default {
   async fetch(request: Request, env: WorkerEnv): Promise<Response> {
     const url = new URL(request.url);
-    if (!url.pathname.startsWith("/api/")) return env.ASSETS.fetch(request);
+    if (!url.pathname.startsWith("/api/")) {
+      // Sites' asset host does not apply Vite's history fallback to deep links.
+      // Serve the same app entry while retaining the browser's selected route.
+      if (["/world", "/director", "/overlay"].includes(url.pathname.replace(/\/$/, ""))) {
+        const entry = new URL(request.url);
+        entry.pathname = "/index.html";
+        entry.search = "";
+        return env.ASSETS.fetch(new Request(entry, request));
+      }
+      return env.ASSETS.fetch(request);
+    }
     try {
       if (!env.WORLD_DB)
         throw new ApiError(
           "Hosted database binding WORLD_DB is unavailable.",
           503,
         );
-      if (url.pathname === "/api/twitch/connect")
-        throw new ApiError(
-          "Hosted Demo Mode has no Twitch OAuth/EventSub connection. Use the Node server for live Twitch.",
-          503,
+      if (url.pathname.startsWith("/api/twitch/")) {
+        const webhook = url.pathname === "/api/twitch/webhook";
+        const actor = webhook ? undefined : await siteIdentity(request);
+        if (actor)
+          await requestLimit(
+            env,
+            env.WORLD_ID || "hello-neighborhood",
+            actor,
+            Date.now(),
+          );
+        return handleHostedTwitch(
+          request,
+          env,
+          actor,
+          env.DEMO_DIRECTOR === "true",
+          {
+            getSnapshot: async () =>
+              parseSnapshot(JSON.parse((await getWorld(env)).snapshot_json)),
+            dispatch: async (event, system) => {
+              try {
+                await mutate(
+                  env,
+                  event.actorId,
+                  system,
+                  { type: "event", event },
+                  { event, system },
+                );
+              } catch (error) {
+                if (
+                  !(error instanceof ApiError) ||
+                  error.status >= 500 ||
+                  error.status === 409
+                )
+                  throw error;
+              }
+            },
+          },
         );
+      }
       const known = [
         "/api/status",
         "/api/snapshot",
@@ -423,7 +486,11 @@ export default {
           );
         }
       }
-      const director = env.DEMO_DIRECTOR === "true";
+      const director =
+        env.DEMO_DIRECTOR === "true" &&
+        (await twitchOwnerAllowed(env, viewerId));
+      if (director) await maintainHostedTwitch(env);
+      const twitchStatus = await hostedTwitchStatus(env);
       const { row, data } =
         url.pathname === "/api/status" || url.pathname === "/api/health"
           ? {
@@ -443,14 +510,14 @@ export default {
         .first<{ count: number }>();
       const status: Extract<ServerMessage, { type: "status" }> = {
         type: "status",
-        mode: "demo",
-        twitch: "Hosted Demo Mode · Twitch is not connected",
+        mode: twitchStatus.mode,
+        twitch: twitchStatus.twitch,
         clients: presence?.count || 0,
         settings: data.settings,
         pending: director ? data.pending : [],
         capabilities: {
           transport: "D1-backed HTTP polling",
-          twitch: "not configured on hosted demo",
+          ...twitchStatus.capabilities,
         },
       };
       const withSnapshot =
@@ -469,7 +536,7 @@ export default {
           viewerId: viewerId,
           authorized: director,
           directorLocalAllowed: director,
-          oauthConfigured: false,
+          oauthConfigured: director && twitchStatus.oauthConfigured,
           transport: "polling",
           revision: row.revision,
           ...(withSnapshot ? { snapshot: data.snapshot } : {}),

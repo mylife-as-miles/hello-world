@@ -63,7 +63,7 @@ const NAMEPLATE_WORLD_H = 0.26;
 const NAMEPLATE_MAX_VISIBLE = 8;
 /** quality 'low' draw-call budget: fewer labels, real shadows only for the nearest few (others get blob discs). */
 const NAMEPLATE_MAX_VISIBLE_LOW = 6;
-const SHADOW_CASTERS_LOW = 5;
+const SHADOW_CASTERS_LOW = 4;
 const BLOB_CAPACITY = 64;
 /** Raid visitors (ids `raid:<group>:<k>`) within this radius of their group centroid collapse into one chip. */
 const RAID_CLUSTER_RADIUS = 7;
@@ -193,6 +193,10 @@ pointer-events:none;user-select:none;animation:hw-bubble-in .32s cubic-bezier(.2
 .hw-bubble.hw-me{background:linear-gradient(180deg,#ffffff,#effffa);box-shadow:0 0 0 2.5px #5ef2c6,0 8px 26px rgba(10,20,30,.34)}
 .hw-bubble.hw-me::after{background:#effffa}
 .hw-bubble.hw-me .hw-name{color:#0d9a76}
+.hw-plates{position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:9}
+.hw-plate{position:absolute;left:0;top:0;transform:translate3d(-9999px,0,0);padding:2px 9px 3px;border-radius:999px;background:rgba(12,16,20,.86);border:1.5px solid rgba(255,255,255,.28);color:#fff;font:650 12.5px/1.25 ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;white-space:nowrap;max-width:240px;overflow:hidden;text-overflow:ellipsis;will-change:transform;user-select:none}
+.hw-plate.hw-me{border-color:rgba(94,242,198,.85)}
+.hw-plate.hw-chip{border-color:rgba(195,155,255,.85)}
 @keyframes hw-bubble-in{from{opacity:0;transform:translateX(var(--dx)) translateY(-92%) scale(calc(var(--s) * .85))}to{opacity:1;transform:translateX(var(--dx)) translateY(-100%) scale(var(--s))}}
 `;
   document.head.appendChild(s);
@@ -265,6 +269,9 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
   const pending = useMemo(() => new Map<string, Array<(h: ResidentHandle) => void>>(), []);
   const hub = useMemo(() => new BubbleHub(), []);
   const lodBus = useMemo(() => new LodBus(), []);
+  const camera = useThree(s => s.camera);
+  const gl = useThree(s => s.gl);
+  const scene = useThree(s => s.scene);
   // quality 'low': instanced emotes (≤ 1 draw call per visible kind) instead of one sprite per particle.
   const emotes = useMemo<EmotePool>(() => (quality === 'low' ? new InstancedEmoteSystem(12) : new EmoteSystem(80)), [quality]);
   // quality 'low': soft blob discs (1 instanced draw) under residents without real shadows.
@@ -280,14 +287,25 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
     return { mesh, geo, mat, tex };
   }, [quality]);
   useEffect(() => () => { if (blob) { blob.geo.dispose(); blob.mat.dispose(); blob.tex.dispose(); blob.mesh.dispose(); } }, [blob]);
+  // quality 'low': the (≤ NAMEPLATE_MAX_VISIBLE_LOW) decluttered labels are pooled DOM pills (0 draw calls).
+  const domPlates = useMemo(() => {
+    if (quality !== 'low' || typeof document === 'undefined') return null;
+    const root = document.createElement('div');
+    root.className = 'hw-plates';
+    const els = Array.from({ length: NAMEPLATE_MAX_VISIBLE_LOW + 2 }, () => { const d = document.createElement('div'); d.className = 'hw-plate'; d.style.display = 'none'; root.appendChild(d); return d; });
+    return { root, els, keys: els.map(() => ''), assigned: [] as Array<{ h: ResidentHandle | null; chip: RaidChip | null }> };
+  }, [quality]);
+  useEffect(() => {
+    if (!domPlates) return;
+    const parent = gl.domElement.parentElement;
+    parent?.appendChild(domPlates.root);
+    return () => { domPlates.root.remove(); };
+  }, [domPlates, gl]);
   const gifts = useMemo(() => new GiftSystem(6), []);
   useEffect(() => () => emotes.dispose(), [emotes]);
   useEffect(() => () => gifts.dispose(), [gifts]);
   useEffect(() => { ensureStyles(); }, []);
 
-  const camera = useThree(s => s.camera);
-  const gl = useThree(s => s.gl);
-  const scene = useThree(s => s.scene);
   const clock = useRef({ now: 0, lodTimer: 0, bubbleTimer: 0, plateTimer: 0, bubbleCount: 0 });
   const pendingGifts = useMemo(() => [] as Array<{ actor: string; target: string; until: number }>, []);
   /** Recently flown gift arcs (giver→receiver) so a late 'thanks' after a fallback doesn't fly twice. */
@@ -524,6 +542,7 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
     }
     plateCands.sort((a, b) => a.score - b.score);
     let shownPlates = 0;
+    if (domPlates) domPlates.assigned.length = 0;
     const nb = clock.current.bubbleCount;
     for (const cnd of plateCands) {
       const l = cnd.x - cnd.w / 2 - 2, r = cnd.x + cnd.w / 2 + 2, t = cnd.y - cnd.hh / 2 - 1, b = cnd.y + cnd.hh / 2 + 1;
@@ -537,6 +556,7 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
         if (r > plateRects[o]! && l < plateRects[o + 1]! && b > plateRects[o + 2]! && t < plateRects[o + 3]!) ok = false;
       }
       if (cnd.h) cnd.h.plateAllowed = ok; else if (cnd.chip) cnd.chip.allowed = ok;
+      if (ok && domPlates && domPlates.assigned.length < domPlates.els.length) domPlates.assigned.push({ h: cnd.h, chip: cnd.chip });
       if (ok && shownPlates < 16) { const o = shownPlates * 4; plateRects[o] = l; plateRects[o + 1] = r; plateRects[o + 2] = t; plateRects[o + 3] = b; }
       if (ok) shownPlates++;
     }
@@ -642,7 +662,7 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
 
     // Raid chips follow their group; keep their on-screen size readable.
     for (const chip of raidChips) {
-      chip.sprite.visible = chip.active && chip.allowed;
+      chip.sprite.visible = !domPlates && chip.active && chip.allowed;
       if (!chip.active) continue;
       const pxPerM = frameCacheLayer(state, camera) / Math.max(1, chip.pos.distanceTo(camera.position));
       chip.px = Math.min(NAMEPLATE_MAX_PX, Math.max(NAMEPLATE_MIN_PX, NAMEPLATE_WORLD_H * pxPerM));
@@ -656,6 +676,26 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
       c.plateTimer = 0.1;
       updateRaidGroups();
       declutterPlates();
+    }
+    if (domPlates) {
+      const W = state.size.width, H = state.size.height;
+      for (let i = 0; i < domPlates.els.length; i++) {
+        const el = domPlates.els[i]!;
+        const a = domPlates.assigned[i];
+        if (!a) { if (el.style.display !== 'none') el.style.display = 'none'; domPlates.keys[i] = ''; continue; }
+        const h = a.h, chip = a.chip;
+        if (h) _v.set(h.pos.x, h.pos.y + h.plateY, h.pos.z); else if (chip) _v.copy(chip.pos);
+        _v.project(camera);
+        if (_v.z > 1) { el.style.display = 'none'; continue; }
+        const key = h ? `r:${h.id}` : `c:${chip?.text ?? ''}`;
+        if (domPlates.keys[i] !== key) {
+          domPlates.keys[i] = key;
+          el.textContent = h ? (store.getResident(h.id)?.displayName ?? '') : chip?.text ?? '';
+          el.className = `hw-plate${h && h.id === viewerResidentId ? ' hw-me' : ''}${chip ? ' hw-chip' : ''}`;
+        }
+        el.style.display = '';
+        el.style.transform = `translate3d(${(((_v.x + 1) / 2) * W).toFixed(1)}px,${(((1 - _v.y) / 2) * H).toFixed(1)}px,0) translate(-50%,-50%)`;
+      }
     }
 
     hub.tick(c.now);
@@ -741,7 +781,7 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
 
   return <group name="residents-layer">
     {structure.map(s => <Resident key={s.id} id={s.id} displayName={s.displayName} appearance={s.resident.appearance}
-      store={store} registry={registry} pending={pending} hub={hub} lodBus={lodBus} emotes={emotes} overlayRef={overlayRef}
+      store={store} registry={registry} pending={pending} hub={hub} lodBus={lodBus} emotes={emotes} overlayRef={overlayRef} domPlates={!!domPlates}
       isViewer={s.id === viewerResidentId} onSelect={onResidentSelect} />)}
     <primitive object={emotes.group} />
     {blob && <primitive object={blob.mesh} />}
@@ -768,6 +808,8 @@ interface ResidentProps {
   lodBus: LodBus;
   emotes: EmotePool;
   overlayRef: { readonly current: boolean };
+  /** quality 'low': labels are DOM pills drawn by the layer; the sprite stays hidden. */
+  domPlates: boolean;
   isViewer: boolean;
   onSelect?: (id: string) => void;
 }
@@ -936,7 +978,7 @@ const Resident = memo(function Resident(p: ResidentProps) {
     if (plateS) {
       const fade = 1 - Math.min(1, Math.max(0, (camDist - NAMEPLATE_SOLID) / (NAMEPLATE_FAR - NAMEPLATE_SOLID)));
       handle.plateCand = fade > 0.02 && handle.visible && !hub.shown.has(id) && !handle.raidCollapsed;
-      plateS.visible = handle.plateCand && handle.plateAllowed;
+      plateS.visible = !p.domPlates && handle.plateCand && handle.plateAllowed;
       plateMat.opacity = fade;
       // Readable in wide shots: clamp the on-screen pill height, keep depth cue in between.
       const pxPerM = frameCache.pxk / Math.max(1, camDist);

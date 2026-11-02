@@ -67,6 +67,8 @@ function blocked(ax: number, ay: number, az: number, bx: number, by: number, bz:
     let t0 = 0, t1 = 1;
     if (o.kind === 'box') {
       const lax = (ax - o.x) * o.c - (az - o.z) * o.s, laz = (ax - o.x) * o.s + (az - o.z) * o.c;
+      // camera keeps ~2 m clear of walls (no wall filling a quarter of the frame)
+      if (ay < o.h + 0.8 && Math.abs(lax) < o.hw + 2.0 && Math.abs(laz) < o.hd + 2.0) return true;
       const lbx = (bx - o.x) * o.c - (bz - o.z) * o.s, lbz = (bx - o.x) * o.s + (bz - o.z) * o.c;
       const dx = lbx - lax, dz = lbz - laz;
       // slab X
@@ -86,6 +88,8 @@ function blocked(ax: number, ay: number, az: number, bx: number, by: number, bz:
         if (t0 > t1) continue;
       }
     } else {
+      // camera keeps ~2 m clear of the fountain / stage footprint when below their top
+      if (ay < o.h + 0.6 && Math.hypot(ax - o.x, az - o.z) < o.r + 2.0) return true;
       const dx = bx - ax, dz = bz - az;
       const fx = ax - o.x, fz = az - o.z;
       const A = dx * dx + dz * dz, B = 2 * (fx * dx + fz * dz), C = fx * fx + fz * fz - o.r * o.r;

@@ -358,6 +358,12 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
   useEffect(() => () => emotes.dispose(), [emotes]);
   useEffect(() => () => gifts.dispose(), [gifts]);
   useEffect(() => { ensureStyles(); }, []);
+  useEffect(() => {
+    // QA only (?hwdebug): expose bubble layout state for automated checks.
+    if (typeof location === 'undefined' || !location.search.includes('hwdebug')) return;
+    (window as unknown as { __hwHub?: BubbleHub }).__hwHub = hub;
+    return () => { delete (window as unknown as { __hwHub?: BubbleHub }).__hwHub; };
+  }, [hub]);
 
   const clock = useRef({ now: 0, lodTimer: 0, bubbleTimer: 0, plateTimer: 0, bubbleCount: 0, rectAt: -1, crL: 0, crT: 0, W: 1, H: 1, hasInsp: false, insL: 0, insR: 0, insT: 0, insB: 0 });
   /** Registered residents as an array (allocation-free per-frame iteration). */
@@ -453,6 +459,16 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
           });
           break;
         case 'chat':
+          // Spoken distress line (no target): small matching emote alongside the bubble.
+          if (!target && e.payload?.sentiment === 'negative' && (e.payload.reaction === 'tired' || e.payload.reaction === 'lonely' || e.payload.reaction === 'bored')) {
+            const reaction = e.payload.reaction;
+            withHandle(actor, h => {
+              if (!takeDistress(distress)) return;
+              const es = emScale(h);
+              if (reaction === 'tired') emotes.spawn('zzz', h.pos.x + 0.08, h.pos.y + h.height + 0.12, h.pos.z, 1, 0.05, 0.55 * es);
+              else emotes.spawn(reaction === 'lonely' ? 'sad' : 'dots', h.pos.x, h.pos.y + h.height + 0.2, h.pos.z, 1, 0.05, es);
+            });
+          }
           if (e.payload?.reaction === 'thanks' && target) {
             // Hand-over on arrival: giver (= target) → recipient (= actor).
             const idx = pendingGifts.findIndex(gp => gp.actor === target && gp.target === actor);
@@ -992,7 +1008,7 @@ const Resident = memo(function Resident(p: ResidentProps) {
     target: new THREE.Vector3(), lastTarget: new THREE.Vector3(), hasTarget: false, estSpeed: 0, visSpeed: 0,
     lastActivity: '', family: 'idle' as AnimationFamily, seat: null as null | { x: number; z: number; facing: number },
     sitting: false, frameSkip: 0, accDt: 0, emoteTimer: 1 + Math.random() * 2, snapAt: 0,
-    distress: null as null | 'sulk' | 'nap' | 'bored',
+    distress: null as null | 'sulk' | 'nap' | 'bored' | 'lonely',
   });
 
   useEffect(() => {
@@ -1063,9 +1079,11 @@ const Resident = memo(function Resident(p: ResidentProps) {
         s.lastActivity = r.activity;
         s.family = animationForVerb(parseActivityVerb(r.activity));
         const act = r.activity.toLowerCase();
+        // Distress is keyed on phrase text (sim verbs vary: sitting/watching/playing/resting...).
         s.distress = /^\s*sulking\b/.test(act) ? 'sulk'
-          : /\b(nap|naps|yawn|yawning|sleepy|drowsy|tired)\b/.test(act) ? 'nap'
-            : /(looking for fun|\bbored\b|nothing to do)/.test(act) ? 'bored' : null;
+          : /(about a nap|\b(nap|naps|yawn|yawning|sleepy|drowsy|tired)\b)/.test(act) ? 'nap'
+            : /(\balone\b|the crowd)/.test(act) ? 'lonely'
+              : /(looking for fun|something fun|\bbored\b|nothing to do)/.test(act) ? 'bored' : null;
         s.seat = null;
         if (s.family === 'sit' || s.family === 'sleep') {
           const found = findSeatNear(tx, tz, 1.2);
@@ -1190,6 +1208,7 @@ const Resident = memo(function Resident(p: ResidentProps) {
         if (takeDistress(p.distress)) {
           if (s.distress === 'sulk') emotes.spawn('cloud', pos.x, pos.y + handle.height + 0.22, pos.z, 1, 0.08, es);
           else if (s.distress === 'nap') emotes.spawn('zzz', pos.x + 0.08, pos.y + handle.height + 0.12, pos.z, 1, 0.05, 0.55 * es);
+          else if (s.distress === 'lonely') emotes.spawn('sad', pos.x, pos.y + handle.height + 0.22, pos.z, 1, 0.05, es);
           else emotes.spawn('dots', pos.x, pos.y + handle.height + 0.22, pos.z, 1, 0.05, es);
         }
         s.emoteTimer = 6 + Math.random() * 2.5;

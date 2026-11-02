@@ -136,6 +136,9 @@ function bakeColors(geos: Map<string, THREE.BufferGeometry>, a: AvatarAppearance
   return merged;
 }
 
+/** Local-space culling bounds covering every pose of a Townie (feet at y=0, height <= ~2.1 m with arms up). */
+const TOWNIE_POSE_BOUNDS = new THREE.Sphere(new THREE.Vector3(0, 1.0, 0), 1.5);
+
 /** Shared vertex-coloured material key for every low-detail resident. */
 const LOW_MATERIAL = '#ffffff|cloth';
 
@@ -226,6 +229,11 @@ export function createTownieRig(a: AvatarAppearance, opts: TownieOptions = {}): 
     m.castShadow = true; m.receiveShadow = false;
     root.add(m);
     m.bind(skeleton, identity);
+    // Fixed, generous local bounds (any pose incl. raised arms / sitting). three.js computes a
+    // SkinnedMesh's sphere lazily ONCE from current bone matrices; if that happens before the
+    // moving root's matrixWorld is refreshed the sphere is offset and the body gets culled while
+    // its label stays visible. Fixed bounds keep frustum culling valid (same as realistic rigs).
+    m.boundingSphere = TOWNIE_POSE_BOUNDS.clone();
   }
 
   // --- head

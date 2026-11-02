@@ -4,6 +4,20 @@ Branch `claude/world-engine` · package `packages/world-engine` (`@hello-world/w
 All results below were produced in the build container (4 vCPU, no GPU; Chromium + SwiftShader software WebGL).
 Frame rates from SwiftShader are **not** representative of real GPUs and are not claimed as performance numbers.
 
+## 0. Final handoff commit
+
+**`b67ad69`**: all specialist passes complete, working tree clean. Verified in an isolated worktree, so in-flight edits are excluded:
+- `tsc --noEmit -p .`: 0 errors
+- `vitest run`: **50/50 passed across 9 files**
+- `vite build`: OK
+
+Additions since the first handoff `dc28c56`:
+- **Camera and events:** event cuts in every broadcast camera, an always-on event banner (raid count-up, join, gift, confetti; also shown in OBS overlay), an establishing shot, and a street camera aimed at residents.
+- **World:** the super-terrain-derived landscape, generated forest and downtown skyline are mounted.
+- **Avatars and creator:** 8 photoreal/realistic bodies, with a fixed-look card for them in the creator.
+- **Simulation:** dialogue variety with a 3-minute no-repeat rule, need and friendship balance, and evening tiredness.
+- **Interactions:** minimum on-screen sizes for bubbles and nameplates, local cheering, and overlay seating.
+
 ## 1. Verification commands and results
 
 | Check | Command | Result |

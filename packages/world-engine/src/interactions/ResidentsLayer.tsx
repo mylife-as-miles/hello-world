@@ -420,7 +420,8 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
               const o = k * 4;
               const ox = Math.min(rt, shownRects[o + 1]!) - Math.max(l, shownRects[o]!);
               const oy = Math.min(bt, shownRects[o + 3]!) - Math.max(t, shownRects[o + 2]!);
-              if (ox > 0 && oy > 0 && ox * oy > 0.35 * w * hh) show = false;
+              // Any real overlap hides the lower-ranked bubble (text must never be covered).
+              if (ox > 6 && oy > 4) show = false;
             }
             if (show && shown < 16) { const o = shown * 4; shownRects[o] = l; shownRects[o + 1] = rt; shownRects[o + 2] = t; shownRects[o + 3] = bt; }
           }

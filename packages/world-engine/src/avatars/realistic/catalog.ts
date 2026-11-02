@@ -27,9 +27,10 @@ export interface AppearanceSupport {
 }
 
 /** body = height only (uniform scale); outfit.color recolours the top garment (mh-* only, see realisticSupportFor);
- *  skin/hair/face/pieces are baked into the scans. */
+ *  accessories = head pieces only (beanie, cap, crown, headphones), fitted to the scan's head; skin/hair/face/outfit
+ *  pieces are baked into the scans. */
 export const REALISTIC_SUPPORT: AppearanceSupport = {
-  skinTone: false, hair: false, outfitColor: true, outfitPieces: false, face: false, body: true, accessories: false,
+  skinTone: false, hair: false, outfitColor: true, outfitPieces: false, face: false, body: true, accessories: true,
 };
 
 /** Per-base support: Rocketbox bodies have no garment segmentation, so outfit colour does not apply to them. */

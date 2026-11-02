@@ -31,7 +31,13 @@ const weather = params.get('weather') ?? 'sunny';
 const flat = params.get('flat') === '1';
 
 const noDistrict = params.get('nodistrict') === '1';
-const integrated = view === 'town' || view === 'townfar';
+const integrated = view === 'town' || view === 'townfar' || view === 'cine' || view === 'street';
+const cineI = Number(params.get('i') ?? 3);
+// Copied from CameraRig CINE_POS / CINE_LOOK (read-only reference).
+const CINE_POS: Array<[number, number, number]> = [[15, 8.5, 17], [6, 5.5, -1], [10.5, 6, -12], [5, 6, -14.5], [-6, 6.5, -10.5], [-12.5, 5.5, -2.5], [-10.5, 5.5, 8], [-3, 5, 10], [3.5, 6.5, 2.5]];
+const CINE_LOOK: Array<[number, number, number]> = [[1, 1, 0], [13, 1.6, -7], [19, 1.8, -18], [0, 2.6, -24], [-15, 0.8, -19], [-20, 1, -9], [-20, 2, 3], [-7, 0.6, 19], [7.5, 1.4, 7]];
+/** District quality in the integrated view (e.g. ?view=town&q=low&dq=high: fast town, full district). */
+const districtQ = (params.get('dq') ?? quality) === 'low' ? 'low' : 'high';
 
 const fakeStore = {
   current: { simulationTime: simTime, weather, residents: [], eventHistory: [], relationships: [] },
@@ -103,8 +109,9 @@ function TownCamera() {
   const camera = useThree(s => s.camera);
   useMemo(() => {
     const pos = new THREE.Vector3(), look = new THREE.Vector3();
-    poseFor('neighborhood', 0, pos, look);
+    poseFor(view === 'street' ? 'street' : 'neighborhood', 0, pos, look);
     if (view === 'townfar') { pos.set(-8, 34, 62); look.set(2, 6, -20); }
+    if (view === 'cine') { const i = Math.abs(cineI) % CINE_POS.length; pos.set(...CINE_POS[i]!); look.set(...CINE_LOOK[i]!); }
     camera.position.copy(pos); camera.lookAt(look); camera.updateProjectionMatrix();
   }, [camera]);
   return null;
@@ -122,7 +129,7 @@ function IntegratedContent() {
       <Town quality={quality} />
       <Fountain />
       <Portal quality={quality} />
-      {!noDistrict && <DowntownDistrict quality={quality} heightAt={flat ? undefined : groundHeight} />}
+      {!noDistrict && <DowntownDistrict quality={districtQ} heightAt={flat ? undefined : groundHeight} />}
       {quality === 'high' && <PostFX />}
       <Stats />
     </>
@@ -142,7 +149,7 @@ function IntegratedApp() {
         </KitContext.Provider>
       </Canvas>
       <div className="hud">
-        <a href="?view=town">town day</a><a href="?view=town&night=1">town night</a><a href="?view=town&t=680">town dusk</a><a href="?view=townfar">town far</a><a href="?view=townfar&night=1">far night</a><a href="?">lab</a>
+        <a href="?view=town">town day</a><a href="?view=town&night=1">town night</a><a href="?view=town&t=680">town dusk</a><a href="?view=townfar">town far</a><a href="?view=townfar&night=1">far night</a><a href="?view=cine&i=3">cine portal</a><a href="?view=cine&i=2">cine arcade</a><a href="?view=street">street</a><a href="?">lab</a>
         <span id="stats" />
       </div>
     </SceneStoreContext.Provider>

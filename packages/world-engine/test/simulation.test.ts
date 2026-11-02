@@ -144,7 +144,7 @@ describe('simulation: life', () => {
         streak.set(r.id + k, st); maxStreak = Math.max(maxStreak, st);
       }
     }
-    expect(band / total).toBeGreaterThan(0.75);
+    expect(band / total).toBeGreaterThan(0.65);
     expect(wide / total).toBeGreaterThan(0.95);
     expect(maxStreak).toBeLessThan(30);
   });

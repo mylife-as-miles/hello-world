@@ -15,6 +15,8 @@ import { dist, emit, type Agent, type World } from './state';
 const TRAVEL_COST = { energy: -0.03, social: 0, fun: 0 };
 
 export function updateAgent(w: World, a: Agent, dt: number, clock: WorldClock): void {
+  // Raid visitors leave promptly when their stay is over (unless a viewer event is playing out).
+  if (a.visitor && !a.leaving && w.simTime >= a.leaveAt && !(a.action && a.action.priority >= 2)) { beginLeaving(w, a); return; }
   const act = a.action;
   if (!act) { decide(w, a, clock); return; }
   if (act.phase === 'travel') {
@@ -127,6 +129,6 @@ export function beginLeaving(w: World, a: Agent): void {
   }
   const spot = portalSpot(w, a);
   goThen(w, a, spot, 'leaving through the portal', 'leaving through the portal', 0.6, {
-    priority: 3, type: 'leave', poiId: 'portal', onDone: (w2, ag) => removeAgent(w2, ag.id),
+    priority: 3, type: 'leave', poiId: 'portal', run: dist(a, spot) > 15, onDone: (w2, ag) => removeAgent(w2, ag.id),
   });
 }

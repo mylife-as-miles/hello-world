@@ -88,24 +88,40 @@ function loadTreeAssets(): Promise<TreeAssets> {
   return assetsPromise;
 }
 
-/** Sway grows with height² so trunks stay planted; phase varies per instance position. */
-function addWind(material: THREE.Material, time: { value: number }, amplitude: number, key: string) {
+/**
+ * Shader tweaks via onBeforeCompile:
+ *  - wind: sway grows with height² so trunks stay planted; phase varies per instance position.
+ *  - keepNormals: double-sided cards keep their authored (outward / upward) normal on the back
+ *    face instead of flipping it, so crowns and impostors shade softly from every side.
+ */
+function patchTreeMaterial(material: THREE.Material, key: string, opts: { time?: { value: number }; wind?: number; keepNormals?: boolean }) {
   material.onBeforeCompile = (shader) => {
-    shader.uniforms.uTreeWind = time;
-    shader.vertexShader = 'uniform float uTreeWind;\n' + shader.vertexShader.replace(
-      '#include <begin_vertex>',
-      `#include <begin_vertex>
-      #ifdef USE_INSTANCING
-        vec2 tOrigin = vec2(instanceMatrix[3][0], instanceMatrix[3][2]);
-      #else
-        vec2 tOrigin = vec2(0.0);
-      #endif
-      float tH = max(position.y, 0.0);
-      float tPh = uTreeWind * 1.2 + dot(tOrigin, vec2(0.37, 0.23));
-      float tBend = ${amplitude.toFixed(4)} * tH * tH;
-      transformed.x += (sin(tPh) + 0.35 * sin(tPh * 2.7 + position.z * 1.7)) * tBend;
-      transformed.z += (0.7 * cos(tPh * 0.83) + 0.3 * sin(tPh * 3.1 + position.x * 1.9)) * tBend;`,
-    );
+    if (opts.time && opts.wind) {
+      shader.uniforms.uTreeWind = opts.time;
+      shader.vertexShader = 'uniform float uTreeWind;\n' + shader.vertexShader.replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+        #ifdef USE_INSTANCING
+          vec2 tOrigin = vec2(instanceMatrix[3][0], instanceMatrix[3][2]);
+        #else
+          vec2 tOrigin = vec2(0.0);
+        #endif
+        float tH = max(position.y, 0.0);
+        float tPh = uTreeWind * 1.2 + dot(tOrigin, vec2(0.37, 0.23));
+        float tBend = ${opts.wind.toFixed(4)} * tH * tH;
+        transformed.x += (sin(tPh) + 0.35 * sin(tPh * 2.7 + position.z * 1.7)) * tBend;
+        transformed.z += (0.7 * cos(tPh * 0.83) + 0.3 * sin(tPh * 3.1 + position.x * 1.9)) * tBend;`,
+      );
+    }
+    if (opts.keepNormals) {
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <normal_fragment_begin>',
+        `#include <normal_fragment_begin>
+        #if defined( DOUBLE_SIDED ) && ! defined( FLAT_SHADED )
+          normal = normalize( vNormal );
+        #endif`,
+      );
+    }
   };
   material.customProgramCacheKey = () => key;
 }
@@ -190,7 +206,8 @@ function makeBlobTexture(): THREE.DataTexture {
     const r = Math.min(1, Math.hypot(dx, dy));
     const a = Math.pow(1 - r, 1.6);
     const o = (y * size + x) * 4;
-    data[o] = 255; data[o + 1] = 255; data[o + 2] = 255; data[o + 3] = Math.round(a * 255);
+    const g = Math.round(a * 255); // alphaMap samples the green channel
+    data[o] = g; data[o + 1] = g; data[o + 2] = g; data[o + 3] = 255;
   }
   const tex = new THREE.DataTexture(data, size, size);
   tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearFilter;
@@ -229,7 +246,11 @@ function buildForest(assets: TreeAssets, impostors: Impostors, placements: Reado
   const up = new THREE.Vector3(0, 1, 0);
   const tint = new THREE.Color();
 
-  const farMaterial = new THREE.MeshStandardMaterial({ map: impostors.target.texture, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.9, metalness: 0 });
+  const farMaterial = new THREE.MeshStandardMaterial({
+    map: impostors.target.texture, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.9, metalness: 0,
+    emissiveMap: impostors.target.texture, emissive: new THREE.Color('#ffffff'), emissiveIntensity: 0.14,
+  });
+  patchTreeMaterial(farMaterial, 'tree-impostor', { keepNormals: true });
   disposables.push(farMaterial);
 
   const batches: VariantBatch[] = [];
@@ -243,8 +264,8 @@ function buildForest(assets: TreeAssets, impostors: Impostors, placements: Reado
       // a little self-lit albedo reads as soft translucency and keeps crowns pastel in shade
       emissiveMap: assets.atlas, emissive: new THREE.Color('#ffffff'), emissiveIntensity: 0.18,
     });
-    addWind(bark, wind, 0.0012, 'tree-wind-bark');
-    addWind(leaf, wind, 0.0034, 'tree-wind-leaf');
+    patchTreeMaterial(bark, 'tree-bark', { time: wind, wind: 0.0012 });
+    patchTreeMaterial(leaf, 'tree-leaf', { time: wind, wind: 0.0034, keepNormals: true });
     disposables.push(bark, leaf);
 
     const count = list.length;
@@ -288,13 +309,13 @@ function buildForest(assets: TreeAssets, impostors: Impostors, placements: Reado
     const all = byVariant.flatMap((list, v) => list.map((p) => ({ p, v })));
     if (all.length > 0) {
       const tex = makeBlobTexture();
-      const mat = new THREE.MeshBasicMaterial({ color: '#2f4a2a', alphaMap: tex, transparent: true, opacity: 0.38, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+      const mat = new THREE.MeshBasicMaterial({ color: '#2f4a2a', alphaMap: tex, transparent: true, opacity: 0.3, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
       const plane = new THREE.PlaneGeometry(2, 2).rotateX(-Math.PI / 2);
       const blobs = new THREE.InstancedMesh(plane, mat, all.length);
       blobs.name = 'tree-blob-shadows';
       all.forEach(({ p, v }, i) => {
         const s = (p.scale > 0 ? p.scale : 1) * BLOB_RADIUS[v]!;
-        pos.set(p.x + 0.35 * s, (p.y ?? 0) + 0.04, p.z + 0.2 * s);
+        pos.set(p.x, (p.y ?? 0) + 0.04, p.z);
         quat.identity();
         scl.set(s, 1, s * 0.9);
         blobs.setMatrixAt(i, matrix.compose(pos, quat, scl));

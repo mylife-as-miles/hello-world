@@ -11,7 +11,7 @@ import type { AvatarLod, HumanBoneName, HumanoidRig } from './rig';
 import { HUMAN_BONES } from './rig';
 import { BASE_MODELS, normalizeAppearance } from './catalog';
 import { createTownieRig } from './procedural/townie';
-import { REALISTIC_SUPPORT, isRealisticBase, type AppearanceSupport } from './realistic/catalog';
+import { isRealisticBase, realisticSupportFor, type AppearanceSupport } from './realistic/catalog';
 
 export type { AppearanceSupport } from './realistic/catalog';
 export { isRealisticBase } from './realistic/catalog';
@@ -79,7 +79,7 @@ export async function loadAvatarRig(appearance: AvatarAppearance, opts: AvatarRi
 
 /** Which appearance fields visibly apply to a base model (creator greys out the rest). */
 export function getAppearanceSupport(baseModelId: string): AppearanceSupport {
-  if (isRealisticBase(baseModelId)) return { ...REALISTIC_SUPPORT };
+  if (isRealisticBase(baseModelId)) return { ...realisticSupportFor(baseModelId) };
   if (isVrmBase(baseModelId)) return { skinTone: false, hair: false, outfitColor: false, outfitPieces: false, face: false, body: true, accessories: true };
   return { skinTone: true, hair: true, outfitColor: true, outfitPieces: true, face: true, body: true, accessories: true };
 }
@@ -92,7 +92,9 @@ function appearanceKey(a: AvatarAppearance): string {
 }
 
 /** React hook: returns a rig for the appearance, swapping + disposing when it changes. */
-export function useAvatarRig(appearance: AvatarAppearance, lod: AvatarLod = 'high'): HumanoidRig | null {
+export function useAvatarRig(appearance: AvatarAppearance, lodIn: AvatarLod = 'high'): HumanoidRig | null {
+  // VRM guest skins have a single LOD: don't re-parse the file when the renderer flips high/low.
+  const lod: AvatarLod = isVrmBase(normalizeAppearance(appearance).baseModelId) ? 'high' : lodIn;
   const key = appearanceKey(appearance) + '|' + lod;
   const vrm = isAsyncBase(normalizeAppearance(appearance).baseModelId);
   // Instant procedural rig (also used as a placeholder while a VRM loads).

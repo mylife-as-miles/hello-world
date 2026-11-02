@@ -5,7 +5,7 @@
  */
 import * as THREE from 'three';
 import { BI, armR, armWeights, legDX, legR, legWeights, torsoAt, torsoS, torsoWeights, type Dims } from './dims';
-import { GeoBuilder, capsuleG, lerp, roundBoxG, smooth, sweep, trs, type Ring, type SkinW, type V3 } from './geom';
+import { GeoBuilder, capsuleG, lerp, roundBoxG, smooth, sphereG, sweep, trs, type Ring, type SkinW, type V3 } from './geom';
 
 export interface LodCfg { radial: number; torsoRadial: number; rings: number; high: boolean }
 export const LOD_HIGH: LodCfg = { radial: 16, torsoRadial: 26, rings: 1, high: true };
@@ -125,9 +125,10 @@ export function handGeometry(lod: LodCfg): Array<{ g: THREE.BufferGeometry; m: T
   const out: Array<{ g: THREE.BufferGeometry; m: THREE.Matrix4 }> = [];
   // Soft "mitten" hand: palm + curled finger block + chunky thumb (reads well at any distance).
   const hi = lod.high;
-  out.push({ g: roundBoxG(0.078, 0.036, 0.072, 0.017, hi ? 3 : 1), m: trs([0.038, 0, 0]) });
-  out.push({ g: roundBoxG(0.064, 0.03, 0.07, 0.0145, hi ? 3 : 1), m: trs([0.094, -0.01, -0.002], [0, 0, -0.38]) });
-  out.push({ g: capsuleG(0.0145, 0.03, hi ? 3 : 2, hi ? 10 : 6), m: trs([0.04, -0.008, 0.042], [0.55, 0, -Math.PI / 2 + 0.85]) });
+  const S = hi ? sphereG(14, 10) : sphereG(8, 6);
+  out.push({ g: S, m: trs([0.04, 0, 0], [0, 0, 0], [0.046, 0.02, 0.038]) });                     // palm
+  out.push({ g: S, m: trs([0.09, -0.012, -0.002], [0, 0, -0.42], [0.036, 0.017, 0.036]) });     // curled fingers
+  out.push({ g: capsuleG(0.0135, 0.028, hi ? 3 : 2, hi ? 10 : 6), m: trs([0.042, -0.006, 0.04], [0.55, 0, -Math.PI / 2 + 0.85]) }); // thumb
   return out;
 }
 

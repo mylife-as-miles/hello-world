@@ -125,7 +125,7 @@ function Scene() {
   return (
     <>
       <color attach="background" args={[LOOK.bg]} />
-      <fog attach="fog" args={[LOOK.fog, 70, 230]} />
+      <fog attach="fog" args={[LOOK.fog, view === 'aerial' ? 320 : 70, view === 'aerial' ? 900 : (params.get('fogfar') ? Number(params.get('fogfar')) : 230)]} />
       <hemisphereLight args={[LOOK.hs, LOOK.hg, LOOK.hI]} />
       <ambientLight intensity={0.25} />
       <directionalLight position={sunPos} intensity={LOOK.sunI} color={LOOK.sun} castShadow

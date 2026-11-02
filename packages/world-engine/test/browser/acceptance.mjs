@@ -29,6 +29,7 @@ const snap = () => page.evaluate(() => window.__world.getSnapshot());
 const dispatch = (e) => page.evaluate((ev) => window.__world.dispatch({ id: `acc-${Date.now()}-${Math.random()}`, source: 'demo', timestamp: Date.now(), ...ev }), e);
 const shot = async (name, opts = {}) => { const p = join(out, `${name}.png`); await page.screenshot({ path: p, timeout: 180000, ...opts }); return p; };
 
+let s;
 page.setDefaultNavigationTimeout(120000);
 page.setDefaultTimeout(120000);
 try {
@@ -42,7 +43,7 @@ try {
   const stats = await page.evaluate(() => globalThis.__HW_AVATAR_STATS ?? null);
   record(2, 'Licensed rigged avatar loads', !!stats && (stats.vrmLoaded > 0 || stats.proceduralBuilt > 0), `avatar stats ${JSON.stringify(stats)}`);
 
-  let s = await snap();
+  s = await snap();
   record(5, 'Multiple residents present', s.residents.length >= 5, `${s.residents.length} residents`);
 
   const before = Object.fromEntries(s.residents.map(r => [r.id, { x: r.location.x, z: r.location.z, a: r.activity }]));

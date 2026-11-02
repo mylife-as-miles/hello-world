@@ -238,6 +238,14 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
   const baseName = baseEntry ? shortLabel(baseEntry.label) : 'This body';
   // VRM and realistic rigs scale uniformly by height; only Townies use `build`.
   const buildApplies = support.body && !realistic && !vrm;
+  // Photoreal bodies ship without facial morph targets (setExpression is a no-op), so
+  // expression previews would be dead buttons there. Honours an optional `expressions`
+  // flag if the avatar API's support matrix grows one.
+  const supportFlags = support as AppearanceSupport & { expressions?: boolean };
+  const expressionsApply = supportFlags.expressions ?? !realistic;
+  const sectionFixed: Partial<Record<SectionId, boolean>> = {
+    face: !support.face, hair: !support.hair, outfit: !support.outfitPieces && !support.outfitColor, extras: !support.accessories,
+  };
   const fixedWhy = realistic ? 'a photoreal body with its own authored look' : vrm ? 'a VRM avatar with its own authored look' : 'a fixed-look body';
 
   // ---- edits
@@ -385,7 +393,8 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
           <div className="hwc-dock" ref={dockRef}>
             <div className="hwc-dock-row" role="group" aria-label="Preview expression">
               <span className="hwc-dock-label">Expression</span>
-              {EXPRESSION_BUTTONS.map(x => (
+              {!expressionsApply && <span className="hwc-dock-note" role="note">No facial rig on {baseName} — expressions work on Townie &amp; VRM bodies</span>}
+              {expressionsApply && EXPRESSION_BUTTONS.map(x => (
                 <button key={x.name} type="button" className={cls('hwc-pill', flash.expr === x.name && 'is-on')} aria-pressed={flash.expr === x.name}
                   aria-label={`Preview ${x.label.toLowerCase()} expression`} data-testid={`expr-${x.name}`} onClick={() => playExpression(x.name)}>
                   <span className="hwc-emo" aria-hidden="true">{x.emo}</span>{x.label}
@@ -423,7 +432,8 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
           </header>
           <nav className="hwc-nav" aria-label="Creator sections">
             {SECTIONS.map(s => (
-              <button key={s.id} type="button" className={cls(activeSection === s.id && 'is-on')} aria-current={activeSection === s.id ? 'true' : undefined}
+              <button key={s.id} type="button" className={cls(activeSection === s.id && 'is-on', sectionFixed[s.id] && 'is-dim')} aria-current={activeSection === s.id ? 'true' : undefined}
+                title={sectionFixed[s.id] ? `${s.label}: fixed by ${baseName}` : undefined}
                 aria-controls={secId(s.id)} data-testid={`nav-${s.id}`} onClick={() => jumpTo(s.id)}>
                 <Icon name={s.icon} size={16} /><span>{s.label}</span>
               </button>

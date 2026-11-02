@@ -64,6 +64,7 @@ export const CREATOR_CSS = /* css */ `
 .hwc-pill:active { transform: scale(0.96); }
 .hwc-pill.is-on { background: var(--hwc-accent-soft); border-color: rgba(162, 143, 255, 0.55); color: #fff; }
 .hwc-pill .hwc-emo { font-size: 13px; line-height: 1; }
+.hwc-dock-note { flex: none; padding: 7px 10px; font-size: 11.5px; color: var(--hwc-muted); white-space: nowrap; }
 .hwc-hint { margin-top: 4px; font-size: 11px; color: var(--hwc-faint); pointer-events: none; }
 .hwc-loading { position: absolute; left: 50%; top: 46%; transform: translate(-50%, -50%); display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 999px; background: rgba(14, 12, 25, 0.7); border: 1px solid var(--hwc-line); font-size: 12px; color: var(--hwc-muted); opacity: 0; transition: opacity .25s; pointer-events: none; z-index: 3; }
 .hwc-loading.is-on { opacity: 1; }
@@ -107,6 +108,7 @@ export const CREATOR_CSS = /* css */ `
 .hwc-nav button { display: flex; flex-direction: column; align-items: center; gap: 4px; border: 1px solid transparent; background: transparent; color: var(--hwc-muted); padding: 8px 4px 7px; border-radius: 12px; font-size: 10.5px; font-weight: 650; letter-spacing: .01em; cursor: pointer; transition: background .18s, color .18s; white-space: nowrap; }
 .hwc-nav button:hover { color: #fff; background: rgba(255,255,255,.05); }
 .hwc-nav button.is-on { color: #fff; background: rgba(255, 255, 255, 0.1); border-color: rgba(255,255,255,.08); }
+.hwc-nav button.is-dim { opacity: 0.45; }
 
 .hwc-scroll { position: relative; flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scroll-behavior: smooth; padding-bottom: 12px; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.18) transparent; }
 .hwc-sec { padding: 18px 20px 6px; }

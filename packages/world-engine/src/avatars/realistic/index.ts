@@ -24,6 +24,10 @@ import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.j
 import type { AvatarAppearance } from '@hello-world/contracts';
 import { HUMAN_BONES, type AttachSlot, type AvatarLod, type ExpressionName, type HumanBoneName, type HumanoidRig } from '../rig';
 import { BODIES, SKELETONS, type RealisticBodyData } from './bodies';
+import { GeoBuilder } from '../procedural/geom';
+import { buildHeadAccessories } from '../procedural/accessories';
+import { RX, RY, RZ, HC } from '../procedural/head';
+import { acquireMaterial, releaseMaterial, shade, type Finish } from '../procedural/materials';
 export { REALISTIC_BASE_MODELS, REALISTIC_SUPPORT, isRealisticBase, realisticSupportFor } from './catalog';
 export type { AppearanceSupport } from './catalog';
 
@@ -77,6 +81,8 @@ interface BodyAsset {
   boneInverses: THREE.Matrix4[];
   /** [0] = LOD0 (high), [1] = LOD1 (low). */
   lods: PartGeo[][];
+  /** Maps the procedural unit head (../procedural/head.ts) onto this scan's cranium (incl. hair), head-bone relative. */
+  headFit: { sx: number; sy: number; sz: number; cx: number; cz: number } | null;
 }
 
 const bodyCache = new Map<string, Promise<BodyAsset | null>>();
@@ -178,6 +184,31 @@ function armCorrections(bones: string[], worldP: THREE.Vector3[]): Map<number, T
   return K;
 }
 
+/** Bounding box of the head-dominated vertices (scalp + hair) above the skull base, relative to the head joint. */
+function fitHead(parts: PartGeo[], bones: string[], worldP: THREE.Vector3[]): BodyAsset['headFit'] {
+  const head = bones.indexOf('crl_Head__C');
+  if (head < 0) return null;
+  const ids = new Set([head, bones.indexOf('crl_eye__L'), bones.indexOf('crl_eye__R')]);
+  const J = worldP[head]!;
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity, maxY = -Infinity, n = 0;
+  for (const part of parts) {
+    const pos = part.geo.getAttribute('position'), si = part.geo.getAttribute('skinIndex'), sw = part.geo.getAttribute('skinWeight');
+    for (let v = 0; v < pos.count; v++) {
+      let best = 0, bj = -1;
+      for (let k = 0; k < 4; k++) { const w = sw.getComponent(v, k); if (w > best) { best = w; bj = si.getComponent(v, k); } }
+      if (!ids.has(bj)) continue;
+      const y = pos.getY(v) - J.y;
+      maxY = Math.max(maxY, y);
+      if (y < 0.07) continue; // cranium only (no jaw / neck / long hair below the ears)
+      const x = pos.getX(v) - J.x, z = pos.getZ(v) - J.z;
+      minX = Math.min(minX, x); maxX = Math.max(maxX, x); minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z); n++;
+    }
+  }
+  if (n < 50 || !(maxY > 0.1)) return null;
+  const sx = (maxX - minX) / 2 / RX, sz = (maxZ - minZ) / 2 / RZ, sy = maxY / (HC[1] + RY);
+  return { sx, sy, sz, cx: (minX + maxX) / 2, cz: (minZ + maxZ) / 2 - HC[2] * sz };
+}
+
 async function loadBody(id: string): Promise<BodyAsset | null> {
   const data = BODIES[id], url = GLB_URLS[id];
   if (!data || !url) return null;
@@ -216,8 +247,9 @@ async function loadBody(id: string): Promise<BodyAsset | null> {
     restLocalT.push(lt); restLocalQ.push(lq.normalize());
   }
   const K = armCorrections(skel.bones, restWorldP);
+  const headFit = fitHead(lods[0]!, skel.bones, restWorldP);
   const tposeWorldQ = restWorldQ.map((q, i) => { const k = K.get(i); return k ? k.clone().multiply(q) : q.clone(); });
-  return { id, data, bones: skel.bones, parents: skel.parents, restLocalT, restLocalQ, restWorldP, tposeWorldQ, boneInverses, lods };
+  return { id, data, bones: skel.bones, parents: skel.parents, restLocalT, restLocalQ, restWorldP, tposeWorldQ, boneInverses, lods, headFit };
 }
 
 function getBody(id: string): Promise<BodyAsset | null> {
@@ -273,6 +305,8 @@ function tintedMaterial(base: THREE.MeshStandardMaterial, tint: THREE.Color): TH
 
 /* --------------------------------------------------------------------- rig */
 
+/** Head accessories that sit on the cranium (face-bound ones like glasses need the stylised face). */
+const HEAD_OK = new Set(['beanie', 'cap', 'crown', 'headphones']);
 const _q = new THREE.Quaternion();
 const _v = new THREE.Vector3();
 const IDENTITY = new THREE.Matrix4();
@@ -296,6 +330,8 @@ class RealisticRig implements HumanoidRig {
   private readonly hipsOffset = new THREE.Vector3();
   private readonly scale: number;
   private readonly ownMaterials: THREE.Material[] = [];
+  private readonly sharedTownieMats: THREE.Material[] = [];
+  private readonly ownGeos: THREE.BufferGeometry[] = [];
   private readonly attach: Partial<Record<AttachSlot, THREE.Object3D>> = {};
   private dirty = true;
 
@@ -369,8 +405,35 @@ class RealisticRig implements HumanoidRig {
     mk('leftHand', 'crl_hand__L', [0.08, -0.01, 0.01]);
     mk('rightHand', 'crl_hand__R', [-0.08, -0.01, 0.01]);
     mk('back', 'crl_spine01__C', [0, 0.02, -0.16]);
+    this.buildHeadAccessories(appearance, lod);
     this.applyPose();
     this.root.updateMatrixWorld(true);
+  }
+
+  /** Hats / crown / headphones from the procedural kit, fitted to this scan's head (same subset as VRM guests). */
+  private buildHeadAccessories(a: AvatarAppearance, lod: AvatarLod): void {
+    const fit = this.body.headFit, i = this.body.bones.indexOf('crl_Head__C');
+    const list = Array.isArray(a.accessories) ? a.accessories.filter((x) => HEAD_OK.has(x)) : [];
+    if (!fit || i < 0 || !list.length) return;
+    const holder = new THREE.Group();
+    holder.name = 'realistic-head-accessories';
+    const inv = this.body.tposeWorldQ[i]!.clone().invert();
+    holder.quaternion.copy(inv);
+    holder.position.set(fit.cx, 0, fit.cz).applyQuaternion(inv);
+    holder.scale.set(fit.sx, fit.sy, fit.sz);
+    this.bones[i]!.add(holder);
+    const outfit = safeColor(a.outfit?.color ?? '') ? `#${safeColor(a.outfit.color)!.getHexString()}` : '#4a6fa5';
+    const b = new GeoBuilder(false);
+    buildHeadAccessories(b, list, 'bald', lod, '');
+    for (const [key, g] of b.build()) {
+      const [slot, fin] = key.split('|') as [string, Finish | undefined];
+      const color = slot.startsWith('#') ? slot : slot === 'accentDark' ? shade(outfit, -0.3) : outfit;
+      const m = acquireMaterial(color, fin ?? 'cloth');
+      this.sharedTownieMats.push(m); this.ownGeos.push(g);
+      const mesh = new THREE.Mesh(g, m);
+      mesh.castShadow = true;
+      holder.add(mesh);
+    }
   }
 
   setBoneRotation(bone: HumanBoneName, rotation: THREE.Quaternion): void {
@@ -426,7 +489,9 @@ class RealisticRig implements HumanoidRig {
   dispose(): void {
     this.root.removeFromParent();
     for (const m of this.ownMaterials) m.dispose();
-    this.ownMaterials.length = 0;
+    for (const m of this.sharedTownieMats) releaseMaterial(m);
+    for (const g of this.ownGeos) g.dispose();
+    this.ownMaterials.length = 0; this.sharedTownieMats.length = 0; this.ownGeos.length = 0;
     // geometries, shared materials and textures stay cached for other residents (see disposeRealisticCache)
   }
 }

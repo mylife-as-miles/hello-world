@@ -27,7 +27,8 @@ scene.background = new THREE.Color(0x26313a);
 const camera = new THREE.PerspectiveCamera(32, innerWidth / innerHeight, 0.1, 100);
 camera.position.set(0, 2.0, +(params.get('z') ?? 10.5));
 const controls = new OrbitControls(camera, renderer.domElement);
-controls.target.set(0, 0.95, -1.2);
+controls.target.set(0, params.has('close') ? 1.45 : 0.95, -1.2);
+if (params.has('close')) camera.position.y = 1.6;
 controls.update();
 scene.add(new THREE.HemisphereLight(0xdfe9ff, 0x4a3d33, 1.2));
 const sun = new THREE.DirectionalLight(0xfff1dc, 2.4);
@@ -53,7 +54,7 @@ function appearanceFor(id: string, i: number): AvatarAppearance {
   return {
     baseModelId: id, skinTone: '#c89a7c', hairStyle: 'short', hairColor: '#2a1d14',
     outfit: { top: 'tee', bottom: 'jeans', shoes: 'sneakers', color: params.has('tint') ? ['#d9534f', '#3a7bd5', '#4caf50', '#e0a030'][i % 4]! : '' },
-    accessories: [], face: { eyeColor: '#3b2a1a', eyeSize: 0.5, noseSize: 0.5, mouthSize: 0.5 }, body: { height: 0.6, build: 0.5 },
+    accessories: params.has('acc') ? [['cap'], ['beanie'], ['headphones'], ['crown']][i % 4]! : [], face: { eyeColor: '#3b2a1a', eyeSize: 0.5, noseSize: 0.5, mouthSize: 0.5 }, body: { height: 0.6, build: 0.5 },
   };
 }
 

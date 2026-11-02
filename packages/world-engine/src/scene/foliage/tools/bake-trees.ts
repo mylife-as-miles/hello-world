@@ -7,6 +7,11 @@ import { deflateSync } from 'node:zlib'
 const ST = process.env.SUPER_TERRAIN ?? '/home/user/vibe-stack/super-terrain'
 const { compileProceduralTree } = await import(`${ST}/src/tree/generator/compileTree.ts`)
 const { bakeLeafSpray } = await import(`${ST}/src/tree/materials/leafSprayAtlas.ts`)
+// meshoptimizer (MIT, Arseny Kapoulkine) — already in the workspace store; offline use only.
+const MESHOPT = process.env.MESHOPT ?? '/home/user/hello-world/node_modules/.pnpm/meshoptimizer@1.1.1/node_modules/meshoptimizer/index.js'
+const { MeshoptSimplifier } = await import(MESHOPT)
+await MeshoptSimplifier.ready
+const WOOD_RATIO = Number(process.env.WOOD_RATIO ?? 0.45) // keep ~45% of the generator's LOD-2 wood triangles
 
 const OUT = process.env.OUT ?? new URL('../assets', import.meta.url).pathname
 const LOD = Number(process.env.LOD ?? 2) as 0 | 1 | 2 // shipped assets: LOD 2
@@ -94,7 +99,17 @@ SPECS.forEach((spec, row) => {
   const s = spec.height / (maxY - minY)
   const wp = new Float32Array(w.positions.length)
   for (let i = 0; i < wp.length; i += 3) { wp[i] = w.positions[i] * s; wp[i + 1] = (w.positions[i + 1] - minY) * s; wp[i + 2] = w.positions[i + 2] * s }
-  const wood: Prim = { name: 'wood', attrs: { POSITION: { data: wp, size: 3 }, NORMAL: { data: new Float32Array(w.normals), size: 3 }, COLOR_0: { data: new Float32Array(w.colors), size: 3 } }, index: new Uint32Array(w.indices) }
+  // simplify the woody mesh (crown hides most twigs) and compact the vertex set
+  const srcIdx = new Uint32Array(w.indices)
+  const target = Math.max(300, Math.floor((srcIdx.length / 3) * WOOD_RATIO)) * 3
+  const [simp] = MeshoptSimplifier.simplify(srcIdx, wp, 3, target, 0.03, [])
+  const remap = new Int32Array(wp.length / 3).fill(-1)
+  let used = 0
+  for (const i of simp) if (remap[i] < 0) remap[i] = used++
+  const cp = new Float32Array(used * 3), cn = new Float32Array(used * 3), cc = new Float32Array(used * 3)
+  remap.forEach((to, from) => { if (to < 0) return; for (let k = 0; k < 3; k++) { cp[to * 3 + k] = wp[from * 3 + k]; cn[to * 3 + k] = w.normals[from * 3 + k]; cc[to * 3 + k] = w.colors[from * 3 + k] } })
+  const ci = new Uint32Array(simp.length); simp.forEach((v, k) => { ci[k] = remap[v] })
+  const wood: Prim = { name: 'wood', attrs: { POSITION: { data: cp, size: 3 }, NORMAL: { data: cn, size: 3 }, COLOR_0: { data: cc, size: 3 } }, index: ci }
   // merge leaf cards (flat quad x[-.5,.5] y[0,1]) with per-card matrix, atlas tile UVs
   const n = f.count, lp = new Float32Array(n * 12), ln = new Float32Array(n * 12), lc = new Float32Array(n * 12), lu = new Float32Array(n * 8), li = new Uint32Array(n * 6)
   const corners = [[-0.5, 0], [0.5, 0], [0.5, 1], [-0.5, 1]]
@@ -143,7 +158,7 @@ SPECS.forEach((spec, row) => {
       atlas[di + 3] = small[si + 3]
     }
   })
-  report.push(`${spec.name} (${spec.species}) lod${LOD}: ${(file.length / 1024).toFixed(1)} KB, wood ${w.indices.length / 3} tris, ${n} cards (${f.representation}/${f.cardGeometry}), gen ${(performance.now() - t0).toFixed(0)} ms`)
+  report.push(`${spec.name} (${spec.species}) lod${LOD}: ${(file.length / 1024).toFixed(1)} KB, wood ${w.indices.length / 3}->${ci.length / 3} tris, ${n} cards (${f.representation}/${f.cardGeometry}), gen ${(performance.now() - t0).toFixed(0)} ms`)
 })
 writeFileSync(`${OUT}/leaf-atlas.png`, png(atlas, atlasW, atlasH))
 console.log(report.join('\n'))

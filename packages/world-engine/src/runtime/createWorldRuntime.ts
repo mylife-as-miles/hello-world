@@ -42,6 +42,13 @@ export interface WorldEngineRuntimeOptions extends WorldRuntimeOptions {
   catchUpMaxSeconds?: number;
   /** Called when an event is rejected (malformed, duplicate, cooldown, queue full). */
   onReject?: (reason: string, event: unknown) => void;
+  /**
+   * Internal per-actor/per-kind ingress cooldowns (defensive defaults for standalone/browser
+   * runtimes). Pass `false` when a trusted server already owns validation, rate limits and the
+   * Director's configurable cooldown (which may be 0 s); pass a partial map to override values (ms).
+   * Validation, de-duplication and queue bounds always stay on.
+   */
+  ingressCooldowns?: boolean | Partial<Record<WorldEvent['kind'], number>>;
 }
 
 export interface WorldEngineRuntime extends WorldRuntime {
@@ -63,6 +70,8 @@ export function createWorldRuntime(options: WorldEngineRuntimeOptions = {}): Wor
   const worldId = options.worldId ?? initial?.worldId ?? 'hello-neighborhood';
   const tickMs = Math.max(50, Math.min(5000, options.tickIntervalMs ?? DEFAULT_TICK_MS));
   const maxResidents = Math.max(1, Math.min(POPULATION_LIMIT, options.maxResidents ?? POPULATION_LIMIT));
+  const cooldowns: Partial<Record<WorldEvent['kind'], number>> | null =
+    options.ingressCooldowns === false ? null : typeof options.ingressCooldowns === 'object' ? options.ingressCooldowns : {};
 
   const sim: Simulation = createSimulation({
     worldId,
@@ -163,7 +172,7 @@ export function createWorldRuntime(options: WorldEngineRuntimeOptions = {}): Wor
     if (seen.has(event.id)) { stats.duplicates++; return; }
     const key = `${event.actorId}|${event.kind}`;
     const last = lastByActorKind.get(key);
-    const cooldown = event.source === 'simulation' ? 0 : ACTOR_COOLDOWN_MS[event.kind];
+    const cooldown = event.source === 'simulation' || cooldowns === null ? 0 : cooldowns[event.kind] ?? ACTOR_COOLDOWN_MS[event.kind];
     if (last !== undefined && event.timestamp >= last && event.timestamp - last < cooldown) {
       reject('cooldown', event);
       remember(event.id);

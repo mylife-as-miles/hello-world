@@ -90,3 +90,18 @@ describe('auto tick catch-up', () => {
     expect(simulated).toBeGreaterThanOrEqual(0.4);
   });
 });
+
+describe('server-owned rate limits', () => {
+  it('ingressCooldowns:false applies every validated event (Director cooldown 0 s)', () => {
+    const rt = createWorldRuntime({ worldId: 'g7', seedResidents: false, autoTick: false, ingressCooldowns: false });
+    const t = 1_900_000_000_000;
+    rt.dispatch({ id: 'c1', kind: 'join', source: 'twitch', actorId: 'twitch:z', actorDisplayName: 'Z', timestamp: t });
+    rt.dispatch({ id: 'c2', kind: 'dance', source: 'twitch', actorId: 'twitch:z', actorDisplayName: 'Z', timestamp: t + 10 });
+    rt.dispatch({ id: 'c3', kind: 'dance', source: 'twitch', actorId: 'twitch:z', actorDisplayName: 'Z', timestamp: t + 20 });
+    expect(rt.stats.rejected).toBe(0);
+    expect(rt.stats.accepted).toBe(3);
+    rt.dispatch({ id: 'c3', kind: 'dance', source: 'twitch', actorId: 'twitch:z', actorDisplayName: 'Z', timestamp: t + 30 });
+    expect(rt.stats.duplicates).toBe(1); // dedupe stays on
+    rt.dispose();
+  });
+});

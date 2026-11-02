@@ -42,7 +42,7 @@ const runtime = createWorldRuntime({ worldId: 'hello-neighborhood', seedResident
 
 | Where | Extension | Purpose |
 | --- | --- | --- |
-| `createWorldRuntime` options | `now`, `maxResidents`, `catchUpMaxSeconds`, `onReject` | injectable clock, population cap, bounded offline catch-up (off by default), rejection diagnostics |
+| `createWorldRuntime` options | `now`, `maxResidents`, `catchUpMaxSeconds`, `onReject`, `ingressCooldowns` | injectable clock, population cap, bounded offline catch-up (off by default), rejection diagnostics; `ingressCooldowns: false` disables the engine's defensive per-actor cooldowns when the server owns rate limits (validation, dedupe and queue bounds stay on) |
 | runtime object | `tick(seconds?)`, `setPaused(bool)`, `isPaused()`, `stats` | manual stepping (tests, `autoTick:false`), director pause |
 | `WorldScene` props | `viewerResidentId`, `onLocationSelect`, `showHud` | in-scene action buttons dispatch events as the viewer's resident; place picking; HUD toggle |
 | `AvatarCreator` props | `initialPersonality`, `onSaveCharacter({appearance, personality, displayName})`, `className` | personality trait selection (send as `join` / `custom` `payload.personality`) |
@@ -86,7 +86,9 @@ The harness keeps a local persistent runtime in IndexedDB (`createPersistentWorl
 ## Integration notes for Codex
 
 1. `apps/web/package.json`: add `"@hello-world/world-engine": "workspace:*"`; `apps/server/package.json`: same (server imports only `/runtime`). Run `pnpm install` to refresh the lockfile.
-2. Server: `const runtime = createWorldRuntime({ worldId, initialSnapshot, seedResidents: true, autoTick: true, tickIntervalMs: 500 })`; broadcast on `runtime.subscribe`; persist `runtime.getSnapshot()` (plain JSON). Optional: `runtime.setPaused(settings.paused)`, `maxResidents: settings.maxResidents`.
+2. Server: `const runtime = createWorldRuntime({ worldId, initialSnapshot, seedResidents: true, autoTick: true, tickIntervalMs: 500, ingressCooldowns: false })` (the server already enforces Director cooldowns); broadcast on `runtime.subscribe`; persist `runtime.getSnapshot()` (plain JSON). Optional: `runtime.setPaused(settings.paused)`, `maxResidents: settings.maxResidents`.
 3. Web: pass Codex's read-only adapter as `runtime` to `<WorldScene>`; for OBS use `<WorldScene transparent cameraMode="neighborhood" />` on `/overlay` with transparent html/body.
 4. Avatar save: `onSave(appearance)` → dispatch `join` (first time) or `custom` with `payload: { action: 'update-avatar', appearance }`.
 5. VRM assets are referenced with `new URL('./assets/…', import.meta.url)` so Vite serves/bundles them from this package without extra config.
+
+Research notes (licences, VRM, navigation, AI, performance, future modules): [`docs/WORLD_ENGINE_RESEARCH.md`](docs/WORLD_ENGINE_RESEARCH.md). QA evidence: [`../../docs/WORLD_ENGINE_QA.md`](../../docs/WORLD_ENGINE_QA.md).

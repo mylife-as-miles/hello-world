@@ -324,7 +324,9 @@ const STYLE_ALBEDO = /* glsl */ `
   {
     vec3 hwS = pow(max(diffuseColor.rgb, vec3(0.0)), vec3(0.76));          // lift darks (linear space)
     float hwSL = dot(hwS, vec3(0.2126, 0.7152, 0.0722));
-    hwS = mix(vec3(hwSL), hwS, 1.28) * vec3(1.07, 1.0, 0.9);                // livelier saturation + warmth
+    // livelier saturation + warmth on mid/light tones; near-blacks stay neutral (no olive suits)
+    float hwK = smoothstep(0.04, 0.22, hwSL);
+    hwS = mix(vec3(hwSL), hwS, mix(1.0, 1.28, hwK)) * mix(vec3(1.02, 1.0, 0.98), vec3(1.07, 1.0, 0.9), hwK);
     diffuseColor.rgb = clamp(hwS, 0.0, 1.0);
   }`;
 const STYLE_DIFFUSE = /* glsl */ `{

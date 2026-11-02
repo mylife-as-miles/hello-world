@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { readConfig } from "./config.js";
 import { createWorldServer } from "./server.js";
 import type { RuntimeFactory } from "./room.js";
+import { createWorldRuntime } from "@hello-world/world-engine/runtime";
 
 dotenv({
   path: fileURLToPath(new URL("../../../.env", import.meta.url)),
@@ -10,12 +11,9 @@ dotenv({
 } as Parameters<typeof dotenv>[0]);
 dotenv({ quiet: true } as Parameters<typeof dotenv>[0]);
 const config = readConfig();
-// Kept as a runtime import until the separately owned engine workspace is integrated.
-const engineModule = "@hello-world/world-engine/runtime";
-const { createWorldRuntime } = (await import(engineModule)) as {
-  createWorldRuntime: RuntimeFactory;
-};
-const app = await createWorldServer(config, createWorldRuntime);
+const runtimeFactory: RuntimeFactory = (options) =>
+  createWorldRuntime({ ...options, ingressCooldowns: false });
+const app = await createWorldServer(config, runtimeFactory);
 const address = await app.start();
 console.info(
   `HELLO WORLD server listening on ${typeof address === "object" && address ? address.port : config.port}; web origin ${config.webOrigin}`,

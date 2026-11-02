@@ -5,8 +5,8 @@
  * to the render loop; React only re-renders on structure changes. The 3D
  * content is memoised with stable callbacks so host re-renders do not cascade.
  */
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Canvas } from '@react-three/fiber';
+import { Component, lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Canvas, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { WorldSceneProps } from '@hello-world/contracts';
 import { SceneStore } from '../core/sceneStore';
@@ -27,9 +27,22 @@ import { WeatherFx } from './Weather';
 import { CameraRig, poseFor, type RigMode } from './CameraRig';
 import { PostFX } from './PostFX';
 import { Hud } from './Hud';
+import { createWorldRenderer, type RendererPreference, type WorldRendererStatus } from './renderer';
+const WebGPUCompatibility = lazy(() => import('./WebGPUCompatibility').then(module => ({ default: module.WebGPUCompatibility })));
+class WebGPUGuard extends Component<{ children: ReactNode; onFailure: () => void }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  componentDidCatch() { this.props.onFailure(); }
+  render() { return this.state.failed ? null : this.props.children; }
+}
+
 import { buildOverlayProps } from './town';
 
 export type WorldSceneExtraProps = {
+  /** Opt-in WebGPU presentation with automatic WebGL fallback. WebGL remains default. */
+  renderer?: RendererPreference;
+  /** Actual backend, never inferred from a requested option or API presence. */
+  onRendererChange?: (status: WorldRendererStatus) => void;
   /** Resident id of the local viewer (highlights "you", enables the inspector). */
   viewerResidentId?: string;
   /** Called with the POI id when the ground / a building is clicked. */
@@ -50,6 +63,18 @@ export function WorldScene(props: WorldSceneProps & WorldSceneExtraProps) {
     runtime, transparent = false, cameraMode = 'neighborhood', selectedResidentId, onResidentSelect,
     quality = 'high', className, viewerResidentId, onLocationSelect, builtInHorizon = true,
   } = props;
+  const preference = props.renderer ?? 'webgl';
+  const [webGPUFailed, setWebGPUFailed] = useState(false);
+  const [rendererStatus, setRendererStatus] = useState<WorldRendererStatus>({ requested: preference, backend: 'webgl' });
+  const rendererCallback = useRef(props.onRendererChange); rendererCallback.current = props.onRendererChange;
+  useEffect(() => setWebGPUFailed(false), [preference]);
+  const effectivePreference: RendererPreference = webGPUFailed ? 'webgl' : preference;
+  const setStatus = (status: WorldRendererStatus) => { setRendererStatus(status); rendererCallback.current?.(status); };
+  const createRenderer = useMemo(() => async (defaults: Parameters<typeof createWorldRenderer>[0]) => createWorldRenderer(defaults, {
+    preference: effectivePreference, transparent,
+    onStatus: status => { setRendererStatus(status); rendererCallback.current?.(status); },
+    onDeviceLost: reason => { setWebGPUFailed(true); setStatus({ requested: preference, backend: 'webgl', reason }); },
+  }), [effectivePreference, transparent, preference]);
   const showHud = props.showHud ?? false;
   const showInspector = props.showInspector ?? viewerResidentId !== undefined;
 
@@ -88,31 +113,36 @@ export function WorldScene(props: WorldSceneProps & WorldSceneExtraProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [transparent]);
 
-  return (
-    <div className={className} style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden' }}>
+  const canvas = (
       <Canvas
-        key={transparent ? 'overlay' : 'world'}
+        key={`${transparent ? 'overlay' : 'world'}-${effectivePreference}`}
         shadows={{ type: THREE.PCFShadowMap }}
         dpr={quality === 'high' ? [1, 1.75] : [1, 1]}
-        gl={{ alpha: transparent, antialias: true, preserveDrawingBuffer: false, toneMapping: THREE.ACESFilmicToneMapping, outputColorSpace: THREE.SRGBColorSpace }}
+        gl={effectivePreference === 'webgl' ? { alpha: transparent, antialias: true, preserveDrawingBuffer: false, toneMapping: THREE.ACESFilmicToneMapping, outputColorSpace: THREE.SRGBColorSpace } : createRenderer}
         frameloop="always"
         camera={{ fov: 42, near: 0.1, far: 1200, position: initial }}
         style={{ position: 'absolute', inset: 0, background: 'transparent' }}
         onCreated={({ gl, scene }) => {
+          if (effectivePreference === 'webgl') { const status: WorldRendererStatus = { requested: preference, backend: 'webgl', ...(webGPUFailed ? { reason: 'WebGPU initialization or device failed; using WebGL.' } : {}) }; gl.domElement.dataset.renderer = 'webgl'; setStatus(status); }
           if (transparent) { gl.setClearColor(0x000000, 0); scene.background = null; }
           else gl.setClearColor('#cfe6f3', 1);
         }}
       >
         <SceneStoreContext.Provider value={store}>
           <KitContext.Provider value={kit}>
-            <WorldContent
+            <Suspense fallback={null}><WorldContent
               kit={kit} store={store} transparent={transparent} quality={quality} rigMode={rigMode}
               selectedResidentId={selected} onResidentSelect={select} viewerResidentId={viewerResidentId}
               onLocationSelect={selectLocation} builtInHorizon={builtInHorizon}
-            />
+            /></Suspense>
           </KitContext.Provider>
         </SceneStoreContext.Provider>
       </Canvas>
+  );
+
+  return (
+    <div data-renderer={rendererStatus.backend} data-renderer-requested={rendererStatus.requested} data-renderer-reason={rendererStatus.reason} className={className} style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden' }}>
+      {effectivePreference === 'webgl' ? canvas : <WebGPUGuard key={effectivePreference} onFailure={() => setWebGPUFailed(true)}>{canvas}</WebGPUGuard>}
       {showInspector && (
         <ResidentInspector
           store={store} runtime={runtime}
@@ -142,6 +172,7 @@ interface ContentProps {
 const WorldContent = memo(function WorldContent({
   kit, store, transparent, quality, rigMode, selectedResidentId, onResidentSelect, viewerResidentId, onLocationSelect, builtInHorizon,
 }: ContentProps) {
+  const webgpu = useThree(state => Boolean((state.gl as unknown as { backend?: { isWebGPUBackend?: boolean } }).backend?.isWebGPUBackend));
   const sky = useMemo(() => createSkyUniforms(), []);
   const cloudTint = useMemo(() => new THREE.Color('#ffffff'), []);
   useEventReactions(kit, store);
@@ -150,6 +181,7 @@ const WorldContent = memo(function WorldContent({
   const overlayProps = useMemo(() => (transparent ? ({ overlay: true } as unknown as Partial<ResidentsLayerProps>) : undefined), [transparent]);
   return (
     <>
+      {webgpu && <WebGPUCompatibility />}
       <Atmosphere transparent={transparent} quality={quality} sky={sky} cloudTint={cloudTint} />
       {!transparent && <SkyDome uniforms={sky} />}
       {!transparent && <Clouds tint={cloudTint} />}
@@ -172,7 +204,7 @@ const WorldContent = memo(function WorldContent({
         viewerResidentId={viewerResidentId} {...overlayProps}
       />
       <CameraRig mode={rigMode} selectedResidentId={selectedResidentId} />
-      {quality === 'high' && !transparent && <PostFX />}
+      {quality === 'high' && !transparent && !webgpu && <PostFX />}
     </>
   );
 });

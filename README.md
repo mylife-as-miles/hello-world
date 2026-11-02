@@ -1,7 +1,5 @@
 # HELLO WORLD
 
-> Integration in progress: the application shell and server are published. Claude’s complete world-engine package is not merged yet, so the full web build is pending that handoff. Server checks can run now.
-
 **Your community. A life of its own.** A livestream-powered 3D neighborhood where viewers become residents, meet their neighbors, and make a little history together.
 
 This is an independent vertical slice of a persistent virtual society. All residents, interactions, demonstration events, Twitch actions, and OBS sessions use the same world runtime. No source or assets are borrowed from the owner's other projects.
@@ -94,4 +92,4 @@ This slice does not claim distributed scaling, cloud-hosted durability, or simul
 
 [Browser and integration QA](docs/QA.md) records real checks and evidence. `pnpm test:browser` uses system Chromium when available; otherwise run `pnpm exec playwright install chromium` first. Set `QA_BROWSER_PATH` for a different executable, and `QA_DIRECTOR_KEY` when testing a key-protected server. [Independent critique](docs/CRITIQUE.md) records weighted scores and remaining problems. Live Twitch and OBS application tests require their respective external applications/permissions; browser-source rendering is tested in Chromium.
 
-Build and browser acceptance results are recorded after the complete engine has been integrated. Initial source scaffolding is not a claim of a verified finished product.
+The engine v1 handoff is integrated. Workspace TypeScript, 80 automated tests, and the production build pass; browser and renderer evidence are recorded in the linked QA documents. Live Twitch and native OBS verification remain dependent on external access.

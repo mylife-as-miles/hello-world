@@ -284,6 +284,16 @@ export default function App() {
       ? (queryCamera as CameraMode)
       : "neighborhood",
   );
+  const [rendererMode, setRendererMode] = useState<"webgl" | "webgpu" | "auto">(
+    () => {
+      const value = new URLSearchParams(window.location.search).get("renderer");
+      return value === "webgpu" || value === "auto" ? value : "webgl";
+    },
+  );
+  const [rendererInfo, setRendererInfo] = useState<{
+    backend: "webgl" | "webgpu";
+    reason?: string;
+  } | null>(null);
   const [requestedLowQuality] = useState(
     () => new URLSearchParams(window.location.search).get("quality") === "low",
   );
@@ -348,7 +358,7 @@ export default function App() {
         .sort((a, b) => b.friendship - a.friendship)
         .slice(0, 3)
     : [];
-  const overlayUrl = `${window.location.origin}/overlay?camera=${camera}${selectedId ? `&resident=${encodeURIComponent(selectedId)}` : ""}`;
+  const overlayUrl = `${window.location.origin}/overlay?camera=${camera}&renderer=${rendererMode}${selectedId ? `&resident=${encodeURIComponent(selectedId)}` : ""}`;
   const authorization = world.capabilities.authorization;
   const broadcasterName = authorization?.startsWith("authorized ")
     ? authorization.slice("authorized ".length)
@@ -490,6 +500,8 @@ export default function App() {
         <SceneBoundary>
           <WorldScene
             runtime={runtime}
+            renderer={rendererMode}
+            onRendererChange={setRendererInfo}
             transparent
             cameraMode={camera}
             selectedResidentId={selectedId}
@@ -666,6 +678,8 @@ export default function App() {
                 <SceneBoundary>
                   <WorldScene
                     runtime={runtime}
+                    renderer={rendererMode}
+                    onRendererChange={setRendererInfo}
                     cameraMode={camera}
                     selectedResidentId={selectedId}
                     onResidentSelect={setSelectedId}
@@ -1680,6 +1694,29 @@ export default function App() {
               ))}
             </select>
           </div>
+          <div className="obs-settings">
+            <label htmlFor="obs-renderer">World renderer</label>
+            <select
+              id="obs-renderer"
+              value={rendererMode}
+              onChange={(e) =>
+                setRendererMode(e.target.value as "webgl" | "webgpu" | "auto")
+              }
+            >
+              <option value="webgl">WebGL · compatibility</option>
+              <option value="webgpu">WebGPU · experimental</option>
+              <option value="auto">Automatic</option>
+            </select>
+          </div>
+          {rendererInfo && (
+            <p className="help-note">
+              {rendererInfo.backend === "webgpu"
+                ? "WebGPU is active."
+                : rendererMode === "webgpu"
+                  ? "WebGPU is unavailable here. WebGL compatibility is active."
+                  : "WebGL is active."}
+            </p>
+          )}
           <p className="help-note">
             <Info size={14} />
             Keep the world server running. Use the same accessible host as this

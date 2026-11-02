@@ -18,7 +18,8 @@
     "@twurple/api": "^8.0.0",
     "@twurple/auth": "^8.0.0",
     "@twurple/chat": "^8.0.0",
-    "@twurple/eventsub-ws": "^8.0.0"
+    "@twurple/eventsub-ws": "^8.0.0",
+    "@hello-world/world-engine": "workspace:*"
   },
   "devDependencies": {
     "tsx": "^4.20.0",

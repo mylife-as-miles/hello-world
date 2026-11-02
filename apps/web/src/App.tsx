@@ -313,6 +313,16 @@ export default function App() {
           r.friendship > 0,
       ).length
     : 0;
+  const selectedRelationships = selected
+    ? snapshot.relationships
+        .filter(
+          (relationship) =>
+            relationship.residentA === selected.id ||
+            relationship.residentB === selected.id,
+        )
+        .sort((a, b) => b.friendship - a.friendship)
+        .slice(0, 3)
+    : [];
   const overlayUrl = `${window.location.origin}/overlay?camera=${camera}`;
   const authorization = world.capabilities.authorization;
   const broadcasterName = authorization?.startsWith("authorized ")
@@ -1396,6 +1406,65 @@ export default function App() {
                         {friendCount}{" "}
                         {friendCount === 1 ? "connection" : "connections"} and a
                         story still unfolding
+                      </div>
+                      <div className="relationship-history">
+                        <div className="relationship-heading">
+                          <span>A LITTLE HISTORY</span>
+                          <Heart size={13} />
+                        </div>
+                        {selectedRelationships.length ? (
+                          selectedRelationships.map((relationship) => {
+                            const otherId =
+                              relationship.residentA === selected.id
+                                ? relationship.residentB
+                                : relationship.residentA;
+                            const other = snapshot.residents.find(
+                              (resident) => resident.id === otherId,
+                            );
+                            const latestMemory = relationship.memories.at(-1);
+                            return (
+                              <button
+                                className="relationship-row"
+                                key={`${relationship.residentA}:${relationship.residentB}`}
+                                disabled={!other}
+                                onClick={() => {
+                                  setSelectedId(otherId);
+                                  if (otherId !== me?.id) setTarget(otherId);
+                                }}
+                              >
+                                <span className="relationship-person">
+                                  {other && (
+                                    <AvatarBadge resident={other} small />
+                                  )}
+                                  <span>
+                                    <strong>
+                                      {other?.displayName ||
+                                        "Resident no longer in this world"}
+                                    </strong>
+                                    <small>
+                                      Friendship ·{" "}
+                                      {Math.round(relationship.friendship)} /
+                                      100
+                                    </small>
+                                  </span>
+                                  {other && <ChevronRight size={13} />}
+                                </span>
+                                <span
+                                  className={`relationship-memory ${latestMemory ? "" : "unrecorded"}`}
+                                >
+                                  {latestMemory
+                                    ? `“${latestMemory}”`
+                                    : "No shared memory recorded yet."}
+                                </span>
+                              </button>
+                            );
+                          })
+                        ) : (
+                          <p className="relationship-empty">
+                            No shared memories yet. A hello is a lovely place to
+                            start.
+                          </p>
+                        )}
                       </div>
                     </section>
                   )}

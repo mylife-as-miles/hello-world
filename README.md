@@ -63,17 +63,16 @@ Direct OBS WebSocket control is not included. Browser Source works independently
 
 ## Architecture and persistence
 
-```text
-Twitch IRC / EventSub ─┐
-Viewer controls ──────┼─► validation / permissions / cooldowns / approval
-Director demo actions ┘                  │
-                                        ▼
-                            one authoritative WorldRuntime
-                              │                     │
-                      saved JSON snapshot      WebSocket snapshots
-                                                    │
-                                      React application + OBS
-                                      IndexedDB reconnect cache
+```mermaid
+flowchart LR
+  T[Twitch IRC / EventSub] --> P[Validation, permissions, cooldowns, approval]
+  V[Viewer controls] --> P
+  D[Director demo actions] --> P
+  P --> R[One authoritative WorldRuntime]
+  R --> F[Saved JSON snapshot]
+  R --> W[WebSocket snapshots]
+  W --> A[React application and OBS]
+  A --> C[Read-only IndexedDB cache]
 ```
 
 - `apps/web/`: React 19, TypeScript, Vite, product shell, Director Studio, OBS presentation, Dexie cache.

@@ -4469,3 +4469,126 @@ html.is-overlay #root {
     font-size: 10px;
   }
 }
+.relationship-history {
+  border-top: 1px solid var(--border);
+  margin-top: 17px;
+  padding-top: 16px;
+}
+.relationship-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #97b282;
+}
+.relationship-heading > span {
+  font-size: 9px;
+  letter-spacing: 0.8px;
+  font-weight: 600;
+  line-height: 1.7;
+}
+.relationship-heading > svg {
+  color: #bda593;
+}
+.relationship-row {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  background: transparent;
+  text-align: left;
+  width: calc(100% + 12px);
+  margin: 10px -6px 0;
+  padding: 9px 6px;
+  border-radius: 7px;
+  gap: 9px;
+}
+.relationship-row:hover:not(:disabled) {
+  background: #293923;
+}
+.relationship-row:disabled {
+  opacity: 0.8;
+}
+.relationship-person {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.relationship-person > span:nth-child(2),
+.relationship-person > span:only-child {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.relationship-person strong {
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.6;
+  color: #cbdcbd;
+  overflow-wrap: anywhere;
+}
+.relationship-person small {
+  font-size: 10px;
+  color: #8aa373;
+  line-height: 1.5;
+}
+.relationship-person > svg {
+  color: #91ae79;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.relationship-memory {
+  display: block;
+  font-size: 11px;
+  color: #a9b99b;
+  line-height: 1.85;
+  padding-left: 2px;
+  overflow-wrap: anywhere;
+}
+.relationship-memory.unrecorded {
+  font-size: 10px;
+  color: #7d956a;
+}
+.relationship-empty {
+  font-size: 11px;
+  color: #859c72;
+  line-height: 1.85;
+  margin-top: 12px;
+  max-width: 250px;
+}
+@media (max-width: 700px) {
+  .relationship-history {
+    margin-top: 20px;
+    padding-top: 18px;
+  }
+  .relationship-heading > span {
+    font-size: 10px;
+  }
+  .relationship-row {
+    padding-top: 11px;
+    padding-bottom: 11px;
+    gap: 11px;
+  }
+  .relationship-person {
+    gap: 11px;
+  }
+  .relationship-person strong {
+    font-size: 14px;
+  }
+  .relationship-person small {
+    font-size: 11px;
+  }
+  .relationship-memory {
+    font-size: 12px;
+    padding-left: 2px;
+  }
+  .relationship-memory.unrecorded {
+    font-size: 11px;
+  }
+  .relationship-empty {
+    font-size: 12px;
+    max-width: none;
+    margin-top: 15px;
+  }
+}

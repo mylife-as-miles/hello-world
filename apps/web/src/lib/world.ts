@@ -78,6 +78,7 @@ class WorldConnection {
   private socket: WebSocket | null = null;
   private retries = 0;
   private connectedOnce = false;
+  private connecting = false;
   private cacheTimer: ReturnType<typeof setTimeout> | undefined;
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   private started = false;
@@ -135,6 +136,13 @@ class WorldConnection {
     return new URL(import.meta.env.VITE_SERVER_URL || window.location.origin);
   }
   private async connect() {
+    if (
+      this.connecting ||
+      this.socket?.readyState === WebSocket.OPEN ||
+      this.socket?.readyState === WebSocket.CONNECTING
+    )
+      return;
+    this.connecting = true;
     this.patch({ connection: "connecting", isDirector: false });
     try {
       const response = await fetch(new URL("/api/status", this.baseUrl()), {
@@ -157,7 +165,11 @@ class WorldConnection {
       url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
       const ws = new WebSocket(url);
       this.socket = ws;
+      const handshakeTimer = setTimeout(() => {
+        if (ws.readyState === WebSocket.CONNECTING) ws.close();
+      }, 8000);
       ws.onopen = () => {
+        clearTimeout(handshakeTimer);
         this.retries = 0;
         this.patch({ connection: "online", error: null });
       };
@@ -178,6 +190,7 @@ class WorldConnection {
         });
       };
       ws.onclose = () => {
+        clearTimeout(handshakeTimer);
         if (this.socket === ws) {
           this.socket = null;
           this.reconnect();
@@ -189,6 +202,8 @@ class WorldConnection {
           "World server unavailable. Start the server to join; saved world is shown when available.",
       });
       this.reconnect();
+    } finally {
+      this.connecting = false;
     }
   }
   private reconnect() {

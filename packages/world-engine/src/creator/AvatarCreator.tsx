@@ -461,7 +461,7 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
           <div className="hwc-dock" ref={dockRef}>
             <div className="hwc-dock-row" role="group" aria-label="Preview expression">
               <span className="hwc-dock-label">Expression</span>
-              {!expressionsApply && <span className="hwc-dock-note" role="note">No facial rig on {baseName} — expressions work on Townie &amp; VRM bodies</span>}
+              {!expressionsApply && <span className="hwc-dock-note" role="note" title="Expressions work on Townie & VRM bodies">No facial rig on {baseName}</span>}
               {expressionsApply && EXPRESSION_BUTTONS.map(x => (
                 <button key={x.name} type="button" className={cls('hwc-pill', flash.expr === x.name && 'is-on')} aria-pressed={flash.expr === x.name}
                   aria-label={`Preview ${x.label.toLowerCase()} expression`} data-testid={`expr-${x.name}`} onClick={() => playExpression(x.name)}>

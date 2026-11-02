@@ -47,6 +47,8 @@ let EXTRA: ReadonlyArray<{ x: number; z: number; r: number; h: number }> = [];
 function blocked(ax: number, ay: number, az: number, bx: number, by: number, bz: number): boolean {
   for (let i = 0; i < EXTRA.length; i++) {
     const o = EXTRA[i]!;
+    // the camera itself must keep clear of props (no canopy / post filling the lens)
+    if (ay < o.h + 0.6 && Math.hypot(ax - o.x, az - o.z) < o.r + 1.0) return true;
     const dx = bx - ax, dz = bz - az;
     const fx = ax - o.x, fz = az - o.z;
     const A = dx * dx + dz * dz, B = 2 * (fx * dx + fz * dz), C = fx * fx + fz * fz - o.r * o.r;

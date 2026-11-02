@@ -173,7 +173,7 @@ function addBush(c: Ctx, batch: Batch, x: number, z: number, s: number, flowers 
 
 function addTree(c: Ctx, batch: Batch, x: number, z: number, kind: 'round' | 'pine' | 'birch' | 'blossom' | 'autumn', s: number, detail = 1, y0 = 0) {
   const r = c.r;
-  if (batch === c.solid && y0 === 0) c.occ?.push({ x, z, r: 1.15 * s, h: 4.3 * s });
+  if (batch === c.solid && y0 === 0) c.occ?.push({ x, z, r: 1.5 * s, h: 4.3 * s });
   if (y0 !== 0) {
     // Lift the whole tree onto the terrain via a wrapper batch transform.
     const sub = new Batch();

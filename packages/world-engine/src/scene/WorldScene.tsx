@@ -187,7 +187,7 @@ const WorldContent = memo(function WorldContent({
         selectedResidentId={selectedResidentId} onResidentSelect={onResidentSelect} quality={quality}
         viewerResidentId={viewerResidentId} overlay={transparent}
       />
-      <CameraRig mode={rigMode} selectedResidentId={selectedResidentId} />
+      <CameraRig mode={rigMode} selectedResidentId={selectedResidentId} transparent={transparent} />
       {quality === 'high' && !transparent && <PostFX />}
     </>
   );

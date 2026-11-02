@@ -296,7 +296,7 @@ function orbitShot(o: OrbitState, dt: number, speed: number, dist: number, h: nu
 
 /* ----------------------------------------------------------------- rig */
 
-export function CameraRig({ mode, selectedResidentId }: { mode: RigMode; selectedResidentId?: string }) {
+export function CameraRig({ mode, selectedResidentId, transparent = false }: { mode: RigMode; selectedResidentId?: string; transparent?: boolean }) {
   const camera = useThree(s => s.camera) as THREE.PerspectiveCamera;
   const store = useSceneStore();
   const kit = useKit();
@@ -394,6 +394,7 @@ export function CameraRig({ mode, selectedResidentId }: { mode: RigMode; selecte
     } else if (mode === 'follow') {
       const r = selectedResidentId ? store.getResident(selectedResidentId) : undefined;
       if (r) frame(s.follow, r.location.x, r.location.z, dt, 6.8, 3.1, 1.15, s.pos, s.look, false);
+      else if (transparent) overlayPose(store, s.overlay, camera, t, dt, s.pos, s.look);
       else poseFor('neighborhood', t, s.pos, s.look);
       rate = 2.4;
     } else if (mode === 'cinematic' && (t >= s.estNext || t - s.estAt < 8)) {

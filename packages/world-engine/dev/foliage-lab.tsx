@@ -3,8 +3,10 @@
  *   default: the variants side by side in front of a ≈400-tree forest (near meshes + far impostors)
  *   ?view=world (game-like camera: park stand + ≈400-tree belt) · ?view=row (variants only)
  *   ?view=park (PARK_TREE_PLACEMENTS close-up) · ?view=forest · ?q=low · ?far=<m>
+ *   &measure=1 — renders high, records GPU triangle/draw counts, switches to low, records,
+ *   then returns to high (one page load measures both qualities; numbers shown in the HUD).
  */
-import { StrictMode, useMemo } from 'react';
+import { StrictMode, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
@@ -14,6 +16,7 @@ const params = new URLSearchParams(location.search);
 const quality = (params.get('q') === 'low' ? 'low' : 'high') as 'low' | 'high';
 const view = params.get('view') ?? 'combo';
 const farParam = params.get('far');
+const measure = params.get('measure') === '1';
 
 function rowPlacements(): TreePlacement[] {
   return TREE_VARIANTS.map((_, i) => ({ x: (i - (TREE_VARIANTS.length - 1) / 2) * 7.5, z: 0, scale: 1, rot: i * 0.9, variant: i }));
@@ -56,13 +59,39 @@ function CameraSetup() {
   return null;
 }
 
-function Stats() {
+function Stats({ q }: { q: string }) {
   const gl = useThree((s) => s.gl);
+  const scene = useThree((s) => s.scene);
   let n = 0;
   useFrame(() => {
-    if (++n % 20 !== 0) return;
+    if (++n % 10 !== 0) return;
     const el = document.getElementById('stats');
-    if (el) el.textContent = `calls ${gl.info.render.calls} · tris ${gl.info.render.triangles} · q=${quality} · view=${view}`;
+    const lod = scene.getObjectByName('generated-trees')?.userData.lod as { near: number; mid: number; far: number } | undefined;
+    if (el) el.textContent = `calls ${gl.info.render.calls} · tris ${gl.info.render.triangles} · q=${q} · view=${view}` +
+      (lod ? ` · trees near ${lod.near} / mid ${lod.mid} / impostor ${lod.far}` : '');
+  });
+  return null;
+}
+
+/** ?measure=1: high → record → low → record → back to high (for the screenshot). */
+function Measure({ setQ }: { setQ: (q: 'low' | 'high') => void }) {
+  const gl = useThree((s) => s.gl);
+  const scene = useThree((s) => s.scene);
+  const st = useRef({ phase: 0, frames: 0, group: null as THREE.Object3D | null, out: [] as string[] });
+  useFrame(() => {
+    const m = st.current;
+    if (m.phase >= 2) return;
+    const g = scene.getObjectByName('generated-trees');
+    if (!g || !g.userData.lod) { m.frames = 0; return; }
+    if (g !== m.group) { m.group = g; m.frames = 0; }
+    if (++m.frames < 5) return;
+    const lod = g.userData.lod as { near: number; mid: number; far: number };
+    m.out.push(`${m.phase === 0 ? 'HIGH' : 'LOW'} ${gl.info.render.triangles} tris / ${gl.info.render.calls} calls (near ${lod.near}, mid ${lod.mid}, impostor ${lod.far})`);
+    const el = document.getElementById('measure');
+    if (el) el.textContent = m.out.join('  ·  ');
+    console.log('[foliage-lab measure]', m.out[m.out.length - 1]);
+    m.phase++;
+    setQ(m.phase === 1 ? 'low' : 'high');
   });
   return null;
 }
@@ -91,6 +120,7 @@ function Ground() {
 }
 
 function App() {
+  const [q, setQ] = useState<'low' | 'high'>(quality);
   const placements = useMemo(() => (view === 'park' ? PARK_TREE_PLACEMENTS
     : view === 'forest' ? forestPlacements()
     : view === 'world' ? [...PARK_TREE_PLACEMENTS, ...beltPlacements()]
@@ -108,12 +138,14 @@ function App() {
         <directionalLight position={[30, 45, 20]} color="#fff4e2" intensity={3.1} castShadow={quality === 'high'}
           shadow-mapSize={[1024, 1024]} shadow-camera-left={-40} shadow-camera-right={40} shadow-camera-top={40} shadow-camera-bottom={-40} shadow-bias={-0.0005} />
         <Ground />
-        <GeneratedTrees quality={quality} placements={placements} farDistance={farParam ? Number(farParam) : undefined} />
-        <Stats />
+        <GeneratedTrees quality={q} placements={placements} farDistance={farParam ? Number(farParam) : undefined} />
+        <Stats q={q} />
+        {measure && <Measure setQ={setQ} />}
       </Canvas>
       <div className="hud">
         <a href="?">combo</a><a href="?view=world">world</a><a href="?view=row">row</a><a href="?view=park">park</a><a href="?view=forest">forest</a><a href="?q=low">low</a>
         <span id="stats" />
+        <div id="measure" />
       </div>
     </>
   );

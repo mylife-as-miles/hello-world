@@ -7,10 +7,12 @@
  * rasterised by super-terrain's leaf-spray baker, recoloured onto a soft pastel ramp.
  *
  * Rendering (WebGL, MeshStandardMaterial):
- *  - near trees: one InstancedMesh per variant × {bark, leaves}; alpha-tested leaf cards;
- *    tiny onBeforeCompile wind sway; trunks cast shadows only when quality = 'high'.
- *  - far trees (beyond `farDistance`, default 90 m high / 65 m low): impostors (2 crossed
- *    side cards + 1 canopy card) rendered once at runtime from the same meshes (1 draw/variant).
+ *  - three distance bands, each one InstancedMesh per variant × material (≤ 5 draws/variant):
+ *    near  (high only, < min(45 m, 0.6·far)): full leaf-card crown + trunk shadows;
+ *    mid   (< farDistance; default 80 m high / 40 m low): 60 % of the cards, enlarged;
+ *    far   impostors (2 crossed side cards + 1 canopy card, 6 tris) rendered once at runtime
+ *          from the same meshes.
+ *    Alpha-tested leaf cards, tiny onBeforeCompile wind sway, mip-aware alpha.
  *  - soft blob contact shadow under every tree (1 draw call) so crowns sit on the ground.
  * React never re-renders per frame; LOD partitions are recomputed in useFrame only when the
  * camera moved. Everything created here is disposed on unmount.
@@ -26,7 +28,11 @@ export interface TreePlacement { x: number; z: number; y?: number; scale: number
 export interface GeneratedTreesProps {
   quality: TreeQuality;
   placements: ReadonlyArray<TreePlacement>;
-  /** Camera distance (m) beyond which trees switch to impostor cards. Default 90 (high) / 65 (low). */
+  /**
+   * Camera distance (m) beyond which trees become impostor cards. Default 80 (high) / 40 (low).
+   * On 'high', trees within min(45, 0.6 × farDistance) get the full crown + trunk shadows; the
+   * band in between (and everything up to farDistance on 'low') uses a sparse crown.
+   */
   farDistance?: number;
   /** Soft blob contact shadows under the crowns. Default true. */
   blobShadows?: boolean;
@@ -37,8 +43,8 @@ export const TREE_VARIANTS = ['broadleaf', 'conifer', 'birch', 'blossom', 'autum
 export type TreeVariantName = (typeof TREE_VARIANTS)[number];
 /** Placement `variant` index for a variant name. */
 export const TREE_VARIANT_INDEX: Record<TreeVariantName, number> = { broadleaf: 0, conifer: 1, birch: 2, blossom: 3, autumn: 4 };
-/** Baked heights in metres at scale 1. */
-export const TREE_VARIANT_HEIGHT: Record<TreeVariantName, number> = { broadleaf: 6.2, conifer: 7, birch: 6.6, blossom: 5.2, autumn: 5.8 };
+/** Approximate crown-top height in metres at scale 1 (trunk base at y = 0). */
+export const TREE_VARIANT_HEIGHT: Record<TreeVariantName, number> = { broadleaf: 7.0, conifer: 7.0, birch: 7.5, blossom: 6.4, autumn: 6.5 };
 
 const GLB_URLS: string[] = [
   new URL('./assets/tree-broadleaf.glb', import.meta.url).href,
@@ -56,7 +62,13 @@ const BLOB_RADIUS = [2.6, 2.1, 2.4, 2.7, 2.5];
 /** Impostor tile background (alpha 0): mips blend toward the crown colour, never a foreign hue. */
 const IMPOSTOR_BG = ['#7fb04f', '#4f8a5a', '#9cc760', '#f0a8c4', '#f0a050'];
 
-interface VariantGeometry { wood: THREE.BufferGeometry; leaves: THREE.BufferGeometry; box: THREE.Box3 }
+interface VariantGeometry {
+  wood: THREE.BufferGeometry;
+  leaves: THREE.BufferGeometry;
+  /** ~60 % of the leaf cards, each enlarged ×1.22 (mid-distance LOD / quality 'low'). */
+  sparse: THREE.BufferGeometry;
+  box: THREE.Box3;
+}
 interface TreeAssets { variants: VariantGeometry[]; atlas: THREE.Texture }
 
 let assetsPromise: Promise<TreeAssets> | null = null;
@@ -80,7 +92,7 @@ function loadTreeAssets(): Promise<TreeAssets> {
       const w = wood as THREE.BufferGeometry, l = leaves as THREE.BufferGeometry;
       w.computeBoundingBox(); l.computeBoundingBox();
       const box = w.boundingBox!.clone().union(l.boundingBox!);
-      return { wood: w, leaves: l, box };
+      return { wood: w, leaves: l, sparse: makeSparseLeaves(l, 0.6, 1.22), box };
     }));
     const atlas = await atlasPromise;
     atlas.colorSpace = THREE.SRGBColorSpace;
@@ -91,6 +103,47 @@ function loadTreeAssets(): Promise<TreeAssets> {
     return assetsValue;
   })();
   return assetsPromise;
+}
+
+/**
+ * Keeps `keep` of the 4-vertex leaf cards (evenly spread) and grows each kept card about its
+ * base edge so the crown silhouette survives with far fewer triangles.
+ */
+function makeSparseLeaves(leaves: THREE.BufferGeometry, keep: number, grow: number): THREE.BufferGeometry {
+  const pos = leaves.getAttribute('position') as THREE.BufferAttribute;
+  const cards = Math.floor(pos.count / 4);
+  const names = ['position', 'normal', 'uv', 'color'] as const;
+  const src = names.map((n) => leaves.getAttribute(n) as THREE.BufferAttribute | undefined);
+  const kept: number[] = [];
+  for (let c = 0; c < cards; c++) if (Math.floor((c + 1) * keep) > Math.floor(c * keep)) kept.push(c);
+  const out = new THREE.BufferGeometry();
+  names.forEach((name, k) => {
+    const a = src[k];
+    if (!a) return;
+    const size = a.itemSize;
+    const data = new Float32Array(kept.length * 4 * size);
+    kept.forEach((c, j) => {
+      for (let v = 0; v < 4; v++) for (let e = 0; e < size; e++) data[(j * 4 + v) * size + e] = a.getComponent(c * 4 + v, e);
+    });
+    if (name === 'position') {
+      for (let j = 0; j < kept.length; j++) {
+        // card corners: 0,1 = base edge, 2,3 = tip edge (see tools/bake-trees.cts)
+        const b = j * 12;
+        const bx = (data[b]! + data[b + 3]!) / 2, by = (data[b + 1]! + data[b + 4]!) / 2, bz = (data[b + 2]! + data[b + 5]!) / 2;
+        for (let v = 0; v < 4; v++) {
+          const o = b + v * 3;
+          data[o] = bx + (data[o]! - bx) * grow; data[o + 1] = by + (data[o + 1]! - by) * grow; data[o + 2] = bz + (data[o + 2]! - bz) * grow;
+        }
+      }
+    }
+    out.setAttribute(name, new THREE.BufferAttribute(data, size));
+  });
+  const index: number[] = [];
+  for (let j = 0; j < kept.length; j++) index.push(j * 4, j * 4 + 1, j * 4 + 2, j * 4, j * 4 + 2, j * 4 + 3);
+  out.setIndex(index);
+  out.computeBoundingBox();
+  out.computeBoundingSphere();
+  return out;
 }
 
 /**
@@ -262,16 +315,23 @@ function makeBlobTexture(): THREE.DataTexture {
 }
 
 // ---------------------------------------------------------------- forest build
+/** LOD band per tree: 0 = near (full crown, trunk shadows on high), 1 = mid (sparse crown), 2 = impostor. */
+type Band = 0 | 1 | 2;
 interface VariantBatch {
   matrices: Float32Array; // 16 per tree, in placement order
   colors: Float32Array; // 3 per tree
   positions: Float32Array; // 3 per tree (LOD distance)
-  far: Uint8Array; // current LOD state per tree
-  trunks: THREE.InstancedMesh;
-  crowns: THREE.InstancedMesh;
-  cards: THREE.InstancedMesh;
+  band: Uint8Array; // current band per tree
+  meshes: [trunksNear: THREE.InstancedMesh, crownsNear: THREE.InstancedMesh, trunksMid: THREE.InstancedMesh, crownsMid: THREE.InstancedMesh, cards: THREE.InstancedMesh];
 }
-interface BuiltForest { group: THREE.Group; wind: { value: number }; updateLod(camera: THREE.Vector3, farDistance: number, force: boolean): void; dispose(): void }
+interface LodStats { near: number; mid: number; far: number }
+interface BuiltForest {
+  group: THREE.Group;
+  wind: { value: number };
+  /** Re-partitions trees by camera distance; returns per-band counts. */
+  updateLod(camera: THREE.Vector3, nearDistance: number, farDistance: number, force: boolean): LodStats;
+  dispose(): void;
+}
 
 function buildForest(assets: TreeAssets, impostors: Impostors, placements: ReadonlyArray<TreePlacement>, quality: TreeQuality, blobShadows: boolean): BuiltForest {
   const group = new THREE.Group();
@@ -315,12 +375,15 @@ function buildForest(assets: TreeAssets, impostors: Impostors, placements: Reado
     const matrices = new Float32Array(count * 16);
     const colors = new Float32Array(count * 3);
     const positions = new Float32Array(count * 3);
-    const trunks = new THREE.InstancedMesh(geo.wood, bark, count);
-    const crowns = new THREE.InstancedMesh(geo.leaves, leaf, count);
-    const cards = new THREE.InstancedMesh(impostors.cards[v]!, farMaterial, count);
-    trunks.name = `tree-${TREE_VARIANTS[v]}-wood`;
-    crowns.name = `tree-${TREE_VARIANTS[v]}-leaves`;
-    cards.name = `tree-${TREE_VARIANTS[v]}-impostor`;
+    const meshes: VariantBatch['meshes'] = [
+      new THREE.InstancedMesh(geo.wood, bark, count),
+      new THREE.InstancedMesh(geo.leaves, leaf, count),
+      new THREE.InstancedMesh(geo.wood, bark, count),
+      new THREE.InstancedMesh(geo.sparse, leaf, count),
+      new THREE.InstancedMesh(impostors.cards[v]!, farMaterial, count),
+    ];
+    const label = TREE_VARIANTS[v] ?? `v${v}`;
+    ['wood-near', 'leaves-near', 'wood-mid', 'leaves-mid', 'impostor'].forEach((suffix, k) => { meshes[k]!.name = `tree-${label}-${suffix}`; });
     list.forEach((p, i) => {
       const k = p.scale > 0 ? p.scale : 1;
       pos.set(p.x, (p.y ?? 0) - 0.06 * k, p.z); // sink a little so root flares never float on slopes
@@ -328,25 +391,26 @@ function buildForest(assets: TreeAssets, impostors: Impostors, placements: Reado
       scl.setScalar(k);
       matrix.compose(pos, quat, scl);
       matrix.toArray(matrices, i * 16);
-      positions[i * 3] = p.x; positions[i * 3 + 1] = (p.y ?? 0) + 3 * scl.y; positions[i * 3 + 2] = p.z;
+      positions[i * 3] = p.x; positions[i * 3 + 1] = (p.y ?? 0) + 3 * k; positions[i * 3 + 2] = p.z;
       // gentle per-tree value/hue jitter so a stand never looks copy-pasted
       const h = Math.sin(p.x * 12.9898 + p.z * 78.233) * 43758.5453;
       const r = h - Math.floor(h);
       tint.setRGB(1, 1, 1).offsetHSL((r - 0.5) * 0.04, 0, (r - 0.5) * 0.14);
       tint.toArray(colors, i * 3);
       // full set once so bounding spheres cover every tree (stays conservative for subsets)
-      trunks.setMatrixAt(i, matrix); crowns.setMatrixAt(i, matrix); cards.setMatrixAt(i, matrix);
-      crowns.setColorAt(i, tint); cards.setColorAt(i, tint);
+      for (const m of meshes) { m.setMatrixAt(i, matrix); m.setColorAt(i, tint); }
     });
-    for (const m of [trunks, crowns, cards]) { m.computeBoundingSphere(); m.instanceMatrix.setUsage(THREE.DynamicDrawUsage); }
-    trunks.castShadow = quality === 'high';
-    trunks.receiveShadow = quality === 'high';
-    crowns.castShadow = false; crowns.receiveShadow = false;
-    cards.castShadow = false; cards.receiveShadow = false;
-    cards.count = 0;
-    group.add(trunks, crowns, cards);
-    disposables.push(trunks, crowns, cards);
-    batches.push({ matrices, colors, positions, far: new Uint8Array(count), trunks, crowns, cards });
+    for (const m of meshes) {
+      m.computeBoundingSphere();
+      m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      m.castShadow = false; m.receiveShadow = false;
+      m.count = 0;
+    }
+    meshes[0].castShadow = quality === 'high';
+    meshes[0].receiveShadow = quality === 'high';
+    group.add(...meshes);
+    disposables.push(...meshes);
+    batches.push({ matrices, colors, positions, band: new Uint8Array(count).fill(255), meshes });
   });
 
   if (blobShadows) {
@@ -371,35 +435,50 @@ function buildForest(assets: TreeAssets, impostors: Impostors, placements: Reado
     }
   }
 
+  const HYST = 4; // metres of hysteresis so trees on a band edge do not flicker
   return {
     group, wind,
-    updateLod(camera, farDistance, force) {
-      const nearSq = farDistance * farDistance;
-      const farSq = (farDistance + 5) * (farDistance + 5);
+    updateLod(camera, nearDistance, farDistance, force) {
+      const stats: LodStats = { near: 0, mid: 0, far: 0 };
       for (const b of batches) {
         let changed = force;
-        const count = b.far.length;
+        const count = b.band.length;
         for (let i = 0; i < count; i++) {
           const dx = b.positions[i * 3]! - camera.x, dy = b.positions[i * 3 + 1]! - camera.y, dz = b.positions[i * 3 + 2]! - camera.z;
-          const d = dx * dx + dy * dy + dz * dz;
-          const state = b.far[i]!;
-          const next = d > farSq ? 1 : d < nearSq ? 0 : state; // hysteresis band avoids popping
-          if (next !== state) { b.far[i] = next; changed = true; }
+          const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+          const prev = b.band[i]!;
+          const strict: Band = d < nearDistance ? 0 : d < farDistance ? 1 : 2;
+          let next: Band = strict;
+          if (!force && prev !== 255 && prev !== strict) {
+            // only leave the current band once clearly past its edge
+            const edgeLow = prev === 0 ? -Infinity : prev === 1 ? nearDistance : farDistance;
+            const edgeHigh = prev === 0 ? nearDistance : prev === 1 ? farDistance : Infinity;
+            if (d > edgeLow - HYST && d < edgeHigh + HYST) next = prev as Band;
+          }
+          if (next !== prev) { b.band[i] = next; changed = true; }
         }
-        if (!changed) continue;
-        let ni = 0, fi = 0;
-        const tm = b.trunks.instanceMatrix.array as Float32Array, cm = b.crowns.instanceMatrix.array as Float32Array, fm = b.cards.instanceMatrix.array as Float32Array;
-        const cc = b.crowns.instanceColor!.array as Float32Array, fc = b.cards.instanceColor!.array as Float32Array;
-        for (let i = 0; i < count; i++) {
-          const src = b.matrices.subarray(i * 16, i * 16 + 16);
-          const col = b.colors.subarray(i * 3, i * 3 + 3);
-          if (b.far[i]) { fm.set(src, fi * 16); fc.set(col, fi * 3); fi++; }
-          else { tm.set(src, ni * 16); cm.set(src, ni * 16); cc.set(col, ni * 3); ni++; }
+        if (changed) {
+          const cursor = [0, 0, 0, 0, 0];
+          const mats = b.meshes.map((m) => m.instanceMatrix.array as Float32Array);
+          const cols = b.meshes.map((m) => m.instanceColor!.array as Float32Array);
+          const put = (k: number, i: number) => {
+            mats[k]!.set(b.matrices.subarray(i * 16, i * 16 + 16), cursor[k]! * 16);
+            cols[k]!.set(b.colors.subarray(i * 3, i * 3 + 3), cursor[k]! * 3);
+            cursor[k]!++;
+          };
+          for (let i = 0; i < count; i++) {
+            const band = b.band[i]!;
+            if (band === 0) { put(0, i); put(1, i); } else if (band === 1) { put(2, i); put(3, i); } else put(4, i);
+          }
+          b.meshes.forEach((m, k) => {
+            m.count = cursor[k]!;
+            m.instanceMatrix.needsUpdate = true;
+            m.instanceColor!.needsUpdate = true;
+          });
         }
-        b.trunks.count = ni; b.crowns.count = ni; b.cards.count = fi;
-        b.trunks.instanceMatrix.needsUpdate = true; b.crowns.instanceMatrix.needsUpdate = true; b.cards.instanceMatrix.needsUpdate = true;
-        b.crowns.instanceColor!.needsUpdate = true; b.cards.instanceColor!.needsUpdate = true;
+        stats.near += b.meshes[0].count; stats.mid += b.meshes[2].count; stats.far += b.meshes[4].count;
       }
+      return stats;
     },
     dispose() { for (const d of disposables) d.dispose(); group.clear(); },
   };
@@ -430,7 +509,7 @@ export function GeneratedTrees({ quality, placements, farDistance, blobShadows =
       alive = false;
       // free GPU copies of the shared assets; three re-uploads them if another instance mounts
       if (assetsValue) {
-        for (const v of assetsValue.variants) { v.wood.dispose(); v.leaves.dispose(); }
+        for (const v of assetsValue.variants) { v.wood.dispose(); v.leaves.dispose(); v.sparse.dispose(); }
         assetsValue.atlas.dispose();
       }
     };
@@ -451,18 +530,21 @@ export function GeneratedTrees({ quality, placements, farDistance, blobShadows =
     return () => { forest.dispose(); setBuilt(null); };
   }, [assets, impostors, stablePlacements, quality, blobShadows]);
 
-  const far = farDistance ?? (quality === 'high' ? 90 : 65);
-  const last = useRef({ x: NaN, y: NaN, z: NaN, built: null as BuiltForest | null, far: NaN, eye: new THREE.Vector3() });
+  const far = farDistance ?? (quality === 'high' ? 80 : 40);
+  // full crowns + trunk shadows only close up on 'high'; 'low' never draws the full crown
+  const near = quality === 'high' ? Math.min(45, far * 0.6) : 0;
+  const last = useRef({ x: NaN, y: NaN, z: NaN, built: null as BuiltForest | null, far: NaN, near: NaN, eye: new THREE.Vector3() });
   useFrame(({ camera }, dt) => {
     if (!built) return;
     built.wind.value += Math.min(dt, 0.1);
     const l = last.current;
     // camera in the forest group's local space (works when mounted under a transformed parent)
     const c = built.group.worldToLocal(camera.getWorldPosition(l.eye));
-    const fresh = l.built !== built || l.far !== far;
+    const fresh = l.built !== built || l.far !== far || l.near !== near;
     if (fresh || (c.x - l.x) ** 2 + (c.y - l.y) ** 2 + (c.z - l.z) ** 2 > 1) {
-      built.updateLod(c, far, fresh);
-      l.x = c.x; l.y = c.y; l.z = c.z; l.built = built; l.far = far;
+      const stats = built.updateLod(c, near, far, fresh);
+      built.group.userData.lod = stats; // { near, mid, far } tree counts, handy for debugging/HUDs
+      l.x = c.x; l.y = c.y; l.z = c.z; l.built = built; l.far = far; l.near = near;
     }
   });
   return built ? <primitive object={built.group} /> : null;

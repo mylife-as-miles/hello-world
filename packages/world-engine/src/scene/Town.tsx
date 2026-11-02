@@ -26,6 +26,10 @@ export function Town({ quality, onLocationSelect, horizon = true, reservedTrees,
   useEffect(() => () => {
     for (const g of [town.solid, town.detail, town.far, town.flat, town.glass, town.bulbs, town.ground]) g.dispose();
   }, [town]);
+  useEffect(() => {
+    kit.occluders = town.occluders;
+    return () => { if (kit.occluders === town.occluders) kit.occluders = []; };
+  }, [kit, town]);
 
   const plaza = useMemo(() => {
     const tex = makePlazaTexture(kit);

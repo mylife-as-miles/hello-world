@@ -9,6 +9,7 @@ export {
   buildForestPlacements, getForestPlacements, forestCover, FOREST_VARIANTS,
   type ForestPlacement, type ForestOptions, type ForestVariantName,
 } from './forest';
+export { buildRockPlacements, type RockPlacement } from './rocks';
 import { getForestPlacements } from './forest';
 
 /** Default forest (high quality) on gentle slopes outside 38.5 m, y = terrainHeightAt. Generated once at import. */

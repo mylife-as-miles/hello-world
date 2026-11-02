@@ -16,6 +16,7 @@ import * as THREE from 'three';
 import { noise2 } from '../batch';
 import type { SharedUniforms } from '../kit';
 import { forestCover } from './forest';
+import { buildRockPlacements } from './rocks';
 import { LAKE, LANDSCAPE_FLAT_RADIUS, LANDSCAPE_INNER_RADIUS, LANDSCAPE_OUTER_RADIUS, sampleTerrain } from './terrain';
 import { clamp, smoothstep } from './superTerrainNoise';
 
@@ -24,6 +25,8 @@ export interface BuiltLandscape {
   terrainMat: THREE.MeshStandardMaterial;
   lake: THREE.BufferGeometry;
   lakeMat: THREE.MeshStandardMaterial;
+  /** All boulders in one instanced draw call. */
+  rocks: THREE.InstancedMesh;
   dispose(): void;
 }
 
@@ -54,10 +57,54 @@ export function buildLandscape(quality: 'low' | 'high', weather: SharedUniforms 
   });
   lakeMat.onBeforeCompile = shader => patchLandscapeFog(shader);
   lakeMat.customProgramCacheKey = () => 'hw-landscape-lake';
+  const rocks = buildRocks(quality);
   return {
-    terrain, terrainMat, lake, lakeMat,
-    dispose() { terrain.dispose(); terrainMat.dispose(); lake.dispose(); lakeMat.dispose(); },
+    terrain, terrainMat, lake, lakeMat, rocks,
+    dispose() {
+      terrain.dispose(); terrainMat.dispose(); lake.dispose(); lakeMat.dispose();
+      rocks.geometry.dispose(); (rocks.material as THREE.Material).dispose(); rocks.dispose();
+    },
   };
+}
+
+/* -------------------------------------------------------------------- rocks */
+
+const ROCK_TONES = [col('#b9ad9a'), col('#a49a8b'), col('#c3b7a2'), col('#9a9286')];
+
+function buildRocks(quality: 'low' | 'high'): THREE.InstancedMesh {
+  // Faceted low-poly boulder: displaced icosahedron, flat shaded (matches the town's stylised rocks).
+  const geo = new THREE.IcosahedronGeometry(1, 1);
+  const p = geo.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+    const n = noise2(x * 1.7 + 3.1, z * 1.7 + y * 2.3, 5);
+    const k = 0.78 + n * 0.42;
+    p.setXYZ(i, x * k, y * k * (y < 0 ? 0.55 : 1), z * k);
+  }
+  geo.computeVertexNormals();
+  const mat = new THREE.MeshStandardMaterial({ roughness: 0.9, metalness: 0, flatShading: true });
+  mat.onBeforeCompile = shader => patchLandscapeFog(shader);
+  mat.customProgramCacheKey = () => 'hw-landscape-rock';
+  const placements = buildRockPlacements(quality);
+  const mesh = new THREE.InstancedMesh(geo, mat, Math.max(1, placements.length));
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), pos = new THREE.Vector3();
+  const e = new THREE.Euler();
+  const c = new THREE.Color();
+  placements.forEach((r, i) => {
+    e.set((r.tone - 0.5) * 0.3, r.rot, (r.squash - 0.75) * 0.4);
+    q.setFromEuler(e);
+    sc.set(r.scale * (1.1 - r.squash * 0.2), r.scale * r.squash, r.scale);
+    pos.set(r.x, r.y, r.z);
+    mesh.setMatrixAt(i, m.compose(pos, q, sc));
+    mesh.setColorAt(i, c.copy(ROCK_TONES[Math.floor(r.tone * ROCK_TONES.length) % ROCK_TONES.length]!));
+  });
+  mesh.count = placements.length;
+  mesh.instanceMatrix.needsUpdate = true;
+  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  mesh.computeBoundingSphere();
+  mesh.receiveShadow = true;
+  mesh.name = 'landscape-rocks';
+  return mesh;
 }
 
 /* ------------------------------------------------------------------ terrain */

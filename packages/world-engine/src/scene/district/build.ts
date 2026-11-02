@@ -51,6 +51,14 @@ class Writer {
       this.poly([[ax, y0, az], [bx, y0, bz], [bx, y1, bz], [ax, y1, az]], col, glow);
     }
   }
+  /** Gabled roof, ridge along X (slopes overhang by `ov`; gable ends in `wallCol`). */
+  gable(x0: number, z0: number, x1: number, z1: number, y: number, h: number, roofCol: RGB, wallCol: RGB, ov = 0.45) {
+    const zm = (z0 + z1) / 2, ye = y - 0.25;
+    this.poly([[x0 - ov, ye, z1 + ov], [x1 + ov, ye, z1 + ov], [x1 + ov, y + h, zm], [x0 - ov, y + h, zm]], roofCol);
+    this.poly([[x1 + ov, ye, z0 - ov], [x0 - ov, ye, z0 - ov], [x0 - ov, y + h, zm], [x1 + ov, y + h, zm]], roofCol);
+    this.poly([[x0, y, z0], [x0, y, z1], [x0, y + h, zm]], wallCol);
+    this.poly([[x1, y, z1], [x1, y, z0], [x1, y + h, zm]], wallCol);
+  }
   /** Square pyramid (roof cap / spire). */
   pyramid(cx: number, y0: number, cz: number, hx: number, hz: number, h: number, col: RGB, glow: RGB = BLACK) {
     const ring: Array<[number, number]> = [[cx - hx, cz + hz], [cx + hx, cz + hz], [cx + hx, cz - hz], [cx - hx, cz - hz], [cx - hx, cz + hz]];
@@ -95,6 +103,7 @@ function addTree(p: Writer, x: number, y: number, z: number, s: number, crown: R
 const WALLS = ['#f3e3c3', '#ecd2a8', '#e3a687', '#f1c09a', '#c9d3ad', '#b3c6d6', '#cdbfdc', '#d28a6c', '#ddd0c0', '#bfe0cc', '#f2dc98', '#e9b7b0', '#c7a58a', '#a9c4bd'].map(h => lin(h));
 const TRIMS = ['#fbf3e4', '#efe2cc', '#d9c7ae', '#b9a68f'].map(h => lin(h));
 const ROOFS = ['#9a8f88', '#8c8a8f', '#a69886', '#7f8a86'].map(h => lin(h));
+const GABLE_ROOFS = ['#d9634a', '#3d5a8a', '#8a5a44', '#e07b55', '#5f7f6a', '#b84f45'].map(h => lin(h));
 const AWNINGS = ['#e7745f', '#4fa3a5', '#f2b84b', '#8a6fc7', '#5f9e6e', '#e36aa6'].map(h => lin(h));
 const NEON = ['#ff6fae', '#5fe3ff', '#ffd25e', '#9d7bff', '#7dffb0', '#ff8f5e'];
 const SHOP_GLASS = lin('#5f6874');
@@ -104,8 +113,8 @@ const SIDEWALK = lin('#d8cbb7');
 const CURB = lin('#bcae9a');
 const DASH = lin('#f4e2a2');
 const POLE = lin('#33393a');
-const LAMP_HEAD = lin('#fff1cf');
-const LAMP_GLOW = lin('#ffcf87', 2.6);
+const LAMP_HEAD = lin('#f7e6c4');
+const LAMP_GLOW = lin('#ffc070', 1.9);
 const POOL_GLOW = lin('#ffb867', 0.55);
 const BEACON = lin('#ff4a3d');
 const BEACON_GLOW = lin('#ff3b2f', 3.2);
@@ -251,6 +260,18 @@ function addBuilding(f: Writer, p: Writer, lot: DistrictLot, high: boolean) {
     thz = Math.max(lot.bayW, Math.round((hz * shrink * 2) / lot.bayW) * lot.bayW / 2);
     p.box(lot.x - hx, top + 0.6, lot.z - hz, lot.x + hx, top + 0.6, lot.z + hz, roof, BLACK, true); // ledge roof
     top = facade(lot.x - thx, lot.z - thz, lot.x + thx, lot.z + thz, top + 0.6, floors - towerSplit, 7);
+  }
+
+  // Cozy low-rises (high quality): pitched roof like the neighborhood houses
+  if (high && lot.style === 'low' && rnd() < 0.5) {
+    p.box(lot.x - thx - 0.15, top, lot.z - thz - 0.15, lot.x + thx + 0.15, top + 0.45, lot.z + thz + 0.15, trim);
+    const gr = GABLE_ROOFS[Math.floor(rnd() * GABLE_ROOFS.length)]!;
+    p.gable(lot.x - thx, lot.z - thz, lot.x + thx, lot.z + thz, top + 0.45, Math.min(5.5, thz * 0.75), gr, wall);
+    if (rnd() < 0.6) { // chimney
+      const cx = lot.x + (rnd() - 0.5) * thx, cz = lot.z + thz * 0.35;
+      p.box(cx - 0.45, top + 0.45, cz - 0.45, cx + 0.45, top + 0.45 + Math.min(5.5, thz * 0.75) + 0.9, cz + 0.45, lin('#9b5e4a'));
+    }
+    return;
   }
 
   // Cornice + roof cap

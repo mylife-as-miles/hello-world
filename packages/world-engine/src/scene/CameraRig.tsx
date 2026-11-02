@@ -15,6 +15,7 @@ import type { CameraMode, WorldEvent } from '@hello-world/contracts';
 import { useSceneStore } from '../core/SceneContext';
 import type { SceneStore } from '../core/sceneStore';
 import { BUILDINGS, getPoi } from '../world/layout';
+import { useKit } from './context';
 
 export type RigMode = CameraMode | 'overlay';
 
@@ -41,7 +42,21 @@ const OCCLUDERS: Occluder[] = (() => {
 })();
 
 /** Is the segment camera(a) → target(b) blocked by any occluder (2D footprint + height)? Allocation-free. */
+let EXTRA: ReadonlyArray<{ x: number; z: number; r: number; h: number }> = [];
+
 function blocked(ax: number, ay: number, az: number, bx: number, by: number, bz: number): boolean {
+  for (let i = 0; i < EXTRA.length; i++) {
+    const o = EXTRA[i]!;
+    const dx = bx - ax, dz = bz - az;
+    const fx = ax - o.x, fz = az - o.z;
+    const A = dx * dx + dz * dz, B = 2 * (fx * dx + fz * dz), C = fx * fx + fz * fz - o.r * o.r;
+    const disc = B * B - 4 * A * C;
+    if (A < 1e-9 || disc <= 0) continue;
+    const sq = Math.sqrt(disc);
+    const t0 = Math.max(0, (-B - sq) / (2 * A)), t1 = Math.min(1, (-B + sq) / (2 * A));
+    if (t0 > t1 || t1 >= 0.97) continue; // ignore props right at the subject
+    if (Math.min(ay + (by - ay) * t0, ay + (by - ay) * t1) < o.h) return true;
+  }
   for (let i = 0; i < OCCLUDERS.length; i++) {
     const o = OCCLUDERS[i]!;
     let t0 = 0, t1 = 1;
@@ -110,7 +125,7 @@ export function poseFor(mode: RigMode, t: number, outPos: THREE.Vector3, outLook
     default:
       // neighborhood: ~40% closer + lower than the old establishing shot, over plaza + stage + café
       outPos.set(-0.6 + Math.sin(t * 0.05) * 1.6, 14.6 + Math.sin(t * 0.07) * 0.5, 23.2 + Math.cos(t * 0.05) * 0.8);
-      outLook.set(4.2, 0.6, 0.6);
+      outLook.set(4.2, 2.0, 0.2);
   }
 }
 
@@ -263,7 +278,8 @@ function overlayPose(store: SceneStore, f: OverlayFit, cam: THREE.PerspectiveCam
 export function CameraRig({ mode, selectedResidentId }: { mode: RigMode; selectedResidentId?: string }) {
   const camera = useThree(s => s.camera) as THREE.PerspectiveCamera;
   const store = useSceneStore();
-  const look = useRef(new THREE.Vector3(4.2, 0.6, 0.6));
+  const kit = useKit();
+  const look = useRef(new THREE.Vector3(4.2, 2.0, 0.6));
   const controls = useRef<OrbitLike | null>(null);
   const first = useRef(true);
   const s = useMemo(() => ({
@@ -301,6 +317,7 @@ export function CameraRig({ mode, selectedResidentId }: { mode: RigMode; selecte
   useFrame((state, rawDt) => {
     const dt = Math.min(rawDt, 1);
     const t = state.clock.elapsedTime;
+    EXTRA = kit.occluders;
     if (mode === 'orbit') {
       if (controls.current) look.current.copy(controls.current.target);
       first.current = false;

@@ -39,8 +39,13 @@ export interface FxApi {
   emitConfetti: (origin: THREE.Vector3, count: number) => void;
 }
 
+/** Vertical cylinders the camera director avoids (lamp posts, trees, planters…), published by Town. */
+export interface CameraOccluder { x: number; z: number; r: number; h: number }
+
 export interface SceneKit {
   env: EnvState;
+  /** Small occluders for camera framing (filled by Town after it builds). */
+  occluders: CameraOccluder[];
   uniforms: SharedUniforms;
   fx: FxApi;
   /** Vertex-coloured lit material for all static props/buildings. */
@@ -108,7 +113,7 @@ export function createKit(): SceneKit {
   const fx: FxApi = { raidAt: -1e9, emitSparkles: () => {}, emitConfetti: () => {} };
 
   return {
-    env, uniforms, fx, solid, ground, glass, bulbs, track,
+    env, uniforms, fx, solid, ground, glass, bulbs, track, occluders: [],
     dispose() { for (const d of disposables) d.dispose(); },
   };
 }

@@ -88,6 +88,8 @@ export function sampleTerrain(x: number, z: number): TerrainSample {
     const spine = smoothstep(108, 192, r);
     const regional = fbm(X * 0.00028, Z * 0.00028, SEED + 11, 3, 2.1, 0.5);
     massif = clamp(smoothstep(0.18, 0.78, spine * 0.75 + regional * 0.55 + 0.08), 0, 1) * smoothstep(96, 136, r);
+    // The lake sits in an open valley: the range steps back from its shore.
+    if (lakeD < 3) massif *= smoothstep(1.15, 3, lakeD);
     // Domain-warped ridged multifractal (the range itself).
     warpX = fbm(X * 0.0011, Z * 0.0011, SEED + 71, 3, 2.2, 0.5) * 240;
     warpZ = fbm(X * 0.0011 + 5.7, Z * 0.0011 - 3.1, SEED + 73, 3, 2.2, 0.5) * 240;

@@ -106,8 +106,9 @@ function World() {
       ev({ kind: 'social', actorId: 'seed:bram', actorDisplayName: 'Bram', targetId: 'seed:pixelcat', payload: { action: 'greet', sentiment: 'negative' }, source: 'simulation', text: 'Hmph. Not now, PixelCat.' }),
     ];
     const timers: ReturnType<typeof setTimeout>[] = [];
-    script().forEach((e, i) => timers.push(setTimeout(() => runtime.dispatch(e), 400 + i * 250)));
-    const iv = setInterval(() => script().forEach((e, i) => timers.push(setTimeout(() => runtime.dispatch({ ...e, id: `${e.id}-${Date.now()}` }), i * 250))), 4000);
+    const scripted = params.get('script') !== '0';
+    if (scripted) script().forEach((e, i) => timers.push(setTimeout(() => runtime.dispatch(e), 400 + i * 250)));
+    const iv = setInterval(() => { if (scripted) script().forEach((e, i) => timers.push(setTimeout(() => runtime.dispatch({ ...e, id: `${e.id}-${Date.now()}` }), i * 250))); }, 4000);
     timers.push(iv as unknown as ReturnType<typeof setTimeout>);
     return () => { timers.forEach(clearTimeout); clearInterval(iv); };
   }, [runtime]);

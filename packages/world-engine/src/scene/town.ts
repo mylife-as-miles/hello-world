@@ -37,6 +37,8 @@ export interface TownGeometry {
   lamps: THREE.Vector3[];
   chimneys: THREE.Vector3[];
   signs: SignDef[];
+  /** Camera occluders (trees, lamp posts, planters) as vertical cylinders. */
+  occluders: Array<{ x: number; z: number; r: number; h: number }>;
 }
 
 export const STAGE_POLE_HEIGHT = 3.45;
@@ -120,6 +122,7 @@ interface Ctx {
   solid: Batch; detail: Batch; far: Batch; flat: Batch; glass: Batch; bulbs: Batch;
   P: Prims; r: () => number; space: Space; q: number;
   lamps: THREE.Vector3[]; chimneys: THREE.Vector3[]; signs: SignDef[];
+  occ?: Array<{ x: number; z: number; r: number; h: number }>;
 }
 
 const pick = <T,>(r: () => number, a: readonly T[]): T => a[Math.floor(r() * a.length) % a.length]!;
@@ -164,6 +167,7 @@ function addBush(c: Ctx, batch: Batch, x: number, z: number, s: number, flowers 
 
 function addTree(c: Ctx, batch: Batch, x: number, z: number, kind: 'round' | 'pine' | 'birch' | 'blossom' | 'autumn', s: number, detail = 1, y0 = 0) {
   const r = c.r;
+  if (batch === c.solid && y0 === 0) c.occ?.push({ x, z, r: 1.15 * s, h: 4.3 * s });
   if (y0 !== 0) {
     // Lift the whole tree onto the terrain via a wrapper batch transform.
     const sub = new Batch();
@@ -194,6 +198,7 @@ function addTree(c: Ctx, batch: Batch, x: number, z: number, kind: 'round' | 'pi
 
 function addWillow(c: Ctx, x: number, z: number, s: number) {
   const b = c.solid;
+  c.occ?.push({ x, z, r: 1.9 * s, h: 3.6 * s });
   b.add(c.P.tcyl(0.65, 8), '#7d5a3e', mtx(x, 1.1 * s, z, 0, 0.24 * s, 2.2 * s, 0.24 * s));
   const col = '#8fc46b';
   b.add(c.P.blob(3, 0.18, 1), col, mtx(x, 2.75 * s, z, 0, 1.7 * s, 0.95 * s, 1.7 * s), true);
@@ -237,6 +242,7 @@ function addLamp(c: Ctx, x: number, z: number) {
   c.solid.add(c.P.sphere(8, 6), '#d9b25f', mtx(x, 3.95, z, 0, 0.05, 0.05, 0.05));
   c.bulbs.add(c.P.sphere(10, 8), '#ffd79a', mtx(x, 3.44, z, 0, 0.12, 0.17, 0.12));
   c.lamps.push(new THREE.Vector3(x, 3.44, z));
+  c.occ?.push({ x, z, r: 0.3, h: 4.1 });
   c.space.circle(x, z, 0.35);
 }
 
@@ -837,11 +843,11 @@ export function buildTown(quality: 'low' | 'high', options: TownOptions = {}): T
   const low = quality === 'low';
   const ctx: Ctx = {
     solid: new Batch(), detail: new Batch(), far: new Batch(), flat: new Batch(), glass: new Batch(), bulbs: new Batch(),
-    P: new Prims(), r: rng(20261102), space: new Space(), q, lamps: [], chimneys: [], signs: [],
+    P: new Prims(), r: rng(20261102), space: new Space(), q, lamps: [], chimneys: [], signs: [], occ: [],
   };
   const c = ctx;
   const reserved = options.reservedTrees ?? [];
-  for (const t of reserved) c.space.circle(t.x, t.z, 1.9 * t.scale);
+  for (const t of reserved) { c.space.circle(t.x, t.z, 1.9 * t.scale); c.occ!.push({ x: t.x, z: t.z, r: 1.3 * t.scale, h: 5.5 * t.scale }); }
   const occupied = options.occupied;
 
   // Paths (border + top), with round joints
@@ -983,7 +989,7 @@ export function buildTown(quality: 'low' | 'high', options: TownOptions = {}): T
 
   const out: TownGeometry = {
     solid: c.solid.build(), detail: c.detail.build(), far: c.far.build(), flat: c.flat.build(), glass: c.glass.build(), bulbs: c.bulbs.build(),
-    ground: buildGround(q, horizon), lamps: c.lamps, chimneys: c.chimneys, signs: c.signs,
+    ground: buildGround(q, horizon), lamps: c.lamps, chimneys: c.chimneys, signs: c.signs, occluders: c.occ ?? [],
   };
   c.P.dispose();
   return out;

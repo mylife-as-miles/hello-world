@@ -337,6 +337,7 @@ class RealisticRig implements HumanoidRig {
   private readonly ownMaterials: THREE.Material[] = [];
   private readonly sharedTownieMats: THREE.Material[] = [];
   private readonly ownGeos: THREE.BufferGeometry[] = [];
+  private readonly skeleton: THREE.Skeleton;
   private readonly attach: Partial<Record<AttachSlot, THREE.Object3D>> = {};
   private dirty = true;
 
@@ -370,7 +371,7 @@ class RealisticRig implements HumanoidRig {
     this.hipsHeight = (body.restWorldP[this.hipsIdx]?.y ?? 1) * this.scale;
     this.kneeHeight = (body.restWorldP[kneeIdx]?.y ?? 0.5) * this.scale;
 
-    const skeleton = new THREE.Skeleton(this.bones, body.boneInverses.map((mm) => mm.clone()));
+    const skeleton = (this.skeleton = new THREE.Skeleton(this.bones, body.boneInverses.map((mm) => mm.clone())));
     const tint = body.data.set === 'mh' && appearance.outfit?.color ? safeColor(appearance.outfit.color) : null;
     const li = lod === 'low' && body.lods[1]?.length ? 1 : 0;
     for (const part of body.lods[li]!) {
@@ -497,6 +498,7 @@ class RealisticRig implements HumanoidRig {
     for (const m of this.sharedTownieMats) releaseMaterial(m);
     for (const g of this.ownGeos) g.dispose();
     this.ownMaterials.length = 0; this.sharedTownieMats.length = 0; this.ownGeos.length = 0;
+    this.skeleton.dispose(); // per-rig bone texture
     // geometries, shared materials and textures stay cached for other residents (see disposeRealisticCache)
   }
 }

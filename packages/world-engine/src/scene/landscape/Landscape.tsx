@@ -1,6 +1,7 @@
 /**
  * <Landscape quality transparent? /> — terrain ring + valley lake around the flat
- * neighborhood (see ./terrain.ts). 2 draw calls, built once, no per-frame work.
+ * neighborhood (see ./terrain.ts) + instanced boulders. 3 draw calls, built once,
+ * no per-frame work.
  * Renders nothing in transparent (OBS overlay) mode.
  */
 import { useContext, useEffect, useMemo } from 'react';
@@ -25,6 +26,7 @@ export function Landscape({ quality, transparent = false }: LandscapeProps) {
     <group name="landscape">
       <mesh geometry={built.terrain} material={built.terrainMat} receiveShadow raycast={noRaycast} />
       <mesh geometry={built.lake} material={built.lakeMat} position-y={LAKE.level} receiveShadow raycast={noRaycast} />
+      <primitive object={built.rocks} raycast={noRaycast} />
     </group>
   );
 }

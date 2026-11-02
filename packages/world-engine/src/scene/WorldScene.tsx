@@ -174,7 +174,7 @@ const WorldContent = memo(function WorldContent({
       {!transparent && <Clouds tint={cloudTint} />}
       {!transparent && (
         <Town quality={quality} onLocationSelect={onLocationSelect} horizon={builtInHorizon && !USE_LANDSCAPE}
-          reservedTrees={PARK_TREE_PLACEMENTS} occupied={districtOccupied} />
+          reservedTrees={PARK_TREE_PLACEMENTS} occupied={districtOccupied} terrainAt={USE_LANDSCAPE ? terrainHeightAt : undefined} />
       )}
       {!transparent && <Fountain />}
       {!transparent && <StageLights />}

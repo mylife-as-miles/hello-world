@@ -18,11 +18,13 @@ export interface TownProps {
   reservedTrees?: TownOptions['reservedTrees'];
   /** STABLE footprint test of an external district. */
   occupied?: TownOptions['occupied'];
+  /** STABLE external terrain sampler (used when horizon is false). */
+  terrainAt?: TownOptions['terrainAt'];
 }
 
-export function Town({ quality, onLocationSelect, horizon = true, reservedTrees, occupied }: TownProps) {
+export function Town({ quality, onLocationSelect, horizon = true, reservedTrees, occupied, terrainAt }: TownProps) {
   const kit = useKit();
-  const town = useMemo(() => buildTown(quality, { horizon, reservedTrees, occupied }), [quality, horizon, reservedTrees, occupied]);
+  const town = useMemo(() => buildTown(quality, { horizon, reservedTrees, occupied, terrainAt }), [quality, horizon, reservedTrees, occupied, terrainAt]);
   useEffect(() => () => {
     for (const g of [town.solid, town.detail, town.far, town.flat, town.glass, town.bulbs, town.ground]) g.dispose();
   }, [town]);

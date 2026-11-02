@@ -64,7 +64,7 @@ export function decide(w: World, a: Agent, clock: WorldClock): void {
     const low = lowestNeed(a);
     const sleepyHour = (clock.period === 'evening' || clock.period === 'night') && a.temperament.nightOwl < 0.5;
     if (low.value < 24 && w.rng.chance(0.7, 'mood-show', a.id)) { a.moodShownAt = w.simTime; showLowNeed(w, a, low.key); return; }
-    if (sleepyHour && a.needs.energy < 40 && w.rng.chance(0.6, 'mood-tired', a.id)) { a.moodShownAt = w.simTime; showLowNeed(w, a, 'energy'); return; }
+    if (sleepyHour && a.needs.energy < 56 && w.rng.chance(0.65, 'mood-tired', a.id)) { a.moodShownAt = w.simTime; showLowNeed(w, a, 'energy'); return; }
   }
   const choices = scoreChoices(w, a, clock).sort((x, y) => y.score - x.score);
   const social = socializeCandidate(w, a);
@@ -89,7 +89,7 @@ function showLowNeed(w: World, a: Agent, need: NeedKey): void {
     } else gesture(w, a, `sulking alone ${atPlace(nearestPoi(a.x, a.z))}`, 5, { priority: 0 });
     return;
   }
-  if (need === 'energy') { gesture(w, a, 'thinking about a nap', 3.5, { priority: 0, effects: { energy: 0.2, social: 0, fun: 0 } }); return; }
+  if (need === 'energy') { gesture(w, a, 'thinking about a nap', 6, { priority: 0, effects: { energy: 0.2, social: 0, fun: 0 } }); return; }
   let place = poi('plaza');
   let bd = Infinity;
   for (const p of POIS) if (p.kind === 'plaza' || p.kind === 'park' || p.kind === 'garden') { const d = dist(a, p.position); if (d < bd) { bd = d; place = p; } }

@@ -19,7 +19,7 @@ import { useKit } from './context';
 
 export type RigMode = CameraMode | 'overlay';
 
-interface OrbitLike { target: THREE.Vector3 }
+interface OrbitLike { target: THREE.Vector3; update?: () => void }
 
 /* ------------------------------------------------------------ occluders */
 
@@ -117,6 +117,9 @@ export function poseFor(mode: RigMode, t: number, outPos: THREE.Vector3, outLook
     case 'overlay':
       // Residents occupy a lower-third band; camera looks just above the plaza.
       outPos.set(0, 6, 28); outLook.set(0, 4.2, 0); break;
+    case 'orbit':
+      // higher + wider start so the skyline ring and mountains are discoverable
+      outPos.set(-16, 40, 64); outLook.set(2, 3, -8); break;
     case 'street': {
       const s = Math.sin(t * 0.045);
       const x = -7 + s * 7;
@@ -303,6 +306,7 @@ export function CameraRig({ mode, selectedResidentId }: { mode: RigMode; selecte
     follow: newFramer(), actor: newFramer(),
     cluster: new THREE.Vector3(), clusterS: new THREE.Vector3(), clusterInit: false, clusterAt: -1, orbit: 0.4,
     overlay: newOverlayFit(),
+    estAt: -1e9, estNext: 25, estCount: 0,
   }), []);
   const cine = useMemo(() => ({
     pos: new THREE.CatmullRomCurve3(CINE_POS.map(p => new THREE.Vector3(...p)), true, 'centripetal'),
@@ -341,8 +345,14 @@ export function CameraRig({ mode, selectedResidentId }: { mode: RigMode; selecte
     const t = state.clock.elapsedTime;
     EXTRA = kit.occluders;
     if (mode === 'orbit') {
+      if (first.current) {
+        poseFor('orbit', t, s.pos, s.look);
+        camera.position.copy(s.pos); look.current.copy(s.look); camera.lookAt(look.current);
+        if (controls.current) { controls.current.target.copy(s.look); controls.current.update?.(); }
+        first.current = false;
+        return;
+      }
       if (controls.current) look.current.copy(controls.current.target);
-      first.current = false;
       return;
     }
     let snap = false;
@@ -363,7 +373,7 @@ export function CameraRig({ mode, selectedResidentId }: { mode: RigMode; selecte
       if (d.kind === 'portal') {
         const p = PORTAL_POS;
         const age = d.until - now;
-        if (d.raid) { s.pos.set(p.x + 8 + Math.sin(age * 0.1) * 1.5, 5.5, p.z + 15); s.look.set(p.x, 5.2, p.z); }
+        if (d.raid) { s.pos.set(p.x + 11 + Math.sin(age * 0.1) * 1.5, 8.5, p.z + 19); s.look.set(p.x, 5.6, p.z); }
         else { s.pos.set(p.x + 4.5, mode === 'street' ? 1.8 : 3.4, p.z + 10.5); s.look.set(p.x, 1.8, p.z + 1.5); }
         rate = 2.2;
       } else {
@@ -383,6 +393,13 @@ export function CameraRig({ mode, selectedResidentId }: { mode: RigMode; selecte
       if (r) frame(s.follow, r.location.x, r.location.z, dt, 6.8, 3.1, 1.15, s.pos, s.look, false);
       else poseFor('neighborhood', t, s.pos, s.look);
       rate = 2.4;
+    } else if (mode === 'cinematic' && (t >= s.estNext || t - s.estAt < 8)) {
+      // occasional wide establishing pass: plaza + downtown skyline ring + mountains
+      if (t >= s.estNext) { s.estAt = t; s.estNext = t + 60 + (s.estCount % 3) * 15; s.estCount++; snap = true; }
+      const a = s.estCount * 1.9 + (t - s.estAt) * 0.025;
+      s.pos.set(Math.sin(a) * 52, 30, Math.cos(a) * 52);
+      s.look.set(-Math.sin(a) * 14, 6, -Math.cos(a) * 14);
+      rate = 3;
     } else if (mode === 'cinematic' && s.clusterInit) {
       // slow orbit around the liveliest group; down-angle capped at ~35°
       const onStage = Math.hypot(s.clusterS.x - STAGE_POS.x, s.clusterS.z - STAGE_POS.z) < 3.15;
@@ -426,6 +443,6 @@ export function CameraRig({ mode, selectedResidentId }: { mode: RigMode; selecte
     <OrbitControls
       ref={(c: unknown) => { controls.current = (c as OrbitLike | null) ?? null; }}
       makeDefault target={[look.current.x, look.current.y, look.current.z]} enableDamping dampingFactor={0.08}
-      maxPolarAngle={Math.PI * 0.46} minDistance={5} maxDistance={95} />
+      maxPolarAngle={Math.PI * 0.46} minDistance={5} maxDistance={170} />
   );
 }

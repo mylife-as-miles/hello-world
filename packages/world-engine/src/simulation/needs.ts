@@ -37,7 +37,7 @@ export function decayNeeds(a: Agent, dt: number, clock: WorldClock): void {
   const sleeping = isSleeping(a);
   const owl = t.nightOwl > 0.5;
   // Evenings make (non night-owl) residents visibly tired; owls fade in the morning instead.
-  const tiredness = clock.period === 'night' ? (owl ? 0.6 : 1.7) : clock.period === 'evening' ? (owl ? 0.8 : 1.5) : owl && clock.period === 'morning' ? 1.3 : 1;
+  const tiredness = clock.period === 'night' ? (owl ? 0.6 : 1.7) : clock.period === 'evening' ? (owl ? 0.8 : 1.8) : owl && clock.period === 'morning' ? 1.3 : 1;
   if (!sleeping) a.needs.energy = clampNeed(a.needs.energy - BASE_DECAY.energy * t.energyDecay * tiredness * dt);
   a.needs.social = clampNeed(a.needs.social - BASE_DECAY.social * t.socialDecay * (sleeping ? 0.25 : 1) * dt);
   a.needs.fun = clampNeed(a.needs.fun - BASE_DECAY.fun * t.funDecay * (sleeping ? 0.2 : 1) * dt);

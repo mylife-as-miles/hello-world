@@ -116,6 +116,12 @@ export interface TownOptions {
   reservedTrees?: ReadonlyArray<{ x: number; z: number; scale: number }>;
   /** Footprint test of an external district (lots/streets) so the forest belt never pierces it. */
   occupied?: (x: number, z: number, pad: number) => boolean;
+  /**
+   * External terrain sampler (landscape `terrainHeightAt`) used when `horizon` is false: the town ground
+   * stays flat inside 36 m and tucks just under the external terrain beyond, and no stylised vegetation
+   * is scattered outside the flat disc.
+   */
+  terrainAt?: (x: number, z: number) => number;
 }
 
 interface Ctx {
@@ -801,7 +807,7 @@ function buildPortalBase(c: Ctx) {
 
 /* ---------------------------------------------------------------- ground */
 
-function buildGround(q: number, horizon = true): THREE.BufferGeometry {
+function buildGround(q: number, horizon = true, terrainAt?: (x: number, z: number) => number): THREE.BufferGeometry {
   const size = horizon ? 320 : 92, seg = q > 0.7 ? (horizon ? 160 : 80) : (horizon ? 96 : 56);
   const g = new THREE.PlaneGeometry(size, size, seg, seg);
   g.rotateX(-Math.PI / 2);
@@ -818,7 +824,9 @@ function buildGround(q: number, horizon = true): THREE.BufferGeometry {
     if (n1 > 0.7) c.lerp(D, (n1 - 0.7) * 1.5);
     const hill = smooth(46, 120, r);
     c.lerp(F, hill * 0.5);
-    const h = horizon ? hill * (5 + 14 * noise2(x * 0.025, z * 0.025, 11)) + smooth(110, 160, r) * 10 : -2.5 * smooth(39, 44, r);
+    const h = horizon
+      ? hill * (5 + 14 * noise2(x * 0.025, z * 0.025, 11)) + smooth(110, 160, r) * 10
+      : r <= 35 ? 0 : (terrainAt ? terrainAt(x, z) : 0) - 0.35 * smooth(35, 38, r) - 2 * smooth(40, 46, r);
     pos.setY(i, h);
     col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
   }
@@ -842,6 +850,8 @@ export function buildTown(quality: 'low' | 'high', options: TownOptions = {}): T
   const q = quality === 'high' ? 1 : 0.55;
   const horizon = options.horizon ?? true;
   const low = quality === 'low';
+  const terrainAt = options.terrainAt;
+  const inFlat = (x: number, z: number) => horizon || Math.hypot(x, z) < 34.5;
   const ctx: Ctx = {
     solid: new Batch(), detail: new Batch(), far: new Batch(), flat: new Batch(), glass: new Batch(), bulbs: new Batch(),
     P: new Prims(), r: rng(20261102), space: new Space(), q, lamps: [], chimneys: [], signs: [], occ: [],
@@ -930,6 +940,7 @@ export function buildTown(quality: 'low' | 'high', options: TownOptions = {}): T
   const treeKinds = ['round', 'round', 'round', 'pine', 'birch', 'blossom', 'autumn', 'round', 'pine'] as const;
   scatter(4.0, 36, (x, z, r) => {
     if (r() > 0.62 * (q > 0.7 ? 1 : 0.7)) return;
+    if (!inFlat(x, z)) return;
     if (!c.space.free(x, z, 1.5)) return;
     const kind = treeKinds[Math.floor(r() * treeKinds.length)]!;
     addTree(c, c.solid, x, z, kind, 0.85 + r() * 0.45, low ? 0 : 1);
@@ -954,12 +965,14 @@ export function buildTown(quality: 'low' | 'high', options: TownOptions = {}): T
   }
   scatter(2.4, 38, (x, z, r) => {
     if (r() > 0.36 * q) return;
+    if (!inFlat(x, z)) return;
     if (!c.space.free(x, z, 0.65)) return;
     addBush(c, inTown(x, z) ? (low ? c.detail : c.solid) : (horizon ? c.far : c.detail), x, z, 0.65 + r() * 0.5, r() < 0.3);
     c.space.circle(x, z, 0.5);
   });
   scatter(2.6, 34, (x, z, r) => {
     if (r() > 0.4 * q) return;
+    if (!inFlat(x, z)) return;
     if (!c.space.free(x, z, 0.3)) return;
     const fc = pick(r, FLOWERS);
     const n = low ? 3 : 4 + Math.floor(r() * 5);
@@ -974,6 +987,7 @@ export function buildTown(quality: 'low' | 'high', options: TownOptions = {}): T
   });
   if (!low) scatter(1.8, 40, (x, z, r) => {
     if (r() > 0.5 * q) return;
+    if (!inFlat(x, z)) return;
     if (!c.space.free(x, z, 0.15)) return;
     const col = pick(r, ['#6aa84f', '#7cb85b', '#8cc46a', '#5e9a46']);
     for (let i = 0; i < 3; i++) {
@@ -982,6 +996,7 @@ export function buildTown(quality: 'low' | 'high', options: TownOptions = {}): T
   });
   scatter(6.5, 44, (x, z, r) => {
     if (r() > 0.3) return;
+    if (!inFlat(x, z)) return;
     if (!c.space.free(x, z, 0.5)) return;
     const s = 0.3 + r() * 0.5;
     if (!inTown(x, z) && !horizon) return;
@@ -990,7 +1005,7 @@ export function buildTown(quality: 'low' | 'high', options: TownOptions = {}): T
 
   const out: TownGeometry = {
     solid: c.solid.build(), detail: c.detail.build(), far: c.far.build(), flat: c.flat.build(), glass: c.glass.build(), bulbs: c.bulbs.build(),
-    ground: buildGround(q, horizon), lamps: c.lamps, chimneys: c.chimneys, signs: c.signs, occluders: c.occ ?? [],
+    ground: buildGround(q, horizon, terrainAt), lamps: c.lamps, chimneys: c.chimneys, signs: c.signs, occluders: c.occ ?? [],
   };
   c.P.dispose();
   return out;

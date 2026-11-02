@@ -198,10 +198,11 @@ function addWillow(c: Ctx, x: number, z: number, s: number) {
 function addBench(c: Ctx, x: number, z: number, yaw: number, len: number) {
   const M = mtx(x, 0, z, yaw);
   const at = (m: THREE.Matrix4) => M.clone().multiply(m);
-  for (let i = 0; i < 3; i++) c.solid.add(c.P.rbox(len, 0.05, 0.13, 0.02), '#c08752', at(mtx(0, 0.46, -0.13 + i * 0.14)));
+  // seat surface top at exactly y = 0.45 (animator seats hips there)
+  for (let i = 0; i < 3; i++) c.solid.add(c.P.rbox(len, 0.05, 0.13, 0.02), '#c08752', at(mtx(0, 0.425, -0.13 + i * 0.14)));
   for (let i = 0; i < 2; i++) c.solid.add(c.P.rbox(len, 0.12, 0.04, 0.02), '#c08752', at(mtx(0, 0.68 + i * 0.17, -0.27, 0, 1, 1, 1, -0.12)));
   for (const s of [-1, 1]) {
-    c.solid.add(c.P.box(), '#3b3f3c', at(mtx(s * (len / 2 - 0.12), 0.23, -0.02, 0, 0.06, 0.46, 0.42)));
+    c.solid.add(c.P.box(), '#3b3f3c', at(mtx(s * (len / 2 - 0.12), 0.2, -0.02, 0, 0.06, 0.4, 0.42)));
     c.solid.add(c.P.box(), '#3b3f3c', at(mtx(s * (len / 2 - 0.12), 0.62, -0.28, 0, 0.06, 0.5, 0.05, -0.12)));
     c.solid.add(c.P.box(), '#3b3f3c', at(mtx(s * (len / 2 - 0.12), 0.6, 0.0, 0, 0.06, 0.05, 0.42)));
   }
@@ -210,9 +211,9 @@ function addBench(c: Ctx, x: number, z: number, yaw: number, len: number) {
 function addChair(c: Ctx, x: number, z: number, yaw: number, color: string) {
   const M = mtx(x, 0, z, yaw);
   const at = (m: THREE.Matrix4) => M.clone().multiply(m);
-  c.solid.add(c.P.rbox(0.46, 0.06, 0.44, 0.02), color, at(mtx(0, 0.46, 0)));
+  c.solid.add(c.P.rbox(0.46, 0.06, 0.44, 0.02), color, at(mtx(0, 0.42, 0))); // seat top at y = 0.45
   c.solid.add(c.P.rbox(0.46, 0.46, 0.05, 0.02), color, at(mtx(0, 0.74, -0.2, 0, 1, 1, 1, -0.08)));
-  for (const sx of [-1, 1]) for (const sz of [-1, 1]) c.solid.add(c.P.box(), '#3d3a36', at(mtx(sx * 0.19, 0.22, sz * 0.18, 0, 0.04, 0.45, 0.04)));
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) c.solid.add(c.P.box(), '#3d3a36', at(mtx(sx * 0.19, 0.2, sz * 0.18, 0, 0.04, 0.4, 0.04)));
 }
 
 function addLamp(c: Ctx, x: number, z: number) {

@@ -25,9 +25,10 @@ export interface ResidentsLayerProps {
   quality?: 'low' | 'high';
   viewerResidentId?: string;
   /**
-   * Transparent stream-overlay mode: no seats/benches are drawn, so residents
-   * never sit or sleep on empty air (they stand instead). Defaults to auto:
-   * true when the canvas is transparent (alpha) and the scene has no background.
+   * Transparent stream-overlay mode: there is no ground, so residents never sit
+   * or sleep on empty air. They only sit on layout seats (the overlay scene draws
+   * benches + café chairs, see scene/town.ts) when OVERLAY_SEATS_DRAWN, else stand.
+   * Defaults to auto: true when the canvas is transparent and the scene has no background.
    */
   overlay?: boolean;
 }
@@ -47,6 +48,8 @@ const NAMEPLATE_FAR = 36;
 /** Only residents this close to a confetti burst / raid portal cheer. */
 const CHEER_RADIUS = 12;
 const VIEWER_EMOTE_SCALE = 1.35;
+/** The transparent overlay scene draws benches/café chairs (scene/town.ts). Set false to make overlay residents always stand. */
+const OVERLAY_SEATS_DRAWN = true;
 
 // ---------------------------------------------------------------------------
 // Shared per-layer state
@@ -204,8 +207,9 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
   const clock = useRef({ now: 0, lodTimer: 0, bubbleTimer: 0 });
   const viewerRef = useRef(viewerResidentId);
   viewerRef.current = viewerResidentId;
-  /** Overlay mode, shared with residents through a ref (no re-render). */
-  const overlayRef = useRef(overlay ?? false);
+  /** Overlay mode, shared with residents through a ref (no re-render); correct from the first frame. */
+  const overlayRef = useRef(false);
+  overlayRef.current = overlay ?? (!!gl.getContextAttributes()?.alpha && !scene.background);
 
   // Fresh-event reactions.
   useEffect(() => {
@@ -510,7 +514,9 @@ const Resident = memo(function Resident(p: ResidentProps) {
     if (!rig) return;
     const anim = new AvatarAnimator(rig, hashString(id));
     // Start in the right family without a visible fade on spawn / LOD swap.
-    const fam = m.current.family;
+    const fam0 = m.current.family;
+    const noSeat = overlayRef.current && !(OVERLAY_SEATS_DRAWN && m.current.seat);
+    const fam = (fam0 === 'sit' || fam0 === 'sleep') && noSeat ? 'idle' : fam0;
     anim.setBase(fam, {});
     for (let i = 0; i < 30; i++) anim.update(1 / 30);
     handle.animator = anim;
@@ -519,7 +525,7 @@ const Resident = memo(function Resident(p: ResidentProps) {
     const queued = pending.get(id);
     if (queued) { pending.delete(id); for (const fn of queued) fn(handle); }
     return () => { if (handle.animator === anim) handle.animator = null; };
-  }, [rig, id, handle, pending]);
+  }, [rig, id, handle, pending, overlayRef]);
 
   const plate = useMemo(() => makeNameplateTexture(p.displayName, p.isViewer ? '#5ef2c6' : undefined), [p.displayName, p.isViewer]);
   useEffect(() => () => plate.texture.dispose(), [plate]);
@@ -563,8 +569,10 @@ const Resident = memo(function Resident(p: ResidentProps) {
     // --- Movement -------------------------------------------------------------
     const pos = handle.pos;
     const overlayMode = overlayRef.current;
-    // Overlay mode draws no benches: never sit/sleep on empty air.
-    const sitFam = !overlayMode && (s.family === 'sit' || s.family === 'sleep');
+    // Overlay mode has no ground: sit/sleep only on a drawn layout seat, never on empty air.
+    const wantsSit = s.family === 'sit' || s.family === 'sleep';
+    const sitAllowed = !overlayMode || (OVERLAY_SEATS_DRAWN && !!s.seat);
+    const sitFam = wantsSit && sitAllowed;
     const toSeat = sitFam && !!s.seat && s.estSpeed < 0.3;
     const goal = toSeat && s.seat ? _v.set(s.seat.x, 0, s.seat.z) : _v.copy(s.target);
     const dx = goal.x - pos.x, dz = goal.z - pos.z;
@@ -635,7 +643,7 @@ const Resident = memo(function Resident(p: ResidentProps) {
     const adt = s.accDt; s.accDt = 0;
 
     // --- Animation family ------------------------------------------------------
-    let fam: AnimationFamily = overlayMode && (s.family === 'sit' || s.family === 'sleep') ? 'idle' : s.family;
+    let fam: AnimationFamily = wantsSit && !sitAllowed ? 'idle' : s.family;
     let speed = 1;
     if (handle.reaction && handle.reaction.until < nowS()) handle.reaction = null;
     if (s.visSpeed > 0.22 && !seated) {

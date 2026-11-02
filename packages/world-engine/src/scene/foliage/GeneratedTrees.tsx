@@ -3,7 +3,7 @@
  * tree generator (MIT, © 2026 alightinastorm; see ./assets/CREDITS.md).
  *
  * Assets (./assets): one compact GLB per variant (`wood` + merged `leaves` cards, metres,
- * ground at y=0) and one shared 512² leaf atlas (row = variant, 4 spray tiles per row)
+ * ground at y=0) and one shared 512² leaf atlas (3 spray tiles per variant, 128² each)
  * rasterised by super-terrain's leaf-spray baker, recoloured onto a soft pastel ramp.
  *
  * Rendering (WebGL, MeshStandardMaterial):
@@ -32,24 +32,29 @@ export interface GeneratedTreesProps {
   blobShadows?: boolean;
 }
 
-/** Variant order = asset order = atlas row order. */
-export const TREE_VARIANTS = ['broadleaf', 'conifer', 'birch', 'blossom'] as const;
+/** Variant order = asset order (placement `variant` index). Town kinds: round→broadleaf, pine→conifer. */
+export const TREE_VARIANTS = ['broadleaf', 'conifer', 'birch', 'blossom', 'autumn'] as const;
 export type TreeVariantName = (typeof TREE_VARIANTS)[number];
+/** Placement `variant` index for a variant name. */
+export const TREE_VARIANT_INDEX: Record<TreeVariantName, number> = { broadleaf: 0, conifer: 1, birch: 2, blossom: 3, autumn: 4 };
 /** Baked heights in metres at scale 1. */
-export const TREE_VARIANT_HEIGHT: Record<TreeVariantName, number> = { broadleaf: 6.2, conifer: 7, birch: 6.6, blossom: 5.2 };
+export const TREE_VARIANT_HEIGHT: Record<TreeVariantName, number> = { broadleaf: 6.2, conifer: 7, birch: 6.6, blossom: 5.2, autumn: 5.8 };
 
 const GLB_URLS: string[] = [
   new URL('./assets/tree-broadleaf.glb', import.meta.url).href,
   new URL('./assets/tree-conifer.glb', import.meta.url).href,
   new URL('./assets/tree-birch.glb', import.meta.url).href,
   new URL('./assets/tree-blossom.glb', import.meta.url).href,
+  new URL('./assets/tree-autumn.glb', import.meta.url).href,
 ];
 const ATLAS_URL = new URL('./assets/leaf-atlas.png', import.meta.url).href;
 
 /** Per-variant bark tint (multiplies the generator's vertex colours) and leaf tint. */
-const BARK_TINT = ['#b39a86', '#9a8070', '#f2eee6', '#a88a7a'];
-const LEAF_TINT = ['#ffffff', '#ffffff', '#ffffff', '#ffffff'];
-const BLOB_RADIUS = [2.6, 2.1, 2.4, 2.7];
+const BARK_TINT = ['#b39a86', '#9a8070', '#f2eee6', '#a88a7a', '#a08470'];
+const LEAF_TINT = ['#ffffff', '#ffffff', '#ffffff', '#ffffff', '#ffffff'];
+const BLOB_RADIUS = [2.6, 2.1, 2.4, 2.7, 2.5];
+/** Impostor tile background (alpha 0): mips blend toward the crown colour, never a foreign hue. */
+const IMPOSTOR_BG = ['#7fb04f', '#4f8a5a', '#9cc760', '#f0a8c4', '#f0a050'];
 
 interface VariantGeometry { wood: THREE.BufferGeometry; leaves: THREE.BufferGeometry; box: THREE.Box3 }
 interface TreeAssets { variants: VariantGeometry[]; atlas: THREE.Texture }
@@ -166,6 +171,8 @@ function bakeImpostors(gl: THREE.WebGLRenderer, assets: TreeAssets): Impostors {
     target.scissor.set(col * TILE, row * TILE, TILE, TILE);
     target.scissorTest = true;
     gl.setRenderTarget(target);
+    gl.setClearColor(IMPOSTOR_BG[col] ?? '#7fb04f', 0);
+    gl.clear(true, true, true);
     gl.render(scene, camera);
   };
   assets.variants.forEach((v, i) => {
@@ -428,12 +435,13 @@ export function GeneratedTrees({ quality, placements, farDistance, blobShadows =
   }, [assets, impostors, stablePlacements, quality, blobShadows]);
 
   const far = farDistance ?? (quality === 'high' ? 90 : 65);
-  const last = useRef({ x: NaN, y: NaN, z: NaN, built: null as BuiltForest | null, far: NaN });
+  const last = useRef({ x: NaN, y: NaN, z: NaN, built: null as BuiltForest | null, far: NaN, eye: new THREE.Vector3() });
   useFrame(({ camera }, dt) => {
     if (!built) return;
     built.wind.value += Math.min(dt, 0.1);
     const l = last.current;
-    const c = camera.position;
+    // camera in the forest group's local space (works when mounted under a transformed parent)
+    const c = built.group.worldToLocal(camera.getWorldPosition(l.eye));
     const fresh = l.built !== built || l.far !== far;
     if (fresh || (c.x - l.x) ** 2 + (c.y - l.y) ** 2 + (c.z - l.z) ** 2 > 1) {
       built.updateLod(c, far, fresh);
@@ -446,7 +454,7 @@ export function GeneratedTrees({ quality, placements, farDistance, blobShadows =
 /**
  * Willow Park example stand (park centre ≈ (-15,-15), lawn radius 4.5). Keeps clear of the
  * pond (-15.2,-21.2 r≈3.3), Pond Bench (-11.5,-17.5), Playground (-20,-9 r 2.5) and the
- * park-gate → park-inner footpath. Variants: 0 broadleaf, 1 conifer, 2 birch, 3 blossom.
+ * park-gate → park-inner footpath. Variants: 0 broadleaf, 1 conifer, 2 birch, 3 blossom, 4 autumn.
  */
 export const PARK_TREE_PLACEMENTS: ReadonlyArray<TreePlacement> = [
   { x: -21.6, z: -14.2, scale: 1.0, rot: 0.4, variant: 0 },
@@ -461,4 +469,6 @@ export const PARK_TREE_PLACEMENTS: ReadonlyArray<TreePlacement> = [
   { x: -18.6, z: -4.6, scale: 0.7, rot: 1.7, variant: 3 },
   { x: -12.6, z: -29.0, scale: 0.95, rot: 3.9, variant: 2 },
   { x: -26.0, z: -22.6, scale: 1.0, rot: 0.2, variant: 0 },
+  { x: -18.4, z: -29.6, scale: 0.9, rot: 2.9, variant: 4 },
+  { x: -27.4, z: -11.0, scale: 0.85, rot: 4.4, variant: 4 },
 ];

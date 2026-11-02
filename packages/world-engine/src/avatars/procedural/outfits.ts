@@ -240,13 +240,13 @@ export function buildTop(b: GeoBuilder, d: Dims, lod: LodCfg, top: string, botto
 
 // ---------------------------------------------------------------- bottoms
 function pelvis(b: GeoBuilder, d: Dims, lod: LodCfg, mat: string, off: number, sTop = 0.2): void {
-  b.add(mat, torsoShell(d, lod, { s0: -0.18, s1: sTop, off, capBottom: true, ringCount: 12 }), { weights: torsoWeights(d) });
+  b.add(mat, torsoShell(d, lod, { s0: -0.18, s1: sTop, off: (s) => off + 0.012 * smooth(0.02, -0.14, s), capBottom: true, ringCount: 12 }), { weights: torsoWeights(d) });
 }
 
 function pantLegs(b: GeoBuilder, d: Dims, lod: LodCfg, mat: string, end: number, off: (t: number) => number, cuff?: { mat: string; w: number; off: number }): void {
   const lw = legWeights(d);
   for (const side of [1, -1] as const) {
-    b.add(mat, legShell(d, lod, side, { t0: -0.06, t1: end, off, ringCount: 20 }), { weights: lw });
+    b.add(mat, legShell(d, lod, side, { t0: -0.03, t1: end, off, ringCount: 20 }), { weights: lw });
     if (cuff) b.add(cuff.mat, legShell(d, lod, side, { t0: end - cuff.w, t1: end + 0.003, off: (t) => off(t) + cuff.off, ringCount: 3 }), { weights: lw });
   }
 }

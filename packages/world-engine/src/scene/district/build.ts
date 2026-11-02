@@ -156,8 +156,13 @@ function windowTextures(size: number): { map: THREE.CanvasTexture; emissive: THR
         ca.fillStyle = grd; ca.fillRect(x, wy, cs, wh);
         ca.fillStyle = 'rgba(255,255,255,0.55)'; ca.fillRect(x, wy, cs * 0.05, wh); // mullion at bay edge
         ca.fillStyle = '#ece6dd'; ca.fillRect(x, y + cs * 0.82, cs, cs * 0.18);      // spandrel band
-        if (i === cells / 2 || r() < 0.3) runLit = r() < 0.5;                        // lit runs (open-plan floors)
-        if (runLit) { cb.fillStyle = r() < 0.75 ? '#fff0cf' : '#d6e8ff'; cb.fillRect(x, wy, cs, wh); }
+        if (i === cells / 2 || r() < 0.45) runLit = r() < 0.42;                      // lit runs (open-plan floors)
+        if (runLit) {
+          const g3 = cb.createLinearGradient(x, wy, x, wy + wh);
+          const c0 = r() < 0.8 ? '#e9c98f' : '#b9cde6';
+          g3.addColorStop(0, c0); g3.addColorStop(1, '#7a5a34');
+          cb.fillStyle = g3; cb.fillRect(x + cs * 0.05, wy, cs * 0.95, wh);
+        }
       }
     }
   }
@@ -193,6 +198,8 @@ function addBuilding(f: Writer, p: Writer, lot: DistrictLot, high: boolean) {
   const rs = rnd();
   const office = lot.style === 'tower' ? rs < 0.7 : lot.style === 'mid' ? rs < 0.3 : false;
   const styleBase = office ? CELLS / 2 : 0;
+  // Per-building night occupancy (multiplies the window emissive map in the facade shader).
+  const litK: RGB = [office ? 0.45 + rnd() * 0.4 : 0.7 + rnd() * 0.45, 0, 0];
 
   // Storefront band (high) or plain plinth (low)
   if (high) {
@@ -230,7 +237,7 @@ function addBuilding(f: Writer, p: Writer, lot: DistrictLot, high: boolean) {
       const start = (uOff + (face0 + i) * 3) % Math.max(1, CELLS / 2 - span + 1);
       const u0 = (styleBase + start) / CELLS, u1 = u0 + span / CELLS;
       const v0 = (vOff + (y0 - store) / FLOOR_H) / CELLS, v1 = v0 + nF / CELLS;
-      f.poly([[ax, y0, az], [bx, y0, bz], [bx, y1, bz], [ax, y1, az]], [cb, cb, ct, ct], BLACK, [[u0, v0], [u1, v0], [u1, v1], [u0, v1]]);
+      f.poly([[ax, y0, az], [bx, y0, bz], [bx, y1, bz], [ax, y1, az]], [cb, cb, ct, ct], litK, [[u0, v0], [u1, v0], [u1, v1], [u0, v1]]);
     }
     return y1;
   };
@@ -366,7 +373,7 @@ export interface DistrictBuild {
 export function buildDistrict(quality: 'low' | 'high', heightAt: (x: number, z: number) => number = () => 0): DistrictBuild {
   const high = quality === 'high';
   hAt = heightAt;
-  const f = new Writer(true, false), p = new Writer(false, true);
+  const f = new Writer(true, true), p = new Writer(false, true);
   const lots = planDistrict(quality);
   for (const lot of lots) addBuilding(f, p, lot, high);
   for (const s of DISTRICT_STREETS) addStreet(p, s, high);
@@ -385,17 +392,23 @@ export function buildDistrict(quality: 'low' | 'high', heightAt: (x: number, z: 
     vertexColors: true, roughness: 0.82, metalness: 0,
   });
   const night = { value: 0 };
-  const plainMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0 });
-  plainMat.onBeforeCompile = (shader) => {
-    shader.uniforms.uNight = night;
-    shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute vec3 aGlow;\nvarying vec3 vGlow;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvGlow = aGlow;');
-    shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform float uNight;\nvarying vec3 vGlow;')
-      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += vGlow * uNight;');
+  const patch = (mat: THREE.MeshStandardMaterial, key: string, emissiveGlsl: string) => {
+    mat.onBeforeCompile = (shader) => {
+      shader.uniforms.uNight = night;
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nattribute vec3 aGlow;\nvarying vec3 vGlow;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvGlow = aGlow;');
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', '#include <common>\nuniform float uNight;\nvarying vec3 vGlow;')
+        .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n' + emissiveGlsl);
+    };
+    mat.customProgramCacheKey = () => key;
   };
-  plainMat.customProgramCacheKey = () => 'hw-district-plain';
+  // facade: aGlow.x = per-building occupancy; faint wall bounce at night keeps silhouettes readable
+  patch(facadeMat, 'hw-district-facade', 'totalEmissiveRadiance *= vGlow.x;\ntotalEmissiveRadiance += diffuseColor.rgb * uNight * 0.06;');
+  const plainMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0 });
+  // plain: aGlow = per-vertex emissive colour (shop windows, lamps, neon, beacons, light pools)
+  patch(plainMat, 'hw-district-plain', 'totalEmissiveRadiance += vGlow * uNight;');
 
   const facade = f.geometry(), plain = p.geometry();
   hAt = () => 0;

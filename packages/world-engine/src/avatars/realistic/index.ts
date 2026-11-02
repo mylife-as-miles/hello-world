@@ -308,6 +308,8 @@ function tintedMaterial(base: THREE.MeshStandardMaterial, tint: THREE.Color): TH
 
 /** Head accessories that sit on the cranium (face-bound ones like glasses need the stylised face). */
 const HEAD_OK = new Set(['beanie', 'cap', 'crown', 'headphones']);
+/** Model-space sphere that contains the body in every animator pose (hips offsets, raised arms, sitting). */
+const POSE_BOUNDS = new THREE.Sphere(new THREE.Vector3(0, 1.0, 0), 1.45);
 const _q = new THREE.Quaternion();
 const _v = new THREE.Vector3();
 const IDENTITY = new THREE.Matrix4();
@@ -383,7 +385,7 @@ class RealisticRig implements HumanoidRig {
       const mesh = new THREE.SkinnedMesh(part.geo, mats);
       mesh.name = part.hair ? 'realistic-hair' : 'realistic-body';
       mesh.castShadow = true; mesh.receiveShadow = !part.hair;
-      mesh.frustumCulled = false; // skinned bounds move with the pose; residents are culled by the caller
+      mesh.boundingSphere = POSE_BOUNDS.clone(); // generous fixed bounds (any pose, incl. raised arms / sitting) keep culling valid
       this.model.add(mesh);
       mesh.bind(skeleton, IDENTITY);
     }

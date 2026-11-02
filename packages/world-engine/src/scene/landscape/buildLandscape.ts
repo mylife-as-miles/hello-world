@@ -52,6 +52,8 @@ export function buildLandscape(quality: 'low' | 'high', weather: SharedUniforms 
     color: '#4f9cbf', roughness: 0.14, metalness: 0.0, transparent: true, opacity: 0.9,
     emissive: '#163b52', emissiveIntensity: 0.18,
   });
+  lakeMat.onBeforeCompile = shader => patchLandscapeFog(shader);
+  lakeMat.customProgramCacheKey = () => 'hw-landscape-lake';
   return {
     terrain, terrainMat, lake, lakeMat,
     dispose() { terrain.dispose(); terrainMat.dispose(); lake.dispose(); lakeMat.dispose(); },
@@ -207,8 +209,30 @@ float lsNoise(vec2 p) {
       .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
   roughnessFactor = mix(roughnessFactor, 0.32, uWet * smoothstep(0.5, 0.9, vUpW) * (1.0 - uSnow));`);
   };
+  const weatherAndDetail = mat.onBeforeCompile;
+  mat.onBeforeCompile = (shader, renderer) => { weatherAndDetail(shader, renderer); patchLandscapeFog(shader); };
   mat.customProgramCacheKey = () => 'hw-landscape-terrain';
   return mat;
+}
+
+/**
+ * Aerial perspective for the far range: the scene's linear fog (≈ 70 → 230 m)
+ * would swallow everything past ~200 m, so the landscape stretches its fog
+ * ramp and caps it, leaving the far ridges as hazy silhouettes that close the
+ * horizon. Near the town (< 100 m) the difference is negligible, so the seam
+ * with the town ground stays invisible.
+ */
+const FOG_STRETCH = 1.65;
+const FOG_MAX = 0.86;
+export function patchLandscapeFog(shader: THREE.WebGLProgramParametersWithUniforms): void {
+  shader.fragmentShader = shader.fragmentShader.replace('#include <fog_fragment>', `#ifdef USE_FOG
+  #ifdef FOG_EXP2
+    float fogFactor = 1.0 - exp( - fogDensity * fogDensity * vFogDepth * vFogDepth );
+  #else
+    float fogFactor = smoothstep( fogNear, fogNear + ( fogFar - fogNear ) * ${FOG_STRETCH.toFixed(2)}, vFogDepth );
+  #endif
+  gl_FragColor.rgb = mix( gl_FragColor.rgb, fogColor, min( fogFactor, ${FOG_MAX.toFixed(2)} ) );
+#endif`);
 }
 
 /* --------------------------------------------------------------------- lake */

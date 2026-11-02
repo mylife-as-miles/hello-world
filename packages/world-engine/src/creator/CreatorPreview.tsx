@@ -34,8 +34,8 @@ export interface CreatorPreviewProps {
   gesture: PreviewCommand<GestureName> | null;
   expression: PreviewCommand<PreviewExpression> | null;
   accent: string;
-  /** Called (outside React render) when a rig is swapped in. */
-  onRigReady?: (rig: HumanoidRig) => void;
+  /** Called (outside React render) when a rig is swapped in, with the appearance it was built from. */
+  onRigReady?: (rig: HumanoidRig, requested: AvatarAppearance) => void;
   /** DOM node toggled while a rig is loading (no React re-render). */
   loadingEl?: React.RefObject<HTMLElement | null>;
   /** Pixels covered by UI overlays at the top/bottom of the canvas (read every frame). */
@@ -181,7 +181,7 @@ function Studio(props: CreatorPreviewProps) {
         for (const [name, e] of exprs.current) anim.setExpression(name, e.w);
         anim.update(1 / 60);
         animRef.current = anim;
-        onRigReady?.(rig);
+        onRigReady?.(rig, requested);
       });
     }, wait);
     return () => { window.clearTimeout(timer); window.clearTimeout(showLoading); };
@@ -313,7 +313,7 @@ function Studio(props: CreatorPreviewProps) {
         <ringGeometry args={[1.5, 1.515, 128]} />
         <meshBasicMaterial color="#ffffff" transparent opacity={0.08} toneMapped={false} />
       </mesh>
-      <ContactShadows position={[0, 0.003, 0]} scale={2.6} resolution={512} blur={2.4} far={1.8} opacity={0.62} color="#0b0816" />
+      <ContactShadows position={[0, 0.003, 0]} scale={2.6} resolution={256} blur={2.2} far={1.8} opacity={0.62} color="#0b0816" />
 
       <OrbitControls
         ref={controls as never}

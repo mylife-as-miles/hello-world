@@ -18,7 +18,7 @@ const WOOD_RATIO = Number(process.env.WOOD_RATIO ?? 0.45) // keep ~45% of the ge
 const OUT = process.env.OUT ?? join(__dirname, '../assets')
 const LOD = Number(process.env.LOD ?? 2) as 0 | 1 | 2 // shipped assets: LOD 2
 const TILE = 128 // atlas tile per spray variant
-const VARIANTS_PER_SPECIES = 4
+const VARIANTS_PER_SPECIES = 3 // leaf-spray tiles per species (5 species × 3 = 15 tiles in a 4×4 grid of 128² = 512²)
 const CARD_SCALE = Number(process.env.CARD_SCALE ?? 1.4) // fuller, softer crowns than the realistic source
 const hex = (h: string) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16))
 interface Spec { name: string; species: string; seed: number; height: number; dark: string; light: string }
@@ -28,6 +28,7 @@ const SPECS: Spec[] = [
   { name: 'conifer', species: 'norway-spruce', seed: 2203, height: 7.0, dark: '#2c6a47', light: '#86c06c' },
   { name: 'birch', species: 'silver-birch', seed: 3307, height: 6.6, dark: '#62a23e', light: '#d2ea7e' },
   { name: 'blossom', species: 'field-oak', seed: 4409, height: 5.2, dark: '#cf7299', light: '#ffd6e4' },
+  { name: 'autumn', species: 'european-beech', seed: 5501, height: 5.8, dark: '#c8662c', light: '#ffc35e' },
 ]
 
 // ---------------- PNG ----------------
@@ -74,15 +75,18 @@ function glb(prims: Prim[]) {
 }
 
 // ---------------- atlas ----------------
-const ATLAS = TILE * VARIANTS_PER_SPECIES // columns = variants, rows = species
-const atlas = new Uint8Array(ATLAS * TILE * SPECS.length * 4)
-const atlasW = ATLAS, atlasH = TILE * SPECS.length
+const COLS = 4, ROWS = Math.ceil((SPECS.length * VARIANTS_PER_SPECIES) / COLS)
+const atlasW = COLS * TILE, atlasH = ROWS * TILE
+const atlas = new Uint8Array(atlasW * atlasH * 4)
+/** [column, row] of a species' spray tile; tiles run row-major, top row first. */
+const tileOf = (species: number, variant: number) => { const t = species * VARIANTS_PER_SPECIES + variant; return [t % COLS, Math.floor(t / COLS)] }
 function downsample(src: Uint8Array, size: number, dst: number) {
   const out = new Uint8Array(dst * dst * 4), f = size / dst
   for (let y = 0; y < dst; y++) for (let x = 0; x < dst; x++) {
-    let r = 0, g = 0, b = 0, a = 0, n = 0
-    for (let sy = 0; sy < f; sy++) for (let sx = 0; sx < f; sx++) { const i = ((y * f + sy) * size + x * f + sx) * 4; const al = src[i + 3]; r += src[i] * al; g += src[i + 1] * al; b += src[i + 2] * al; a += al; n++ }
-    const o = (y * dst + x) * 4; out[o] = a ? r / a : 0; out[o + 1] = a ? g / a : 0; out[o + 2] = a ? b / a : 0; out[o + 3] = a / n
+    let r = 0, g = 0, b = 0, a = 0, n = 0, ur = 0, ug = 0, ub = 0
+    for (let sy = 0; sy < f; sy++) for (let sx = 0; sx < f; sx++) { const i = ((y * f + sy) * size + x * f + sx) * 4; const al = src[i + 3]; r += src[i] * al; g += src[i + 1] * al; b += src[i + 2] * al; a += al; n++; ur += src[i]; ug += src[i + 1]; ub += src[i + 2] }
+    // fully transparent texels keep the rasteriser's dilated colour so mips never fringe dark
+    const o = (y * dst + x) * 4; out[o] = a ? r / a : ur / n; out[o + 1] = a ? g / a : ug / n; out[o + 2] = a ? b / a : ub / n; out[o + 3] = a / n
   }
   return out
 }
@@ -132,8 +136,10 @@ SPECS.forEach((spec, row) => {
       ln[o] = bx / bl; ln[o + 1] = by / bl; ln[o + 2] = bz / bl
       lc[o] = f.colors[c * 3]; lc[o + 1] = f.colors[c * 3 + 1]; lc[o + 2] = f.colors[c * 3 + 2]
       const uo = (c * 4 + k) * 2
-      lu[uo] = (v + (cx + 0.5)) / VARIANTS_PER_SPECIES
-      lu[uo + 1] = 1 - (row + (1 - cy)) / SPECS.length
+      const [tc, tr] = tileOf(row, v)
+      const iu = 0.008 + (cx + 0.5) * 0.984, iv = 0.008 + cy * 0.984 // tiny inset: no mip bleed
+      lu[uo] = (tc + iu) / COLS
+      lu[uo + 1] = 1 - (tr + (1 - iv)) / ROWS
     })
     li.set([c * 4, c * 4 + 1, c * 4 + 2, c * 4, c * 4 + 2, c * 4 + 3], c * 6)
   }
@@ -154,7 +160,8 @@ SPECS.forEach((spec, row) => {
   const D = hex(spec.dark), L = hex(spec.light)
   tiles.forEach((small, v) => {
     for (let y = 0; y < TILE; y++) for (let x = 0; x < TILE; x++) {
-      const si = (y * TILE + x) * 4, di = ((row * TILE + y) * atlasW + v * TILE + x) * 4
+      const [tc, tr] = tileOf(row, v)
+      const si = (y * TILE + x) * 4, di = ((tr * TILE + y) * atlasW + tc * TILE + x) * 4
       const l = 0.3 * small[si] + 0.59 * small[si + 1] + 0.11 * small[si + 2]
       const t = Math.min(1, Math.max(0, (l - lo) / Math.max(1, hi - lo)))
       const tt = t * t * (3 - 2 * t)

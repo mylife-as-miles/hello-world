@@ -1,7 +1,8 @@
 /**
  * Foliage lab (Foliage Engineer): http://localhost:5189/foliage-lab.html
  *   default: the variants side by side in front of a ≈400-tree forest (near meshes + far impostors)
- *   ?view=row (variants only) · ?view=park (PARK_TREE_PLACEMENTS) · ?view=forest · ?q=low · ?far=<m>
+ *   ?view=world (game-like camera: park stand + ≈400-tree belt) · ?view=row (variants only)
+ *   ?view=park (PARK_TREE_PLACEMENTS close-up) · ?view=forest · ?q=low · ?far=<m>
  */
 import { StrictMode, useMemo } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -25,7 +26,19 @@ function forestPlacements(): TreePlacement[] {
     const a = rnd() * Math.PI * 2, r = 14 + Math.sqrt(rnd()) * 150;
     const x = Math.cos(a) * r, z = Math.sin(a) * r - 40;
     if (view === 'combo' && z > -24) continue;
-    out.push({ x, z, scale: 0.7 + rnd() * 0.6, rot: rnd() * 6.28, variant: Math.floor(rnd() * 4) });
+    out.push({ x, z, scale: 0.7 + rnd() * 0.6, rot: rnd() * 6.28, variant: Math.floor(rnd() * TREE_VARIANTS.length) });
+  }
+  return out;
+}
+
+/** Belt around a 35 m town footprint, like the landscape agent's FOREST_PLACEMENTS will be. */
+function beltPlacements(): TreePlacement[] {
+  const out: TreePlacement[] = [];
+  let s = 7654321;
+  const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+  for (let i = 0; i < 420; i++) {
+    const a = rnd() * Math.PI * 2, r = 38 + Math.sqrt(rnd()) * 150;
+    out.push({ x: Math.cos(a) * r, z: Math.sin(a) * r, scale: 0.8 + rnd() * 0.6, rot: rnd() * 6.28, variant: rnd() < 0.45 ? 1 : Math.floor(rnd() * TREE_VARIANTS.length) });
   }
   return out;
 }
@@ -35,6 +48,7 @@ function CameraSetup() {
   useMemo(() => {
     if (view === 'park') { camera.position.set(-2, 13, 2); camera.lookAt(-15, 2, -17); }
     else if (view === 'forest') { camera.position.set(0, 22, 40); camera.lookAt(0, 4, -30); }
+    else if (view === 'world') { camera.position.set(0, 38, 46); camera.lookAt(0, 0, -6); }
     else if (view === 'combo') { camera.position.set(0, 7, 21); camera.lookAt(0, 4.2, -6); }
     else { camera.position.set(0, 5.5, 19); camera.lookAt(0, 3.2, 0); }
     camera.updateProjectionMatrix();
@@ -60,7 +74,13 @@ function Ground() {
         <planeGeometry args={[600, 600]} />
         <meshStandardMaterial color="#9ccf78" roughness={1} />
       </mesh>
-      {view === 'park' && (
+      {view === 'world' && (
+        <mesh rotation-x={-Math.PI / 2} position={[0, 0.03, 0]}>
+          <circleGeometry args={[10, 48]} />
+          <meshStandardMaterial color="#e6d8c0" roughness={1} />
+        </mesh>
+      )}
+      {(view === 'park' || view === 'world') && (
         <mesh rotation-x={-Math.PI / 2} position={[-15.2, 0.02, -21.2]}>
           <circleGeometry args={[2.7, 40]} />
           <meshStandardMaterial color="#7fc4d8" roughness={0.3} />
@@ -73,6 +93,7 @@ function Ground() {
 function App() {
   const placements = useMemo(() => (view === 'park' ? PARK_TREE_PLACEMENTS
     : view === 'forest' ? forestPlacements()
+    : view === 'world' ? [...PARK_TREE_PLACEMENTS, ...beltPlacements()]
     : view === 'combo' ? [...rowPlacements(), ...forestPlacements()] : rowPlacements()), []);
   return (
     <>
@@ -91,7 +112,7 @@ function App() {
         <Stats />
       </Canvas>
       <div className="hud">
-        <a href="?">combo</a><a href="?view=row">row</a><a href="?view=park">park</a><a href="?view=forest">forest</a><a href="?q=low">low</a>
+        <a href="?">combo</a><a href="?view=world">world</a><a href="?view=row">row</a><a href="?view=park">park</a><a href="?view=forest">forest</a><a href="?q=low">low</a>
         <span id="stats" />
       </div>
     </>

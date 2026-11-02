@@ -68,6 +68,9 @@ export const CREATOR_CSS = /* css */ `
 .hwc-hint { margin-top: 4px; font-size: 11px; color: var(--hwc-faint); pointer-events: none; }
 .hwc-loading { position: absolute; left: 50%; top: 46%; transform: translate(-50%, -50%); display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 999px; background: rgba(14, 12, 25, 0.7); border: 1px solid var(--hwc-line); font-size: 12px; color: var(--hwc-muted); opacity: 0; transition: opacity .25s; pointer-events: none; z-index: 3; }
 .hwc-loading.is-on { opacity: 1; }
+.hwc-standin { position: absolute; left: 50%; top: 92px; transform: translateX(-50%); display: none; padding: 7px 12px; border-radius: 999px; font-size: 11.5px; white-space: nowrap; z-index: 3;
+  color: #ffd9a6; background: rgba(36, 22, 10, 0.78); border: 1px solid rgba(255, 196, 120, 0.35); pointer-events: none; }
+.hwc-standin.is-on { display: block; }
 .hwc-stage.is-loading-heavy .hwc-loading { border-color: rgba(255, 214, 150, 0.4); color: #ffe6c4; background: rgba(28, 20, 14, 0.72); }
 .hwc-stage.is-loading-heavy .hwc-loading i { border-top-color: #ffd29a; }
 .hwc-stage.is-loading-heavy::after { content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 1;

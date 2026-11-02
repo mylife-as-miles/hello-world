@@ -220,10 +220,15 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
   // Rig swaps are reported straight to the DOM (no React re-render): useful for
   // tests/QA to confirm the rig only rebuilds when the appearance changes.
   const rigBuilds = useRef(0);
-  const onRigReady = useCallback((rig: HumanoidRig) => {
+  const standInEl = useRef<HTMLDivElement>(null);
+  const onRigReady = useCallback((rig: HumanoidRig, requested: AvatarAppearance) => {
     rigBuilds.current += 1;
     const el = stageRef.current;
     if (el) { el.dataset.rigBuilds = String(rigBuilds.current); el.dataset.rigKind = rig.kind; }
+    // The avatar API falls back to a procedural Townie when a VRM/photoreal body fails to
+    // load; say so instead of silently showing a different character.
+    const fellBack = (isRealisticBase(requested.baseModelId) || isVrmBase(requested.baseModelId)) && rig.kind === 'procedural';
+    standInEl.current?.classList.toggle('is-on', fellBack);
   }, []);
   const flashTimers = useRef<{ expr?: number; wave?: number }>({});
   useEffect(() => () => { window.clearTimeout(flashTimers.current.expr); window.clearTimeout(flashTimers.current.wave); }, []);
@@ -390,6 +395,7 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
             </div>
           </div>
           <div className="hwc-loading" ref={loadingEl} aria-hidden="true" data-testid="creator-loading"><i /><span>Loading…</span></div>
+          <div className="hwc-standin" ref={standInEl} role="status" data-testid="creator-standin">Couldn't load this body — showing a Townie stand-in</div>
           <div className="hwc-dock" ref={dockRef}>
             <div className="hwc-dock-row" role="group" aria-label="Preview expression">
               <span className="hwc-dock-label">Expression</span>

@@ -45,7 +45,7 @@ function sleeves(b: GeoBuilder, d: Dims, lod: LodCfg, mat: string, end: number, 
 }
 
 function band(b: GeoBuilder, d: Dims, lod: LodCfg, mat: string, s0: number, s1: number, off: number, ribbed = false): void {
-  b.add(mat, torsoShell(d, lod, { s0, s1, off: (s) => off + 0.003 * Math.sin(((s - s0) / (s1 - s0)) * Math.PI), ringCount: 3, mod: ribbed && lod.high ? rib(40, 0.012) : undefined }), { weights: torsoWeights(d) });
+  b.add(mat, torsoShell(d, lod, { s0, s1, off: (s) => off + 0.003 * Math.sin(((s - s0) / (s1 - s0)) * Math.PI), ringCount: 3, mod: ribbed && lod.high ? rib(48, 0.005) : undefined }), { weights: torsoWeights(d) });
 }
 
 function chestPoint(d: Dims, s: number, side: number, off: number): V3 {
@@ -119,10 +119,10 @@ export function buildTop(b: GeoBuilder, d: Dims, lod: LodCfg, top: string, botto
       return;
     }
     case 'jacket': {
-      // tee underneath + open jacket
+      // tee underneath + open jacket (slimmer shoulders)
       shell('shirt', -0.08, 1.0, 0.009);
       band(b, d, lod, 'shirt', 0.95, 1.02, 0.006);
-      const off = 0.025;
+      const off = 0.021;
       const open = 0.3;
       shell('top', -0.16, 0.99, (s) => off + 0.004 * smooth(0.4, -0.1, s), { theta0: open, theta1: Math.PI * 2 - open, ringCount: 22 });
       // lapels (darker), folded outward along the opening
@@ -194,9 +194,9 @@ export function buildTop(b: GeoBuilder, d: Dims, lod: LodCfg, top: string, botto
       const off = 0.022;
       shell('top', -0.12, 1.0, off);
       band(b, d, lod, 'topDark', -0.18, -0.1, off + 0.006, true);
-      band(b, d, lod, 'trim', -0.155, -0.135, off + 0.0095);
+      band(b, d, lod, 'trim', -0.155, -0.135, off + 0.0125);
       band(b, d, lod, 'topDark', 0.93, 1.03, off - 0.002, true);
-      band(b, d, lod, 'trim', 0.955, 0.975, off + 0.004);
+      band(b, d, lod, 'trim', 0.955, 0.975, off + 0.0065);
       sleeves(b, d, lod, 'trim', ua + la - 0.008, off - 0.004, { cuff: 'topDark', cuffW: 0.04 });
       buttons(b, d, lod, 'trim', 0.0, 0.85, 5, off + 0.003, 0.008);
       if (hi) {
@@ -240,7 +240,7 @@ export function buildTop(b: GeoBuilder, d: Dims, lod: LodCfg, top: string, botto
 
 // ---------------------------------------------------------------- bottoms
 function pelvis(b: GeoBuilder, d: Dims, lod: LodCfg, mat: string, off: number, sTop = 0.2): void {
-  b.add(mat, torsoShell(d, lod, { s0: -0.28, s1: sTop, off, capBottom: true, ringCount: 12 }), { weights: torsoWeights(d) });
+  b.add(mat, torsoShell(d, lod, { s0: -0.2, s1: sTop, off, capBottom: true, ringCount: 12 }), { weights: torsoWeights(d) });
 }
 
 function pantLegs(b: GeoBuilder, d: Dims, lod: LodCfg, mat: string, end: number, off: (t: number) => number, cuff?: { mat: string; w: number; off: number }): void {

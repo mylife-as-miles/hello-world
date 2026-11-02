@@ -67,7 +67,7 @@ function lidGeometry(upper: boolean): THREE.BufferGeometry {
     g.deleteAttribute('uv');
     return withColor(g, (_i, _x, y, z) => {
       const edge = Math.abs(y); // near equator => near the lid edge
-      const dark = upper ? (edge < 0.2 && z > -0.2 ? 1 : 0) : (edge < 0.12 && z > 0 ? 0.35 : 0);
+      const dark = upper ? (edge < 0.13 && z > -0.1 ? 1 : 0) : 0;
       const v = 1 - dark * 0.9;
       return upper && dark ? [0.09, 0.07, 0.07] : [v, v * 0.98, v * 0.98];
     });
@@ -190,11 +190,11 @@ export class TownieFace {
     let s = seed || 1;
     this.rnd = () => { s ^= s << 13; s >>>= 0; s ^= s >>> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; };
     this.nextBlink = 0.5 + this.rnd() * 3;
-    const eyeR = 0.0315 * p.eyeScale;
+    const eyeR = 0.0272 * p.eyeScale;
     for (const side of [1, -1] as const) {
       const ph = side * 0.41, el = -0.075;
       const n = headNormal(ph, el);
-      const c = headPoint(ph, el, -eyeR * (lod === 'high' ? 0.5 : 0.75));
+      const c = headPoint(ph, el, -eyeR * (lod === 'high' ? 0.6 : 0.75));
       if (lod === 'low') {
         const dot = new THREE.Mesh(unitSphere(10, 8), m.dark);
         dot.position.set(c[0], c[1], c[2]);

@@ -61,8 +61,8 @@ function layout(): { items: Item[]; cam: [number, number, number]; target: [numb
     return { items, cam: [0, 1.3, 9.5], target: [0, 0.85, 0], fov: 32 };
   }
   if (view === 'face') {
-    const items = EXPR.map((e, i) => ({ a: CAST[i % CAST.length]!, x: (i - 4) * 0.42, expr: e, base: 'idle' as AnimationFamily }));
-    return { items, cam: [0, 1.45, 3.2], target: [0, 1.4, 0], fov: 30 };
+    const items = EXPR.map((e, i) => ({ a: A({ ...CAST[i % CAST.length]!, baseModelId: 'townie-classic', body: { height: 0.5, build: 0.5 }, accessories: [] }), x: (i - 4) * 0.36, expr: e, base: 'idle' as AnimationFamily }));
+    return { items, cam: [0, 1.5, 2.6], target: [0, 1.45, 0], fov: 30 };
   }
   if (view === 'hair') {
     const items = HAIR_STYLES.map((h, i) => ({ a: A({ hairStyle: h.id, hairColor: ['#3b2417', '#d9a441', '#c2412d', '#1c1410', '#6b4226', '#e36aa6'][i % 6]!, outfit: { color: '#4aa3df' } }), x: (i - 5.5) * 0.45, ry: i % 2 ? 0.6 : -0.6 }));
@@ -87,7 +87,7 @@ function layout(): { items: Item[]; cam: [number, number, number]; target: [numb
     return { items, cam: [0, 1.2, 8], target: [0, 0.85, 0], fov: 32 };
   }
   const items: Item[] = CAST.map((a, i) => ({ a, x: (i - 4.5) * 0.92, z: (i % 2) * -0.25, gesture: i === 3 ? 'wave' : undefined, expr: (['happy', 'relaxed', 'neutral', 'happy', 'surprised', 'neutral', 'happy', 'relaxed', 'angry', 'happy'] as ExpressionName[])[i] }));
-  return { items, cam: [0, 1.25, 8.6], target: [0, 0.88, 0], fov: 33 };
+  return { items, cam: [0, 1.2, 7.4], target: [0, 0.86, 0], fov: 33 };
 }
 
 function Lab() {

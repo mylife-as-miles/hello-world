@@ -47,7 +47,7 @@ export function torsoShell(d: Dims, lod: LodCfg, o: TorsoShellOpts): THREE.Buffe
     rings.push(r);
   }
   let startPole: V3 | null = null, endPole: V3 | null = null;
-  if (o.capBottom) { const r0 = rings[0]!; startPole = [0, r0.c[1] - 0.025, r0.c[2]]; }
+  if (o.capBottom) { const r0 = rings[0]!; startPole = [0, r0.c[1] - 0.006, r0.c[2]]; }
   if (o.capTop) { const r1 = rings[rings.length - 1]!; endPole = [0, r1.c[1] + 0.012, r1.c[2]]; }
   return sweep(rings, { u: X, v: Z, segs: lod.torsoRadial, startPole, endPole, theta0: o.theta0, theta1: o.theta1, mod: o.mod });
 }
@@ -189,7 +189,7 @@ function neckWeights(d: Dims) {
 
 export function buildSkin(b: GeoBuilder, d: Dims, lod: LodCfg, cov: Coverage): void {
   const tw = torsoWeights(d), aw = armWeights(d), lw = legWeights(d);
-  b.add('skin', torsoShell(d, lod, { s0: -0.27, s1: 1.04, off: 0, capBottom: true, capTop: true, ringCount: 26 }), { weights: tw });
+  b.add('skin', torsoShell(d, lod, { s0: -0.21, s1: 1.04, off: 0, capBottom: true, capTop: true, ringCount: 26 }), { weights: tw });
   // neck
   const nr = d.neckR;
   const neckRings: Ring[] = [];

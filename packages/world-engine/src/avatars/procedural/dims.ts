@@ -63,10 +63,10 @@ export function computeDims(presetId: string, buildIn: number): Dims {
   const T = neck - hips;
   const armY = upperChest + 0.088 * P.torso;
   const sh = P.shoulder * lerp(0.96, 1.05, build);
-  const armX = 0.158 * sh;
+  const armX = 0.15 * sh;
   const upperArm = 0.245 * P.arm, lowerArm = 0.225 * P.arm, hand = 0.17 * P.arm;
   const hipX = 0.082 * P.hip * lerp(0.95, 1.06, build);
-  const hs = P.head;
+  const hs = P.head * 1.06;
   const L = P.limb;
 
   const torsoKeys = [
@@ -83,7 +83,7 @@ export function computeDims(presetId: string, buildIn: number): Dims {
   ];
   const ua = upperArm, la = lowerArm;
   const armKeys = [
-    [0.0, 0.05 * g * L], [0.07, 0.047 * g * L], [ua * 0.6, 0.041 * g * L], [ua, 0.035 * g],
+    [0.0, 0.046 * g * L], [0.07, 0.044 * g * L], [ua * 0.6, 0.041 * g * L], [ua, 0.035 * g],
     [ua + 0.05, 0.037 * g * L], [ua + la * 0.55, 0.032 * g], [ua + la, 0.026 * g],
   ];
   const ul = upperLeg, ll = lowerLeg;

@@ -54,14 +54,16 @@ function LabRig({ item, index, x, z }: { item: Item; index: number; x: number; z
   return <group position={[x, 0, z]}>
     <primitive object={rig.root} />
     {item.family === 'sit' || item.family === 'sleep' ? <mesh position={[0, 0.225, -0.05]}><boxGeometry args={[0.6, 0.45, 0.45]} /><meshStandardMaterial color="#8b6a4f" /></mesh> : null}
-    <Html position={[0, -0.12, 0.4]} center style={{ pointerEvents: 'none', whiteSpace: 'nowrap', font: '600 12px system-ui', color: '#fff', background: 'rgba(0,0,0,.55)', padding: '2px 6px', borderRadius: 6 }}>{item.label}</Html>
+    <Html position={[0, 2.05, 0]} center style={{ pointerEvents: 'none', whiteSpace: 'nowrap', font: '600 12px system-ui', color: '#fff', background: 'rgba(0,0,0,.55)', padding: '2px 6px', borderRadius: 6 }}>{item.label}</Html>
   </group>;
 }
 
 function Lab() {
   const rows = Math.ceil(ITEMS.length / cols);
   const spacing = 1.6;
-  const cam: [number, number, number] = view === 'side' ? [12, 2.2, 0] : view === 'back' ? [0, 2.4, -9] : [0, 2.4 + rows * 0.8, 3 + rows * 2.6];
+  const span = Math.max(Math.min(cols, ITEMS.length) * spacing, rows * spacing * 1.25);
+  const d = 1.2 + span * 0.85;
+  const cam: [number, number, number] = view === 'side' ? [d, 1.3, 0] : view === 'back' ? [0, 1.3 + rows * 0.5, -d] : view === 'top' ? [0, d, 0.01] : [d * 0.35, 1.3 + rows * 0.7, d];
   return <Canvas dpr={1} camera={{ position: cam, fov: 40 }} style={{ position: 'fixed', inset: 0 }}>
     <color attach="background" args={['#24313a']} />
     <hemisphereLight args={['#dfefff', '#3a2f28', 1.2]} />

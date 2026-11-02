@@ -91,13 +91,13 @@ export class Prims {
     return this.get('prism', () => {
       const g = new THREE.BufferGeometry();
       const v = [
-        // front (x=+0.5) & back (x=-0.5) triangles
-        0.5, 0, -0.5, 0.5, 0, 0.5, 0.5, 1, 0,
-        -0.5, 0, 0.5, -0.5, 0, -0.5, -0.5, 1, 0,
+        // gable ends (x=+0.5 / x=-0.5), counter-clockwise from outside
+        0.5, 0, 0.5, 0.5, 0, -0.5, 0.5, 1, 0,
+        -0.5, 0, -0.5, -0.5, 0, 0.5, -0.5, 1, 0,
         // slope +z
-        0.5, 0, 0.5, -0.5, 0, 0.5, -0.5, 1, 0, 0.5, 0, 0.5, -0.5, 1, 0, 0.5, 1, 0,
+        0.5, 0, 0.5, -0.5, 1, 0, -0.5, 0, 0.5, 0.5, 0, 0.5, 0.5, 1, 0, -0.5, 1, 0,
         // slope -z
-        -0.5, 0, -0.5, 0.5, 0, -0.5, 0.5, 1, 0, -0.5, 0, -0.5, 0.5, 1, 0, -0.5, 1, 0,
+        -0.5, 0, -0.5, 0.5, 1, 0, 0.5, 0, -0.5, -0.5, 0, -0.5, -0.5, 1, 0, 0.5, 1, 0,
       ];
       g.setAttribute('position', new THREE.Float32BufferAttribute(v, 3));
       g.computeVertexNormals();

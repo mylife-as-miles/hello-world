@@ -116,14 +116,14 @@ function Studio(props: CreatorPreviewProps) {
         holder.current.add(rig.root);
         rigRef.current = rig;
         rigHeight.current = Number.isFinite(rig.height) && rig.height > 0.3 ? rig.height : 1.75;
-        const anim = new AvatarAnimator(rig, 0);
+        const anim = new AvatarAnimator(rig, 7);
         anim.setBase(baseRef.current);
         const g = gestureRef.current;
         if (g && g.until > elapsed.current) anim.playGesture(g.name, { duration: g.until - elapsed.current });
         anim.update(1 / 60); // pose before first paint (no T-pose flash)
         animRef.current = anim;
         // re-apply live expression weights on the fresh rig
-        for (const [name, e] of exprs.current) rig.setExpression(name, e.w);
+        for (const [name, e] of exprs.current) anim.setExpression(name, e.w);
         onRigReady?.(rig);
       });
     }, first ? 0 : 60);
@@ -195,23 +195,24 @@ function Studio(props: CreatorPreviewProps) {
     const rig = rigRef.current;
     const anim = animRef.current;
     if (!rig || !anim) return;
-    // expressions (set before animator.update, which calls rig.update)
+    // Expressions go through the animator's manual channel (it blends them with
+    // its own moods/auto-blink and forwards to rig.setExpression in update()).
     for (const [name, e] of exprs.current) {
       if (e.blinkT !== undefined) {
         e.blinkT += dt;
         const t = e.blinkT;
-        // two quick blinks: close 0.09s, hold 0.06s, open 0.12s, pause, repeat
-        const one = (x: number) => (x < 0 ? 0 : x < 0.09 ? x / 0.09 : x < 0.15 ? 1 : x < 0.27 ? 1 - (x - 0.15) / 0.12 : 0);
-        e.w = Math.max(one(t), one(t - 0.42));
-        rig.setExpression(name, e.w);
-        if (t > 0.75) { rig.setExpression(name, 0); exprs.current.delete(name); }
+        // playful double blink: close 0.1s, hold 0.1s, open 0.12s, repeat once
+        const one = (x: number) => (x < 0 ? 0 : x < 0.1 ? x / 0.1 : x < 0.2 ? 1 : x < 0.32 ? 1 - (x - 0.2) / 0.12 : 0);
+        e.w = Math.max(one(t), one(t - 0.46));
+        anim.setExpression(name, e.w);
+        if (t > 0.85) { anim.setExpression(name, 0); exprs.current.delete(name); }
         continue;
       }
       if (e.target > 0 && now > e.until) e.target = 0;
       const rate = e.target > e.w ? 7 : 4.5;
       e.w += (e.target - e.w) * (1 - Math.exp(-dt * rate));
-      if (e.target === 0 && e.w < 0.01) { rig.setExpression(name, 0); exprs.current.delete(name); continue; }
-      rig.setExpression(name, e.w);
+      if (e.target === 0 && e.w < 0.01) { anim.setExpression(name, 0); exprs.current.delete(name); continue; }
+      anim.setExpression(name, e.w);
     }
     if (gestureRef.current && now > gestureRef.current.until) gestureRef.current = null;
     anim.update(dt);

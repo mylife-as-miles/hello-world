@@ -520,8 +520,8 @@ export class AvatarAnimator {
       S(p, 'chest', 0.02 + 0.02 * br, 0.02 * sway, 0);
       S(p, 'neck', -0.02, 0, 0);
       S(p, 'head', 0.02, 0, 0.04 * sway);
-      arm(p, 1, -0.55, 1.32, 0, 0.45, 0.75);
-      arm(p, -1, -0.55, 1.32, 0, 0.45, 0.75);
+      arm(p, 1, -0.5, 1.36, 0, 0.95, 0.95);
+      arm(p, -1, -0.5, 1.36, 0, 0.95, 0.95);
       hand(p, 1, 0.25, 0); hand(p, -1, 0.25, 0);
     } else {
       const nod = 0.04 * Math.sin(t * 0.35 + this.ph[4]!);
@@ -530,8 +530,8 @@ export class AvatarAnimator {
       S(p, 'chest', 0.12 + 0.025 * br, 0, 0.03);
       S(p, 'neck', 0.2, 0, 0.1);
       S(p, 'head', 0.35 + nod, 0.1, 0.22);
-      arm(p, 1, -0.45, 1.38, 0, 0.5, 0.65);
-      arm(p, -1, -0.45, 1.38, 0, 0.5, 0.65);
+      arm(p, 1, -0.4, 1.4, 0, 1.0, 0.9);
+      arm(p, -1, -0.4, 1.4, 0, 1.0, 0.9);
       hand(p, 1, 0.35, 0); hand(p, -1, 0.35, 0);
     }
   }
@@ -577,9 +577,9 @@ export class AvatarAnimator {
     this.poseIdle(p, 0.2);
     const t = this.t;
     const tilt = Math.sin(t * 0.45 + this.ph[7]!);
-    arm(p, -1, -0.5, 1.28, 0, 0.75, 2.35);      // right hand to chin
+    arm(p, -1, -0.85, 1.42, 0, 0.45, 2.25);     // right hand to chin
     hand(p, -1, 0.35, 0.2);
-    arm(p, 1, -0.35, 1.3, 0, 1.25, 1.5);         // left forearm across the belly
+    arm(p, 1, -0.3, 1.32, 0, 1.3, 1.55);         // left forearm across the belly (supports the elbow)
     hand(p, 1, 0.1, 0);
     A(p, 'spine', 0.02, 0.04, 0);
     S(p, 'neck', 0.02, -0.04, 0.04);

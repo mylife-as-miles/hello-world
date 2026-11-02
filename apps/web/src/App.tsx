@@ -301,6 +301,16 @@ export default function App() {
   const [localNotice, setLocalNotice] = useState<string | null>(null);
   const sceneRef = useRef<HTMLDivElement>(null);
   const me = snapshot.residents.find((r) => r.id === residentId);
+  const visibleResidents = me
+    ? [
+        me,
+        ...snapshot.residents.filter((resident) => resident.id !== me.id),
+      ].slice(0, 12)
+    : snapshot.residents.slice(0, 12);
+  const hiddenResidentCount = Math.max(
+    0,
+    snapshot.residents.length - visibleResidents.length,
+  );
   const selected = snapshot.residents.find((r) => r.id === selectedId) || me;
   const socialTarget = target || selected?.id;
   const ready = connection === "online";
@@ -337,6 +347,18 @@ export default function App() {
       : broadcasterName
         ? `${broadcasterName}’s community`
         : "Connected Twitch community";
+
+  useEffect(() => {
+    // The connection becomes online only after an authoritative snapshot arrives.
+    // Preserve an OBS query selection while the initial/cache snapshot is loading.
+    if (!ready) return;
+    const currentIds = new Set(
+      snapshot.residents.map((resident) => resident.id),
+    );
+    if (target && !currentIds.has(target)) setTarget("");
+    if (selectedId && !currentIds.has(selectedId)) setSelectedId(me?.id);
+    else if (!selectedId && me) setSelectedId(me.id);
+  }, [ready, snapshot.residents, selectedId, target, me?.id]);
 
   useEffect(() => {
     const onPopState = () => {
@@ -1303,7 +1325,7 @@ export default function App() {
                     {activityTab === "residents" ? (
                       <div className="residents-list">
                         {snapshot.residents.length ? (
-                          snapshot.residents.slice(0, 12).map((resident) => (
+                          visibleResidents.map((resident) => (
                             <button
                               className={`resident-row ${selected?.id === resident.id ? "selected" : ""}`}
                               key={resident.id}
@@ -1340,10 +1362,9 @@ export default function App() {
                             </span>
                           </div>
                         )}
-                        {snapshot.residents.length > 12 && (
+                        {hiddenResidentCount > 0 && (
                           <span className="more-residents">
-                            + {snapshot.residents.length - 12} more around the
-                            neighborhood
+                            + {hiddenResidentCount} more around the neighborhood
                           </span>
                         )}
                       </div>

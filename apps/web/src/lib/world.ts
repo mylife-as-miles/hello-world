@@ -171,7 +171,7 @@ class WorldConnection {
       ws.onopen = () => {
         clearTimeout(handshakeTimer);
         this.retries = 0;
-        this.patch({ connection: "online", error: null });
+        this.patch({ error: null });
       };
       ws.onmessage = (event) => {
         try {
@@ -229,7 +229,7 @@ class WorldConnection {
         )
           throw new Error("Unsupported snapshot");
         this.connectedOnce = true;
-        this.patch({ snapshot: message.snapshot });
+        this.patch({ snapshot: message.snapshot, connection: "online" });
         if (!this.cacheTimer)
           this.cacheTimer = setTimeout(() => {
             this.cacheTimer = undefined;

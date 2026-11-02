@@ -11,7 +11,7 @@ Frame rates from SwiftShader are **not** representative of real GPUs and are not
 - `vitest run`: **50/50 passed across 9 files**
 - `vite build`: OK
 
-Additions since the first handoff `dc28c56`:
+Round 4 (after the first handoff `dc28c56`) is verified at `68e92e2`: tsc 0 errors, vitest **53/53**, `vite build` OK. Additions since `dc28c56`:
 - **Camera and events:** event cuts in every broadcast camera, an always-on event banner (raid count-up, join, gift, confetti; also shown in OBS overlay), an establishing shot, and a street camera aimed at residents.
 - **World:** the super-terrain-derived landscape, generated forest and downtown skyline are mounted.
 - **Avatars and creator:** 8 photoreal/realistic bodies, with a fixed-look card for them in the creator.
@@ -154,6 +154,47 @@ Recommended next steps:
 4. Needs that occasionally become critical, and more autonomous gifts and compliments.
 
 Evidence: `scratchpad/critic/c3/*` (screenshots, metrics JSON, dialogue sample, logs). `tsc` reported 0 errors and `vitest` 50/50.
+
+### Cycle 4 (22:41–22:55 UTC, frozen build of round-4 commit `68e92e2`): **7.6 / 10** (+0.2)
+
+| Category | Weight | C1 | C2 | C3 | C4 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 3D world & visual quality | 20 % | 6.5 | 7.0 | 7.4 | 7.4 |
+| Character creator & avatar quality | 20 % | 6.5 | 6.8 | 7.0 | 7.4 |
+| Sims-like life simulation | 20 % | 7.5 | 7.7 | 7.6 | 7.6 |
+| Interactions & social behaviour | 20 % | 7.0 | 7.2 | 7.8 | 7.8 |
+| Performance & technical reliability | 10 % | 7.0 | 7.3 | 6.8 | 7.5 |
+| Persistence & memory | 10 % | 7.0 | 7.4 | 7.3 | 7.8 |
+
+Round 4 changes:
+- dithered occluder fading and orbit swing
+- banner lifetimes, gift recipient and join cuts
+- nameplate declutter and raid chips
+- gift arc and memory on arrival
+- need dips and social progression
+- staggered raid arcs
+- one draw call per low-detail resident, with real shadows only from the nearest 3
+- lighter forest at low quality, alpha-to-coverage leaves, weather tint
+- grounded overlay furniture
+
+Default-view cost at quality=low went from 171–181 to **123–124 draw calls and 291–292k triangles**. The coordinator and the critic measured independently, both with the in-scene renderer.info probe. Across cameras at low quality the range is now 89–185, down from 139–385.
+
+Fixed:
+- Raid banner held for 12.7 s.
+- Gift banner names the recipient.
+- Join cuts no longer get swallowed by the coalescing window.
+- Raider nameplates collapse into chips.
+- Gift memory is written on arrival.
+- Overlay furniture is grounded and the beam is slim.
+
+Partial:
+- Close-camera composition: cinematic C shows a lamp post, orbit shows a café wall, and follow framing is blocked by a planter.
+- Low-need distress is visible only some of the time: 12 % of samples are below 25, but only a few show it.
+- Low-quality foliage dithering.
+
+Most damaging remaining problem: **the raid shot in the world view**. The full-height beam washes out the centre, the banner covers the raiders, and a lamp post stands in front of them.
+
+New bug: the raid count-up starts at "0 viewers".
 
 ## Launch film
 

@@ -132,6 +132,25 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
   const [flash, setFlash] = useState<{ expr: PreviewExpression | null; wave: boolean }>({ expr: null, wave: false });
   const nonce = useRef(0);
   const loadingEl = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const topRef = useRef<HTMLDivElement>(null);
+  const dockRef = useRef<HTMLDivElement>(null);
+  const insets = useRef({ top: 70, bottom: 120 });
+  // Measure the overlay bands so the camera frames the character in the free space.
+  useEffect(() => {
+    const stage = stageRef.current, top = topRef.current, dock = dockRef.current;
+    if (!stage || !top || !dock || typeof ResizeObserver === 'undefined') return;
+    const measure = () => {
+      const s = stage.getBoundingClientRect(), t = top.getBoundingClientRect(), d = dock.getBoundingClientRect();
+      const panel = stage.parentElement?.querySelector<HTMLElement>('.hwc-panel')?.getBoundingClientRect();
+      const coveredBottom = panel && panel.top < s.bottom && panel.left < s.right - 1 ? s.bottom - panel.top : 0;
+      insets.current = { top: Math.max(0, t.bottom - s.top + 10), bottom: Math.max(coveredBottom, s.bottom - d.top + 12) };
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(stage); ro.observe(top); ro.observe(dock);
+    return () => ro.disconnect();
+  }, []);
   const flashTimers = useRef<{ expr?: number; wave?: number }>({});
   useEffect(() => () => { window.clearTimeout(flashTimers.current.expr); window.clearTimeout(flashTimers.current.wave); }, []);
 
@@ -238,14 +257,15 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
       <style>{CREATOR_CSS}</style>
       <div className="hwc-layout">
         {/* ------------------------------------------------ preview */}
-        <div className="hwc-stage">
+        <div className="hwc-stage" ref={stageRef}>
           <CreatorPreview appearance={appearance} appearanceKey={appearanceKey} camera={camera} cameraNonce={cameraNonce}
-            autoRotate={autoRotate} base={base} gesture={gesture} expression={expression} accent={ACCENT} loadingEl={loadingEl} />
-          <div className="hwc-stage-top">
+            autoRotate={autoRotate} base={base} gesture={gesture} expression={expression} accent={ACCENT} loadingEl={loadingEl} insets={insets} />
+          <div className="hwc-stage-top" ref={topRef}>
             <div className="hwc-brand">
               <span className="hwc-eyebrow">Hello World</span>
               <span className="hwc-title">Character Studio</span>
               <span className="hwc-badge"><i />{baseEntry ? `${baseEntry.label} body` : 'Custom body'}{vrm ? ' · VRM' : ''}</span>
+              <span className="hwc-hint" aria-hidden="true">Drag to rotate · scroll or pinch to zoom</span>
             </div>
             <div className="hwc-tools">
               <div className="hwc-seg" role="group" aria-label="Camera framing">
@@ -264,7 +284,7 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
             </div>
           </div>
           <div className="hwc-loading" ref={loadingEl} aria-hidden="true"><i />Loading model…</div>
-          <div className="hwc-dock">
+          <div className="hwc-dock" ref={dockRef}>
             <div className="hwc-dock-row" role="group" aria-label="Preview expression">
               <span className="hwc-dock-label">Expression</span>
               {EXPRESSION_BUTTONS.map(x => (
@@ -287,7 +307,6 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
               })}
             </div>
           </div>
-          <div className="hwc-hint" aria-hidden="true">Drag to rotate · Scroll to zoom</div>
         </div>
 
         {/* ------------------------------------------------ panel */}
@@ -308,7 +327,7 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
             {SECTIONS.map(s => (
               <button key={s.id} type="button" className={cls(activeSection === s.id && 'is-on')} aria-current={activeSection === s.id ? 'true' : undefined}
                 aria-controls={secId(s.id)} data-testid={`nav-${s.id}`} onClick={() => jumpTo(s.id)}>
-                <Icon name={s.icon} size={14} />{s.label}
+                <Icon name={s.icon} size={16} /><span>{s.label}</span>
               </button>
             ))}
           </nav>

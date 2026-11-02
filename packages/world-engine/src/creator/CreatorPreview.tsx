@@ -37,23 +37,35 @@ export interface CreatorPreviewProps {
   onRigReady?: (rig: HumanoidRig) => void;
   /** DOM node toggled while a rig is loading (no React re-render). */
   loadingEl?: React.RefObject<HTMLElement | null>;
+  /** Pixels covered by UI overlays at the top/bottom of the canvas (read every frame). */
+  insets?: React.RefObject<{ top: number; bottom: number }>;
 }
 
 const EXPRESSION_HOLD = 1.8;
+const NO_INSETS = { top: 0, bottom: 0 };
 
-/** Per-preset framing. Distances are fitted to the vertical fov at runtime. */
-function presetGoal(preset: CameraPreset, h: number, fovDeg: number, aspect: number) {
+/**
+ * Per-preset framing: fit a body span into the free band between the UI
+ * overlays (top bar / bottom dock) and centre it there.
+ */
+function presetGoal(preset: CameraPreset, h: number, fovDeg: number, width: number, height: number, insets: { top: number; bottom: number }) {
   const tan = Math.tan(THREE.MathUtils.degToRad(fovDeg) / 2);
-  // visible height wanted, and target height on the body
+  const s = h / 1.75;
   const spec = preset === 'face'
-    ? { span: 0.5 * (h / 1.75), ty: h * 0.9, phi: 1.5, theta: 0.12 }
+    ? { span: 0.42 * s, center: h * 0.915, phi: 1.5, theta: 0.06, width: 0.42 }
     : preset === 'upper'
-      ? { span: 1.12 * (h / 1.75), ty: h * 0.72, phi: 1.47, theta: 0.28 }
-      : { span: h * 1.3 + 0.12, ty: h * 0.5 + 0.02, phi: 1.43, theta: 0.42 };
-  // In narrow viewports also fit the width (arms + a little air).
-  const widthSpan = preset === 'full' ? 1.25 : preset === 'upper' ? 0.95 : 0.42;
-  const dist = Math.max(spec.span / 2 / tan, widthSpan / 2 / (tan * Math.max(0.3, aspect)));
-  return { targetY: spec.ty, dist, phi: spec.phi, theta: spec.theta };
+      ? { span: 0.98 * s, center: h * 0.72, phi: 1.47, theta: 0.14, width: 0.95 }
+      : { span: h * 1.06 + 0.16, center: h * 0.5, phi: 1.44, theta: 0.22, width: 1.3 };
+  const H = Math.max(1, height);
+  const top = Math.min(insets.top, H * 0.3);
+  const bottom = Math.min(insets.bottom, H * 0.4);
+  const free = Math.max(H * 0.3, H - top - bottom);
+  // visible world height so that `span` fills the free band
+  const V = Math.max(spec.span * H / free, spec.width / Math.max(0.3, width / H));
+  const dist = V / 2 / tan;
+  // shift the target so the span is centred in the free band (not the canvas)
+  const offset = ((top - bottom) / 2) * (V / H);
+  return { targetY: spec.center + offset, dist, phi: spec.phi, theta: spec.theta };
 }
 
 function makeGlowTexture(): THREE.CanvasTexture | null {
@@ -76,7 +88,7 @@ function makeGlowTexture(): THREE.CanvasTexture | null {
 interface OrbitLike { target: THREE.Vector3; update(): void }
 
 function Studio(props: CreatorPreviewProps) {
-  const { appearance, appearanceKey, camera: preset, cameraNonce, autoRotate, base, gesture, expression, accent, onRigReady, loadingEl } = props;
+  const { appearance, appearanceKey, camera: preset, cameraNonce, autoRotate, base, gesture, expression, accent, onRigReady, loadingEl, insets } = props;
   const turntable = useRef<THREE.Group>(null);
   const holder = useRef<THREE.Group>(null);
   const controls = useRef<OrbitLike | null>(null);
@@ -172,7 +184,7 @@ function Studio(props: CreatorPreviewProps) {
     const c = controls.current;
     if (c) {
       const persp = camera as THREE.PerspectiveCamera;
-      const goal = presetGoal(presetRef.current, rigHeight.current, persp.fov ?? 28, size.width / Math.max(1, size.height));
+      const goal = presetGoal(presetRef.current, rigHeight.current, persp.fov ?? 28, size.width, size.height, insets?.current ?? NO_INSETS);
       const k = 1 - Math.exp(-dt * 5.5);
       const dy = (goal.targetY - c.target.y) * k;
       c.target.y += dy;
@@ -234,16 +246,16 @@ function Studio(props: CreatorPreviewProps) {
         <Lightformer form="ring" intensity={1.6} color={accent} position={[0, 2, -4]} scale={2.5} />
       </Environment>
 
-      <group ref={turntable} rotation-y={-0.32}>
+      <group ref={turntable} rotation-y={-0.22}>
         <group ref={holder} />
         {/* pedestal */}
         <mesh position-y={-0.045} receiveShadow>
           <cylinderGeometry args={[1.12, 1.18, 0.09, 72]} />
-          <meshPhysicalMaterial color="#2b2840" roughness={0.38} metalness={0.15} clearcoat={0.7} clearcoatRoughness={0.25} />
+          <meshPhysicalMaterial color="#1d1a2e" roughness={0.42} metalness={0.2} clearcoat={0.55} clearcoatRoughness={0.3} envMapIntensity={0.55} />
         </mesh>
         <mesh rotation-x={-Math.PI / 2} position-y={0.0015}>
-          <ringGeometry args={[1.06, 1.1, 96]} />
-          <meshBasicMaterial color={accent} transparent opacity={0.85} toneMapped={false} />
+          <ringGeometry args={[1.085, 1.11, 128]} />
+          <meshBasicMaterial color={accent} transparent opacity={0.9} toneMapped={false} />
         </mesh>
         <mesh rotation-x={-Math.PI / 2} position-y={0.0012}>
           <ringGeometry args={[0.62, 0.628, 96]} />
@@ -253,7 +265,7 @@ function Studio(props: CreatorPreviewProps) {
       {glow && (
         <mesh rotation-x={-Math.PI / 2} position-y={0.002} renderOrder={1}>
           <planeGeometry args={[2.6, 2.6]} />
-          <meshBasicMaterial map={glow} color={accent} transparent opacity={0.22} depthWrite={false} blending={THREE.AdditiveBlending} toneMapped={false} />
+          <meshBasicMaterial map={glow} color={accent} transparent opacity={0.14} depthWrite={false} blending={THREE.AdditiveBlending} toneMapped={false} />
         </mesh>
       )}
       <mesh rotation-x={-Math.PI / 2} position-y={-0.09}>

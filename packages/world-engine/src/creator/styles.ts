@@ -64,7 +64,7 @@ export const CREATOR_CSS = /* css */ `
 .hwc-pill:active { transform: scale(0.96); }
 .hwc-pill.is-on { background: var(--hwc-accent-soft); border-color: rgba(162, 143, 255, 0.55); color: #fff; }
 .hwc-pill .hwc-emo { font-size: 13px; line-height: 1; }
-.hwc-hint { position: absolute; left: 20px; bottom: 22px; font-size: 11px; color: var(--hwc-faint); pointer-events: none; z-index: 1; }
+.hwc-hint { margin-top: 4px; font-size: 11px; color: var(--hwc-faint); pointer-events: none; }
 .hwc-loading { position: absolute; left: 50%; top: 46%; transform: translate(-50%, -50%); display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 999px; background: rgba(14, 12, 25, 0.7); border: 1px solid var(--hwc-line); font-size: 12px; color: var(--hwc-muted); opacity: 0; transition: opacity .25s; pointer-events: none; z-index: 3; }
 .hwc-loading.is-on { opacity: 1; }
 .hwc-loading i { width: 12px; height: 12px; border-radius: 50%; border: 2px solid rgba(255,255,255,.2); border-top-color: var(--hwc-accent); animation: hwc-spin .8s linear infinite; }
@@ -85,9 +85,9 @@ export const CREATOR_CSS = /* css */ `
 .hwc-head-traits span { font-size: 10.5px; padding: 2px 7px; border-radius: 999px; background: var(--hwc-accent-soft); color: #e4ddff; }
 .hwc-head-traits em { font-style: normal; font-size: 11px; color: var(--hwc-faint); }
 
-.hwc-nav { display: flex; gap: 4px; padding: 4px 14px 12px; overflow-x: auto; scrollbar-width: none; border-bottom: 1px solid var(--hwc-line); flex: none; }
+.hwc-nav { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(54px, 1fr); gap: 2px; padding: 2px 12px 10px; overflow-x: auto; scrollbar-width: none; border-bottom: 1px solid var(--hwc-line); flex: none; }
 .hwc-nav::-webkit-scrollbar { display: none; }
-.hwc-nav button { flex: none; display: inline-flex; align-items: center; gap: 6px; border: 1px solid transparent; background: transparent; color: var(--hwc-muted); padding: 7px 10px; border-radius: 10px; font-size: 12px; font-weight: 600; cursor: pointer; transition: background .18s, color .18s; }
+.hwc-nav button { display: flex; flex-direction: column; align-items: center; gap: 4px; border: 1px solid transparent; background: transparent; color: var(--hwc-muted); padding: 8px 4px 7px; border-radius: 12px; font-size: 10.5px; font-weight: 650; letter-spacing: .01em; cursor: pointer; transition: background .18s, color .18s; white-space: nowrap; }
 .hwc-nav button:hover { color: #fff; background: rgba(255,255,255,.05); }
 .hwc-nav button.is-on { color: #fff; background: rgba(255, 255, 255, 0.1); border-color: rgba(255,255,255,.08); }
 
@@ -114,7 +114,7 @@ export const CREATOR_CSS = /* css */ `
 .hwc-preset-name { font-size: 13px; font-weight: 650; }
 .hwc-preset-tag { font-size: 11px; color: var(--hwc-faint); text-align: center; }
 
-.hwc-bases { display: grid; grid-template-columns: repeat(auto-fill, minmax(122px, 1fr)); gap: 8px; }
+.hwc-bases { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
 .hwc-base { display: flex; align-items: center; gap: 8px; text-align: left; padding: 8px 10px 8px 6px; border-radius: 14px; border: 1px solid var(--hwc-line); background: var(--hwc-card); cursor: pointer; transition: background .2s, border-color .2s; }
 .hwc-base:hover { background: var(--hwc-card-hover); }
 .hwc-base.is-on { border-color: var(--hwc-accent); background: var(--hwc-accent-soft); }
@@ -189,8 +189,9 @@ export const CREATOR_CSS = /* css */ `
   .hwc-badge { display: none; }
   .hwc-seg button { padding: 6px 9px; font-size: 11.5px; }
   .hwc-iconbtn { width: 34px; height: 34px; }
-  .hwc-dock { bottom: 30px; gap: 6px; left: 12px; right: 12px; transform: none; width: auto; max-width: none; align-items: stretch; }
-  .hwc-dock-row { padding: 4px; border-radius: 14px; }
+  .hwc-dock { bottom: 30px; gap: 6px; left: 0; right: 0; transform: none; width: auto; max-width: none; flex-direction: row; align-items: center; overflow-x: auto; scrollbar-width: none; padding: 0 12px; }
+  .hwc-dock::-webkit-scrollbar { display: none; }
+  .hwc-dock-row { flex: none; padding: 4px; border-radius: 14px; overflow: visible; max-width: none; }
   .hwc-pill { padding: 6px 9px; font-size: 11.5px; }
   .hwc-dock-label { display: none; }
   .hwc-hint { display: none; }

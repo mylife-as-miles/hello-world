@@ -196,6 +196,41 @@ Most damaging remaining problem: **the raid shot in the world view**. The full-h
 
 New bug: the raid count-up starts at "0 viewers".
 
+### Cycle 5 (23:13–23:27 UTC, frozen build of round-5 commit `8c0e483`): **7.7 / 10** (+0.1)
+
+Scores: world 7.8 · creator/avatars 7.5 · simulation 7.7 · interactions 7.6 · performance 8.1 · persistence 7.8. History: 6.9 → 7.2 → 7.4 → 7.6 → 7.7.
+
+Verified at `8c0e483`: tsc 0 errors, vitest 55/55, build OK.
+
+Draw calls and triangles at quality=low:
+
+| View | Draw calls | Triangles |
+| --- | ---: | ---: |
+| Default | 124–125 | 331k |
+| Cinematic | 132 | |
+| Follow | 129 | |
+| Orbit | 140 | |
+| Street | 162 | |
+| Raid | 83 | |
+
+Fixed:
+- **Raid payoff in the world view.** Slim, fading beam. The portal sits top-centre with raiders in the upper-middle third and no prop in front. The banner is at the top, reads "40 viewers" and never shows 0.
+- **Orbit and follow framing.** Orbit no longer clips into the café; follow keeps the subject in the central 80 %.
+- **Visible low-need behaviour.** Shown about 56 % of the time a need is low.
+- **Personality clashes.** About one clash every 2.3 game hours, with accepted and refused apologies.
+- **Need-based inspector moods.**
+- **Low-poly far forest.**
+- **Creator tab jumps and the characterful default character.**
+- **Name tags without a body (likely fixed).** Every resident's meshes sit at its position.
+
+Remaining:
+- **Most damaging: speech bubbles overlap in busy chat**, worst in the overlay.
+- **The see-through dither (new regression).** The near-camera screen-door pattern reads as a glitch, and the camera-to-subject cone can dissolve benches under other seated residents.
+- **Distress mostly shows as "looking for fun".** Residents low on energy sometimes choose fun over rest.
+- **Repeated apologies between the same pair.**
+- **The default creator face looks drowsy.**
+- **Photoreal and Townie style clash (design trade-off).** The optional `?realisticStylize=1` warms the scans but doesn't close the gap, so it stays off by default.
+
 ## Launch film
 
 A 21.2 s, 1920×1080, 30 fps silent launch cut was made from real product renders by a separate agent pair: footage capture plus a director working from the [cinetic](https://github.com/Leonxlnx/cinetic) skill (MIT). Remotion was skipped for time and the film was assembled with ffmpeg. The film is delivered outside the repository and is not committed.

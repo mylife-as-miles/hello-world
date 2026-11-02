@@ -12,7 +12,8 @@ different licences apply, depending on the base model.
 Changes made by Valdrada: glTF + meshopt export, packing into texture arrays, recalibrated skin tones.
 
 Changes made here: the texture-array layers were transcoded and re-encoded as WebP. Skin and face layers and hair are
-1024²; clothing and eye layers are 512². Props are hidden at load time. The skeleton bind data was copied from the
+1024²; clothing and eye layers are 512². Hair layers keep lossless alpha, and their colour is dilated (push-pull)
+into transparent texels so filtering doesn't darken strand edges. Props are hidden at load time. The skeleton bind data was copied from the
 dataset manifest into `../bodies.ts`. One change to the variant table: `mh-amara` uses eye layer 15 (dark-brown iris)
 instead of 21.
 
@@ -149,11 +150,11 @@ fa7746fdd7e786eb1a382129a5d1af83d29b76184f661537b02525f987a72e2c  tex/a75.webp
 1408ccc1f05696a8bb788b8d76a926a5c0485b0eec6650b3df3bb94396353023  tex/a80.webp
 9d84769dda74b48a7a4a136bdc741c8a6a48b627879a6a9e191de2d068f34bd7  tex/a81.webp
 9058065270907b490f55eb1a17258c9d05e7c842607d5b250e2f27ebac819d09  tex/a9.webp
-a41aec009a421cfa5ba50350d62b6e8de34ca02e435bd5373fd2c2b4847ed223  tex/h13.webp
-2914a0d2ebdd31b4f8eda900f2e197ec4497289951d4c2cd477dbb1f26caffd8  tex/h3.webp
-4ba162515a547ae06bb127e2e432a5d4d61827df04b0e62b318d4e9c997c767a  tex/h5.webp
-0770846a504a110e7a18ef2d4a768f1b5967aeba4e4653c822a067569fe70896  tex/h7.webp
-97f7d09dad2ee5987c8dac66ab079f344fed29e72b2d9ef31755ec43314378b0  tex/h8.webp
+379d2e4d8b2f69c004c6461a67d59691f1c24a2ce50d8501e8b3daaebda2de11  tex/h13.webp
+ed480cd142545c61ba294f148da5cffc00375fd13634b13f0f37fba2a6bc2323  tex/h3.webp
+54b0c7fcf0e8d87a61d6242297cd16ed210dcacd7f79156c583125d71c0a20da  tex/h5.webp
+38ab3a68ebc9692dd89397aeebdfecefe638d92bf82befb61bc94237c044a351  tex/h7.webp
+e4db7ee3a24fa2aca180d712918a5b475b041bff37bd326b46ebec16434994f6  tex/h8.webp
 824577905523e516d78ba0619401440232cfdcef85c0cb618789332ccd148aeb  tex/ra34.webp
 7adf995f040a1c2ec110a26437d9442a67c553689005bb8fec3bf19a30157350  tex/ra35.webp
 98b85715b247849a64e3073cd8e45c5e11162cc841584ae60896a7c9e882261a  tex/ra42.webp
@@ -162,8 +163,8 @@ a2c33f60e0437ff76bf2c405b42c38b890f63323456ef5732e88baa1881fd272  tex/ra43.webp
 38f622a1c4cc3702020ad23c7cbf60cdc60beceb40a5bfba280791826d84926a  tex/ra7.webp
 94c7c3d863378981ed20f5201065e44c5261182d52e243364313634a08cd068f  tex/ra78.webp
 b50cb1bf727bab42020c88764211109791bf01aa0766dc27d711ec99b33720a0  tex/ra79.webp
-3bef721b2025afcfa9796985566073cdac3be18ba42379295316f2c60194dcad  tex/rh0.webp
-4bc699cf5c7fad7853ecdc53a24b10ffa7b4341fecb5e9c46e67e11a86b0aaab  tex/rh14.webp
-7ce72e097c0280c334a44a9fbb95593074c04279fd70f7fb45a6dd3984019a9a  tex/rh18.webp
-8d3afff74487386a1e0b379f4f02c66038098f55dab2ec24ffc45bdcb70a744c  tex/rh28.webp
+824d56b2ab25d48059ac998fe58da7a4a3078a65babe373040ae4a3aacdad038  tex/rh0.webp
+f3c1d7dd0fde4e60b06c0b327db8a682d6ef85a42066270f53c94252934b8b8b  tex/rh14.webp
+2f1e7db571c43f2ad5d5c7d9ae561c2add08495b22101e0932d3b423c86301e4  tex/rh18.webp
+832559c1032b8e7d1c33de1b6add5d5b2a6ead81c2a6ca179af80e84194de9a8  tex/rh28.webp
 ```

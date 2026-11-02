@@ -1,0 +1,44 @@
+{
+  "name": "@hello-world/world-engine",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "HELLO WORLD living-neighborhood engine: 3D WorldScene, AvatarCreator and a deterministic, Node-safe life-simulation runtime.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./runtime": "./src/runtime/index.ts"
+  },
+  "sideEffects": false,
+  "scripts": {
+    "dev": "vite --host 0.0.0.0 --port 5180",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@hello-world/contracts": "workspace:*",
+    "@pixiv/three-vrm": "^3.5.5",
+    "@react-three/drei": "^10.7.9",
+    "@react-three/fiber": "^9.8.2",
+    "@react-three/postprocessing": "^3.2.2",
+    "dexie": "^4.0.11",
+    "postprocessing": "^6.39.6",
+    "three": "^0.187.0"
+  },
+  "peerDependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@types/three": "^0.187.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "fake-indexeddb": "^6.2.7",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "typescript": "~5.9.3",
+    "vite": "^7.1.0",
+    "vitest": "^3.2.4"
+  }
+}

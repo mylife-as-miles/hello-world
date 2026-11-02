@@ -1,0 +1,26 @@
+{
+  "name": "@hello-world/server",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@hello-world/contracts": "workspace:*",
+    "ws": "^8.18.0",
+    "zod": "^3.24.0",
+    "dotenv": "^16.4.7",
+    "@twurple/api": "^8.0.0",
+    "@twurple/auth": "^8.0.0",
+    "@twurple/chat": "^8.0.0",
+    "@twurple/eventsub-ws": "^8.0.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.0",
+    "@types/ws": "^8.5.13"
+  }
+}

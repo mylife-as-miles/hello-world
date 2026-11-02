@@ -152,7 +152,7 @@ export const HOME_COUNT = POIS.filter(p => p.kind === 'home').length;
 /** Buildings rendered by the scene. Door is on the local +Z face. */
 export const BUILDINGS: BuildingDef[] = [
   { id: 'b-cafe', kind: 'cafe', name: 'Sunbeam Café', position: { x: 16.5, z: -6.5 }, rotation: -PI / 2, width: 7, depth: 5.5, palette: 0, poiId: 'cafe' },
-  { id: 'b-arcade', kind: 'arcade', name: 'Pixel Arcade', position: { x: 20.5, z: -19 }, rotation: -PI * 0.75, width: 5.5, depth: 4.5, palette: 1, poiId: 'arcade' },
+  { id: 'b-arcade', kind: 'arcade', name: 'Pixel Arcade', position: { x: 20.5, z: -19 }, rotation: -PI * 0.28, width: 5.5, depth: 4.5, palette: 1, poiId: 'arcade' },
   { id: 'b-home-1', kind: 'house', name: 'Maple House', position: { x: -21.5, z: 3.2 }, rotation: PI / 2, width: 6, depth: 5.5, palette: 2, poiId: 'home-1' },
   { id: 'b-home-2', kind: 'house', name: 'Fern Cottage', position: { x: -11, z: 20.2 }, rotation: PI, width: 5.5, depth: 5, palette: 3, poiId: 'home-2' },
   { id: 'b-home-3', kind: 'house', name: 'Cedar Loft', position: { x: 0.5, z: 20.6 }, rotation: PI, width: 6.5, depth: 5.5, palette: 4, poiId: 'home-3' },

@@ -14,102 +14,16 @@ import * as THREE from 'three';
 import type { CameraMode, WorldEvent, ResidentProfile } from '@hello-world/contracts';
 import { useSceneStore } from '../core/SceneContext';
 import type { SceneStore } from '../core/sceneStore';
-import { BUILDINGS, getPoi } from '../world/layout';
+import { getPoi } from '../world/layout';
 import { useKit } from './context';
+import {
+  OCCLUDERS, blocked, propsNear, centralClutter, foregroundClutter, pickFramingPose, poseClean, setCameraProps, POSE_RISE,
+  type PickedPose,
+} from './cameraPose';
 
 export type RigMode = CameraMode | 'overlay';
 
 interface OrbitLike { target: THREE.Vector3; update?: () => void }
-
-/* ------------------------------------------------------------ occluders */
-
-type Occluder =
-  | { kind: 'box'; x: number; z: number; hw: number; hd: number; c: number; s: number; h: number }
-  | { kind: 'circle'; x: number; z: number; r: number; h: number };
-
-const OCCLUDERS: Occluder[] = (() => {
-  const out: Occluder[] = [];
-  for (const b of BUILDINGS) {
-    const h = b.kind === 'house' ? (b.palette === 4 || b.palette === 6 ? 8.2 : 6.4) : b.kind === 'cafe' ? 4.8 : 5.6;
-    out.push({ kind: 'box', x: b.position.x, z: b.position.z, hw: b.width / 2 + 0.45, hd: b.depth / 2 + 0.45, c: Math.cos(b.rotation), s: Math.sin(b.rotation), h });
-  }
-  const stage = getPoi('stage')?.position;
-  if (stage) out.push({ kind: 'circle', x: stage.x, z: stage.z, r: 3.15, h: 3.2 });
-  // fountain: treated taller than it is so shots never look across its tiers (no see-through dither on it)
-  out.push({ kind: 'circle', x: 0, z: 0, r: 2.35, h: 3.6 });
-  const portal = getPoi('portal')?.position;
-  if (portal) out.push({ kind: 'box', x: portal.x, z: portal.z, hw: 3.3, hd: 0.7, c: 1, s: 0, h: 5.2 });
-  return out;
-})();
-
-/** Is the segment camera(a) → target(b) blocked by any occluder (2D footprint + height)? Allocation-free. */
-let EXTRA: ReadonlyArray<{ x: number; z: number; r: number; h: number; minY?: number }> = [];
-
-function blocked(ax: number, ay: number, az: number, bx: number, by: number, bz: number): boolean {
-  for (let i = 0; i < EXTRA.length; i++) {
-    const o = EXTRA[i]!;
-    // the camera itself must keep clear of props (no canopy / post filling the lens)
-    const lo = o.minY ?? 0;
-    if (ay < o.h + 0.6 && ay > lo - 0.6 && Math.hypot(ax - o.x, az - o.z) < o.r + 2.2) return true;
-    const dx = bx - ax, dz = bz - az;
-    const fx = ax - o.x, fz = az - o.z;
-    const A = dx * dx + dz * dz, B = 2 * (fx * dx + fz * dz), C = fx * fx + fz * fz - o.r * o.r;
-    const disc = B * B - 4 * A * C;
-    if (A < 1e-9 || disc <= 0) continue;
-    const sq = Math.sqrt(disc);
-    const t0 = Math.max(0, (-B - sq) / (2 * A)), t1 = Math.min(1, (-B + sq) / (2 * A));
-    if (t0 > t1 || t1 >= 0.97) continue; // ignore props right at the subject
-    const ya = ay + (by - ay) * t0, yb = ay + (by - ay) * t1;
-    if (Math.min(ya, yb) < o.h && Math.max(ya, yb) > lo) return true;
-  }
-  for (let i = 0; i < OCCLUDERS.length; i++) {
-    const o = OCCLUDERS[i]!;
-    let t0 = 0, t1 = 1;
-    if (o.kind === 'box') {
-      const lax = (ax - o.x) * o.c - (az - o.z) * o.s, laz = (ax - o.x) * o.s + (az - o.z) * o.c;
-      // camera keeps ~2 m clear of walls (no wall filling a quarter of the frame)
-      if (ay < o.h + 0.8 && Math.abs(lax) < o.hw + 2.0 && Math.abs(laz) < o.hd + 2.0) return true;
-      const lbx = (bx - o.x) * o.c - (bz - o.z) * o.s, lbz = (bx - o.x) * o.s + (bz - o.z) * o.c;
-      const dx = lbx - lax, dz = lbz - laz;
-      // slab X
-      if (Math.abs(dx) < 1e-6) { if (Math.abs(lax) > o.hw) continue; }
-      else {
-        let ta = (-o.hw - lax) / dx, tb = (o.hw - lax) / dx;
-        if (ta > tb) { const q = ta; ta = tb; tb = q; }
-        t0 = Math.max(t0, ta); t1 = Math.min(t1, tb);
-        if (t0 > t1) continue;
-      }
-      // slab Z
-      if (Math.abs(dz) < 1e-6) { if (Math.abs(laz) > o.hd) continue; }
-      else {
-        let ta = (-o.hd - laz) / dz, tb = (o.hd - laz) / dz;
-        if (ta > tb) { const q = ta; ta = tb; tb = q; }
-        t0 = Math.max(t0, ta); t1 = Math.min(t1, tb);
-        if (t0 > t1) continue;
-      }
-    } else {
-      // camera keeps ~2 m clear of the fountain / stage footprint when below their top
-      if (ay < o.h + 0.6 && Math.hypot(ax - o.x, az - o.z) < o.r + 2.0) return true;
-      const dx = bx - ax, dz = bz - az;
-      const fx = ax - o.x, fz = az - o.z;
-      const A = dx * dx + dz * dz, B = 2 * (fx * dx + fz * dz), C = fx * fx + fz * fz - o.r * o.r;
-      const disc = B * B - 4 * A * C;
-      if (A < 1e-9 || disc <= 0) continue;
-      const sq = Math.sqrt(disc);
-      t0 = Math.max(0, (-B - sq) / (2 * A)); t1 = Math.min(1, (-B + sq) / (2 * A));
-      if (t0 > t1) continue;
-    }
-    const y0 = ay + (by - ay) * t0;
-    if (t1 >= 0.999) {
-      // target stands inside the footprint (e.g. on the stage): only the entry point matters
-      if (t0 > 0.001 && y0 < o.h) return true;
-      continue;
-    }
-    const y1 = ay + (by - ay) * t1;
-    if (Math.min(y0, y1) < o.h) return true;
-  }
-  return false;
-}
 
 /* -------------------------------------------------------------- helpers */
 
@@ -151,54 +65,7 @@ const CINE_LOOK: Array<[number, number, number]> = [
 const STAGE_POS = getPoi('stage')?.position ?? { x: 7.5, z: 7 };
 const PORTAL_POS = getPoi('portal')?.position ?? { x: 0, z: -24 };
 
-/** Fat test: any prop (lamp post, tree, planter…) within `margin` of the subject end of the segment. */
-function propsNear(ax: number, ay: number, az: number, bx: number, by: number, bz: number, margin: number): boolean {
-  const dx = bx - ax, dz = bz - az;
-  const l2 = dx * dx + dz * dz || 1;
-  for (let i = 0; i < EXTRA.length; i++) {
-    const o = EXTRA[i]!;
-    const t = Math.max(0, Math.min(1, ((o.x - ax) * dx + (o.z - az) * dz) / l2));
-    if (t < 0.2 || t > 0.97) continue;
-    const px = ax + dx * t, pz = az + dz * t;
-    if (Math.hypot(o.x - px, o.z - pz) < o.r + margin && ay + (by - ay) * t < o.h) return true;
-  }
-  return false;
-}
-
-/** Lamp posts / planters / trees standing in the central third of the frame (between camera and subject). */
-function centralClutter(ax: number, az: number, bx: number, bz: number): boolean {
-  const dx = bx - ax, dz = bz - az;
-  const D = Math.hypot(dx, dz) || 1;
-  const fx = dx / D, fz = dz / D;
-  for (let i = 0; i < EXTRA.length; i++) {
-    const o = EXTRA[i]!;
-    if (o.h < 1.2) continue;
-    const ox = o.x - ax, oz = o.z - az;
-    const f = ox * fx + oz * fz;
-    if (f < 0.8 || f > D - 1.2) continue;
-    if (Math.abs(ox * fz - oz * fx) < f * 0.22 + o.r * 0.6) return true;
-  }
-  return false;
-}
-
 const PORTAL_CANDIDATES = [0.32, -0.32, 0.55, -0.55, 0.14, -0.14, 0.8, -0.8, 1.05, -1.05];
-
-/** Tall props in the near half of a shot (camera → subject) would loom in the foreground. */
-function foregroundClutter(cx: number, cz: number, tx: number, tz: number): boolean {
-  const dx = tx - cx, dz = tz - cz;
-  const D = Math.hypot(dx, dz) || 1;
-  const fx = dx / D, fz = dz / D;
-  for (let i = 0; i < EXTRA.length; i++) {
-    const o = EXTRA[i]!;
-    if (o.h < 2.4) continue;
-    const ox = o.x - cx, oz = o.z - cz;
-    const f = ox * fx + oz * fz;
-    if (f <= 0 || f > D * 0.5) continue;
-    const lateral = Math.abs(ox * fz - oz * fx);
-    if (lateral < f * 0.62 + o.r) return true;
-  }
-  return false;
-}
 
 /**
  * Portal shot (raid / join): picks the first clear angle from a small candidate set so no lamp post,
@@ -211,7 +78,7 @@ function portalPose(raid: boolean, outPos: THREE.Vector3, outLook: THREE.Vector3
   for (let i = 0; i < PORTAL_CANDIDATES.length; i++) {
     const c = PORTAL_CANDIDATES[i]!;
     const cx = tx + Math.sin(c) * D, cz = tz + Math.cos(c) * D;
-    if (!blocked(cx, H, cz, tx, ty + 0.6, tz) && !propsNear(cx, H, cz, tx, ty, tz, 1.2) && !foregroundClutter(cx, cz, tx, tz) && !centralClutter(cx, cz, tx, tz)) { a = c; break; }
+    if (!blocked(cx, H, cz, tx, ty + 0.6, tz) && !propsNear(cx, H, cz, tx, ty, tz, 1.2) && !foregroundClutter(cx, cz, tx, tz) && !centralClutter(cx, H, cz, tx, ty + 0.6, tz)) { a = c; break; }
   }
   outPos.set(tx + Math.sin(a) * D, H, tz + Math.cos(a) * D);
   // aim ~1 m below the arrivals so they sit slightly above centre (upper-middle third)
@@ -257,22 +124,17 @@ interface Framer {
   rel: number;             // chosen relative yaw (camera side)
   yaw: number;             // smoothed absolute camera yaw
   init: boolean;
-  /** 0 = shoulder-height shot, 1 = elevated look-down (used while every low angle is blocked by props). */
-  elev: number;
-  elevTarget: number;
+  /** Rung of the height ladder (0 = shoulder height); rises instead of accepting clutter. */
+  level: number;
+  hS: number;              // smoothed camera height
+  dS: number;              // smoothed camera distance
+  sincePick: number;
 }
-const newFramer = (): Framer => ({ pos: new THREE.Vector3(), prev: new THREE.Vector3(), vel: new THREE.Vector3(), heading: 0, rel: 0.62, yaw: 0, init: false, elev: 0, elevTarget: 0 });
-const REL_CANDIDATES = [0.62, -0.62, 1.15, -1.15, 1.7, -1.7, 2.4, -2.4, Math.PI];
-
-function clearAt(f: Framer, rel: number, dist: number, height: number, ly: number, strict = false): boolean {
-  const a = f.heading + rel;
-  const cx = f.pos.x + Math.sin(a) * dist, cz = f.pos.z + Math.cos(a) * dist;
-  if (blocked(cx, height, cz, f.pos.x, ly, f.pos.z)) return false;
-  return !strict || !centralClutter(cx, cz, f.pos.x, f.pos.z);
-}
+const newFramer = (): Framer => ({ pos: new THREE.Vector3(), prev: new THREE.Vector3(), vel: new THREE.Vector3(), heading: 0, rel: 0.62, yaw: 0, init: false, level: 0, hS: 0, dS: 0, sincePick: 0 });
+const PICK: PickedPose = { x: 0, y: 0, z: 0, yaw: 0, rel: 0.62, level: 0 };
 
 function frame(f: Framer, tx: number, tz: number, dt: number, dist: number, height: number, lookY: number, outPos: THREE.Vector3, outLook: THREE.Vector3, snap: boolean) {
-  if (!f.init || snap) { f.pos.set(tx, 0, tz); f.prev.copy(f.pos); f.vel.set(0, 0, 0); f.init = true; }
+  if (!f.init || snap) { f.pos.set(tx, 0, tz); f.prev.copy(f.pos); f.vel.set(0, 0, 0); f.init = true; f.hS = height; f.dS = dist; f.level = 0; }
   f.prev.copy(f.pos);
   const k = snap ? 1 : 1 - Math.exp(-dt * 3);
   f.pos.x += (tx - f.pos.x) * k; f.pos.z += (tz - f.pos.z) * k;
@@ -284,29 +146,27 @@ function frame(f: Framer, tx: number, tz: number, dt: number, dist: number, heig
   const speed = Math.hypot(f.vel.x, f.vel.z);
   if (speed > 0.35) f.heading = angleLerp(f.heading, Math.atan2(f.vel.x, f.vel.z), 1 - Math.exp(-dt * 1.6));
   const ly = lookY;
-  // keep the current side while it is clear, else search (same side first)
-  if (!clearAt(f, f.rel, dist, height, ly, true)) {
-    const side = f.rel < 0 ? -1 : 1;
-    let found = false;
-    // pass 1: clear AND no lamp post / planter in the central third; pass 2: merely clear
-    for (let pass = 0; pass < 2 && !found; pass++) {
-      for (let i = 0; i < REL_CANDIDATES.length; i++) {
-        const cand = REL_CANDIDATES[i]! * side;
-        if (clearAt(f, cand, dist, height, ly, pass === 0)) { f.rel = cand; found = true; break; }
-      }
-    }
-    // nothing clear at shoulder height: rise and look down over the props
-    f.elevTarget = found ? 0 : 1;
-  } else f.elevTarget = 0;
-  f.elev += (f.elevTarget - f.elev) * (snap ? 1 : 1 - Math.exp(-dt * 1.5));
-  height = height + (5.8 - height) * f.elev;
-  dist = dist + (7.6 - dist) * f.elev;
+  const headY = lookY + 0.45;
+  // Keep the current pose while it is clean; otherwise (or every ~1.5 s while raised) re-pick:
+  // every relative yaw on each rung of the height ladder — clutter is never accepted, the camera rises instead.
+  f.sincePick += dt;
+  const lvlH = height + POSE_RISE[f.level]!, lvlD = dist * (1 + f.level * 0.12);
+  const cy = f.heading + f.rel;
+  const clean = poseClean(f.pos.x + Math.sin(cy) * lvlD, lvlH, f.pos.z + Math.cos(cy) * lvlD, f.pos.x, headY, f.pos.z);
+  if (snap || !clean || (f.level > 0 && f.sincePick > 1.5)) {
+    f.sincePick = 0;
+    pickFramingPose(f.pos.x, f.pos.z, headY, f.heading, dist, height, PICK, f.rel);
+    f.rel = PICK.rel; f.level = PICK.level;
+  }
+  const hT = height + POSE_RISE[f.level]!, dT = dist * (1 + f.level * 0.12);
+  const ks = snap ? 1 : 1 - Math.exp(-dt * 1.6);
+  f.hS += (hT - f.hS) * ks; f.dS += (dT - f.dS) * ks;
   const targetYaw = f.heading + f.rel;
   f.yaw = snap ? targetYaw : angleLerp(f.yaw, targetYaw, 1 - Math.exp(-dt * 1.8));
   const ahead = Math.min(2, speed * 0.6);
   const hx = speed > 0.01 ? f.vel.x / speed : 0, hz = speed > 0.01 ? f.vel.z / speed : 0;
   outLook.set(f.pos.x + hx * ahead, ly, f.pos.z + hz * ahead);
-  outPos.set(f.pos.x + Math.sin(f.yaw) * dist, height, f.pos.z + Math.cos(f.yaw) * dist);
+  outPos.set(f.pos.x + Math.sin(f.yaw) * f.dS, f.hS, f.pos.z + Math.cos(f.yaw) * f.dS);
 }
 
 /** Densest resident cluster (counts neighbours within 6 m). */
@@ -389,30 +249,44 @@ function overlayPose(store: SceneStore, f: OverlayFit, cam: THREE.PerspectiveCam
   outLook.set(cx, H - D * Math.tan(OVERLAY_PITCH), cz);
 }
 
-interface OrbitState { pos: THREE.Vector3; look: THREE.Vector3; clusterS: THREE.Vector3; orbit: number; blockedFor: number }
+interface OrbitState { pos: THREE.Vector3; look: THREE.Vector3; clusterS: THREE.Vector3; orbit: number; blockedFor: number; rise: number; riseT: number }
 
 /** Camera must stay outside the stage's string-light ring (plus margin). */
 const outsideStageRing = (x: number, z: number) => Math.hypot(x - STAGE_POS.x, z - STAGE_POS.z) > 4.4;
+const ORBIT_OFFS = [0.3, -0.3, 0.6, -0.6, 0.9, -0.9, 1.3, -1.3, 1.8, -1.8, 2.4, -2.4];
+const ORBIT_LIFTS = [0, 2.5, 5];
 
-/**
- * Slow orbit around the smoothed cluster centre. Small props are dissolved by the see-through
- * cone; if the subject stays blocked for > 0.5 s the camera swings along the orbit until clear.
- */
-function orbitClear(o: OrbitState, a: number, dist: number, h: number, lookY: number): boolean {
+function orbitClean(o: OrbitState, a: number, dist: number, h: number, headY: number): boolean {
   const cx = o.clusterS.x + Math.sin(a) * dist, cz = o.clusterS.z + Math.cos(a) * dist;
-  return outsideStageRing(cx, cz) && !blocked(cx, h, cz, o.clusterS.x, lookY, o.clusterS.z) && !centralClutter(cx, cz, o.clusterS.x, o.clusterS.z);
+  return outsideStageRing(cx, cz) && poseClean(cx, h, cz, o.clusterS.x, headY, o.clusterS.z);
 }
 
+/**
+ * Slow orbit around the smoothed group centre (street / cinematic drift). The same clutter, lens and
+ * occlusion tests as follow: on a dirty pose it jumps to the nearest clean yaw offset, and rises
+ * (2.5 m, 5 m) rather than accepting a prop in the central third.
+ */
 function orbitShot(o: OrbitState, dt: number, speed: number, dist: number, h: number, lookY: number) {
-  if (orbitClear(o, o.orbit, dist, h, lookY)) {
+  const headY = lookY + 0.45;
+  if (orbitClean(o, o.orbit, dist, h + o.riseT, headY)) {
     o.blockedFor = 0;
     o.orbit += dt * speed;
+    if (o.riseT > 0 && orbitClean(o, o.orbit, dist, h, headY)) o.riseT = 0;
   } else {
     o.blockedFor += dt;
-    // swing smoothly along the orbit once the block persists (> 0.5 s)
-    o.orbit += dt * (o.blockedFor > 0.5 ? 0.9 : speed);
+    if (o.blockedFor > 0.25) {
+      o.blockedFor = 0;
+      let done = false;
+      for (let li = 0; li < ORBIT_LIFTS.length && !done; li++) {
+        for (let i = 0; i < ORBIT_OFFS.length; i++) {
+          if (orbitClean(o, o.orbit + ORBIT_OFFS[i]!, dist, h + ORBIT_LIFTS[li]!, headY)) { o.orbit += ORBIT_OFFS[i]!; o.riseT = ORBIT_LIFTS[li]!; done = true; break; }
+        }
+      }
+      if (!done) o.riseT = ORBIT_LIFTS[ORBIT_LIFTS.length - 1]!;
+    }
   }
-  o.pos.set(o.clusterS.x + Math.sin(o.orbit) * dist, h, o.clusterS.z + Math.cos(o.orbit) * dist);
+  o.rise += (o.riseT - o.rise) * Math.min(1, dt * 1.5);
+  o.pos.set(o.clusterS.x + Math.sin(o.orbit) * dist, h + o.rise, o.clusterS.z + Math.cos(o.orbit) * dist);
   o.look.set(o.clusterS.x, lookY, o.clusterS.z);
 }
 
@@ -488,7 +362,7 @@ export function CameraRig({ mode, selectedResidentId, transparent = false, quali
     follow: newFramer(), actor: newFramer(),
     cluster: new THREE.Vector3(), clusterS: new THREE.Vector3(), clusterInit: false, clusterAt: -1, orbit: 0.4,
     overlay: newOverlayFit(),
-    estAt: -1e9, estNext: 25, estCount: 0, blockedFor: 0,
+    estAt: -1e9, estNext: 25, estCount: 0, blockedFor: 0, rise: 0, riseT: 0,
     cut: new THREE.Vector3(), cutWant: 0, cutR0: 0.35, cutR1: 0.95,
     shotPos: new THREE.Vector3(), shotLook: new THREE.Vector3(), head: new THREE.Vector3(), outFor: 0,
   }), []);
@@ -530,12 +404,13 @@ export function CameraRig({ mode, selectedResidentId, transparent = false, quali
   useFrame((state, rawDt) => {
     const dt = Math.min(rawDt, 1);
     const t = state.clock.elapsedTime;
-    EXTRA = kit.occluders;
+    setCameraProps(kit.occluders);
     kit.uniforms.uCutNear.value = 0; // no screen-door near the lens: camera placement avoids props instead
     if (mode === 'orbit') {
       kit.uniforms.uCutOn.value = Math.max(0, kit.uniforms.uCutOn.value - dt * 3);
       kit.uniforms.uCutA.value.copy(camera.position);
       pushOutOfBuildings(camera.position);
+      kit.env.camPos.copy(camera.position);
       if (first.current) {
         poseFor('orbit', t, s.pos, s.look);
         camera.position.copy(s.pos); look.current.copy(s.look); camera.lookAt(look.current);
@@ -667,6 +542,7 @@ export function CameraRig({ mode, selectedResidentId, transparent = false, quali
         camera.lookAt(look.current);
       }
     }
+    kit.env.camPos.copy(camera.position);
     const u = kit.uniforms;
     u.uCutA.value.copy(camera.position);
     if (snap || u.uCutOn.value < 0.01) u.uCutB.value.copy(s.cut); else u.uCutB.value.lerp(s.cut, Math.min(1, dt * 6));

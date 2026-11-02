@@ -5,6 +5,7 @@ import { createWorldRuntime } from '../src/runtime/createWorldRuntime';
 import { findSeatNear, SPAWN_POINT } from '../src/world/layout';
 import { ACTIVITY_VERBS, parseActivityVerb } from '../src/world/activities';
 import { memoryClause, personalize } from '../src/simulation/dialogue';
+import { raidVisitorCount } from '../src/simulation/events';
 
 const T0 = 1_700_000_000_000;
 function clock() { let t = T0; return { now: () => t, advance: (ms: number) => { t += ms; } }; }
@@ -435,17 +436,17 @@ describe('simulation: contract events', () => {
   it('raid spawns visitors at the portal; locals welcome them; visitors leave after ~240 s', () => {
     const { rt, c, tick } = runtime();
     rt.dispatch(ev('raid', 'tw:cozy', 'CozyStreamer', { id: 'raid-1', payload: { amount: 30, channel: 'CozyStreamer' } }, c.now()));
-    tick(8);
+    tick(20);
     let visitors = rt.getSnapshot().residents.filter(r => r.id.startsWith('raid:raid-1:'));
-    expect(visitors.length).toBe(5);
-    expect(new Set(visitors.map(v => v.displayName)).size).toBe(5);
+    expect(visitors.length).toBe(12);
+    expect(new Set(visitors.map(v => v.displayName)).size).toBe(12);
     expect(visitors.map(v => v.displayName)).toContain("CozyStreamer's #1 fan");
     const celebrate = rt.getSnapshot().eventHistory.find(e => e.source === 'simulation' && e.payload?.reaction === 'raid')!;
     expect(celebrate.payload).toMatchObject({ action: 'celebrate', visitors: 30, amount: 30, channel: 'CozyStreamer' });
     for (const v of visitors) {
       expect(v.displayName).not.toMatch(/Raider \d+$/);
       expect(v.displayName.length).toBeLessThanOrEqual(40);
-      expect(Math.hypot(v.location.x - SPAWN_POINT.x, v.location.z - SPAWN_POINT.z)).toBeLessThan(6);
+      expect(Math.hypot(v.location.x - SPAWN_POINT.x, v.location.z - SPAWN_POINT.z)).toBeLessThan(9);
       expect(v.appearance.baseModelId.startsWith('vrm-')).toBe(true);
     }
     expect(new Set(visitors.map(v => v.appearance.baseModelId)).size).toBe(4);
@@ -531,19 +532,78 @@ describe('simulation: contract events', () => {
     tick(1);
     expect(count()).toBeGreaterThanOrEqual(1);
     expect(count()).toBeLessThan(4);
-    tick(10);
-    const vs = rt.getSnapshot().residents.filter(r => r.id.startsWith('raid:raid-arc:'));
-    expect(vs.length).toBe(8);
-    for (let i = 0; i < vs.length; i++) {
-      expect(vs[i]!.location.z).toBeGreaterThan(-24);
-      expect(Math.hypot(vs[i]!.location.x, vs[i]!.location.z + 24)).toBeLessThan(6);
-      for (let j = i + 1; j < vs.length; j++) expect(Math.hypot(vs[i]!.location.x - vs[j]!.location.x, vs[i]!.location.z - vs[j]!.location.z)).toBeGreaterThan(0.6);
+    const first = new Map<string, { x: number; z: number }>();
+    for (let i = 0; i < 24; i++) {
+      tick(1);
+      for (const r of rt.getSnapshot().residents) if (r.id.startsWith('raid:raid-arc:') && !first.has(r.id)) first.set(r.id, { x: r.location.x, z: r.location.z });
     }
-    tick(50);
+    expect(count()).toBe(15);
+    const pts = [...first.values()];
+    expect(pts.length).toBe(15);
+    for (let i = 0; i < pts.length; i++) {
+      expect(pts[i]!.z).toBeGreaterThan(-24);
+      const d = Math.hypot(pts[i]!.x, pts[i]!.z + 24);
+      expect(d).toBeGreaterThan(2);
+      expect(d).toBeLessThan(6.5);
+      for (let j = i + 1; j < pts.length; j++) expect(Math.hypot(pts[i]!.x - pts[j]!.x, pts[i]!.z - pts[j]!.z)).toBeGreaterThan(0.6);
+    }
+    tick(60);
     const later = rt.getSnapshot().residents.filter(r => r.id.startsWith('raid:raid-arc:'));
-    const inPlaza = later.filter(v => v.location.z > -9);
-    expect(inPlaza.length).toBeGreaterThanOrEqual(6);
+    const inPlaza = later.filter(v => Math.hypot(v.location.x, v.location.z) < 8);
+    expect(inPlaza.length).toBeGreaterThanOrEqual(12);
+    // Groups of up to 4 at distinct spots: the crowd spreads around the plaza.
+    const spots = new Set(inPlaza.map(v => `${Math.round(Math.atan2(v.location.z, v.location.x) * 2)}`));
+    expect(spots.size).toBeGreaterThanOrEqual(3);
     for (const v of inPlaza) expect(inPlaza.some(o => o !== v && Math.hypot(o.location.x - v.location.x, o.location.z - v.location.z) < 2.6)).toBe(true);
+  });
+
+  it('raid size scales the visitor crowd, respects the cap without evicting its own visitors, and visitors leave in waves', () => {
+    expect([0, 5, 40, 100, 5000].map(raidVisitorCount)).toEqual([3, 5, 14, 16, 16]);
+    const { rt, c, tick } = runtime();
+    for (let i = 0; i < 32; i++) { c.advance(10); rt.dispatch(ev('join', `tw:fan${i}`, `Fan ${i}`, {}, c.now())); }
+    expect(rt.getSnapshot().residents.length).toBe(45);
+    rt.dispatch(ev('raid', 'tw:big', 'BigStreamer', { id: 'big-1', payload: { amount: 100, channel: 'BigStreamer' } }, c.now()));
+    tick(30);
+    let s = rt.getSnapshot();
+    expect(s.residents.length).toBe(50);
+    expect(s.residents.filter(r => r.id.startsWith('raid:big-1:')).length).toBe(5);
+    // A second raid replaces the first raid's visitors (oldest/departing first), never its own.
+    rt.dispatch(ev('raid', 'tw:big2', 'OtherStreamer', { id: 'big-2', payload: { amount: 40, channel: 'OtherStreamer' } }, c.now()));
+    tick(30);
+    s = rt.getSnapshot();
+    expect(s.residents.length).toBe(50);
+    expect(s.residents.filter(r => r.id.startsWith('raid:big-2:')).length).toBe(5);
+    expect(s.residents.filter(r => r.id.startsWith('raid:big-1:')).length).toBe(0);
+    // Waves: visitors leave group by group.
+    const removed: number[] = [];
+    let prev = s.residents.filter(r => r.id.startsWith('raid:')).length;
+    for (let i = 0; i < 700 && prev > 0; i++) {
+      tick(1);
+      const now = rt.getSnapshot();
+      const cnt = now.residents.filter(r => r.id.startsWith('raid:')).length;
+      if (cnt < prev) { removed.push(now.simulationTime); prev = cnt; }
+    }
+    expect(prev).toBe(0);
+    expect(removed.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('evenings bring a few residents genuinely tired (night owls excepted) — naps, rest and sleep show naturally', () => {
+    const base = runtime().rt.getSnapshot();
+    const { rt, tick } = runtime({ initialSnapshot: { ...base, simulationTime: 720, eventHistory: [] } }); // 20:00
+    const tired = new Set<string>();
+    const states = new Set<string>();
+    for (let i = 0; i < 720; i++) { // until 02:00
+      tick(1);
+      if (i % 4) continue;
+      for (const r of rt.getSnapshot().residents) {
+        if (!r.personality.includes('night-owl') && (r.needs.energy < 25 || r.activity.startsWith('sleeping'))) tired.add(r.id);
+        const m = /^(thinking about a nap|resting|sleeping)/.exec(r.activity);
+        if (m) states.add(m[1]!);
+      }
+    }
+    expect(tired.size).toBeGreaterThanOrEqual(3);
+    expect(states.has('sleeping')).toBe(true);
+    expect(states.has('thinking about a nap') || states.has('resting')).toBe(true);
   });
 
   it('respects the population cap of 50', () => {

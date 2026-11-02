@@ -12,7 +12,7 @@ import { complimentThing, lines, memoryLine, placeVars, requestExtraLine, withAr
 import { meetingPoint, WALK_SPEED } from './movement';
 import { bump, feel, isSleeping } from './needs';
 import { compatibility, defaultPersonality, temperamentFor } from './personality';
-import { arrivalSpot, atPlace, homeFor, nearestPoi, pickSpot, poi, portalSpot, spotAround } from './places';
+import { arrivalSpot, atPlace, homeFor, nearestPoi, pickSpot, poi, portalSpot, pushOut, spotAround } from './places';
 import { addMemory, adjustFriendship, getRel, pairKey, reactsPositively } from './relationships';
 import { startEncounter } from './social';
 import { cleanText, dist, emit, schedule, type Agent, type World } from './state';
@@ -36,13 +36,16 @@ export function createAgent(w: World, init: NewAgentInit): Agent {
     joinedAt: init.joinedAt, lastActiveAt: init.lastActiveAt, homeId: homeFor(init.id).id, seed: !!init.seed, visitor: !!init.visitor,
     leaveAt: Infinity, leaving: false, needsWelcome: false, action: null, path: [], mood: 0.2, sentiment: 0,
     socialReadyAt: 0, lastReplyAt: -1e9, moodShownAt: -1e9,
+    // Personal bedtime (non night-owls get genuinely tired after it): 20:00–23:30.
+    bedtime: 20 + (hashString(`bed:${init.id}`) % 36) / 10,
   };
 }
 
 /** Make room for one more resident: raid visitors first (leaving ones first), then stale viewers. */
-function makeRoom(w: World, protect: string): boolean {
+function makeRoom(w: World, protect: string, protectGroup?: string): boolean {
   if (w.agents.size < w.maxResidents) return true;
-  const visitors = [...w.agents.values()].filter(a => a.visitor && a.id !== protect)
+  // Departing visitors go first, then the oldest raid's visitors — never the raid that is arriving.
+  const visitors = [...w.agents.values()].filter(a => a.visitor && a.id !== protect && (!protectGroup || a.group !== protectGroup))
     .sort((a, b) => Number(b.leaving) - Number(a.leaving) || a.leaveAt - b.leaveAt);
   if (visitors.length) { removeAgent(w, visitors[0]!.id); return true; }
   const stale = [...w.agents.values()].filter(a => !a.seed && a.id !== protect && w.now - a.lastActiveAt >= STALE_MS)
@@ -387,7 +390,8 @@ function safeIdPart(s: string): string {
 
 function onRaid(w: World, e: WorldEvent): void {
   const amount = typeof e.payload?.amount === 'number' ? e.payload.amount : 0;
-  const n = Math.min(8, Math.max(2, Math.ceil(amount / 6)));
+  // Visitor agents scale with the raid: 40 viewers ≈ 14 avatars, 100+ → 16 (population cap still applies).
+  const n = raidVisitorCount(amount);
   const base = cleanText(typeof e.payload?.channel === 'string' && e.payload.channel ? e.payload.channel : e.actorDisplayName, 24) || 'Friendly';
   w.facts.raidAt = w.simTime;
   w.facts.raidChannel = base;
@@ -395,15 +399,20 @@ function onRaid(w: World, e: WorldEvent): void {
   const spawnAt: number[] = [];
   let acc = 0;
   for (let k = 1; k <= n; k++) { spawnAt.push(acc); acc += w.rng.range(0.5, 0.8, 'raid-stagger', `${group}:${k}`); }
+  const groups = Math.ceil(n / 4);
   for (let k = 1; k <= n; k++) {
-    const g = Math.floor((k - 1) / 3);
-    const lastInGroup = Math.min(n, g * 3 + 3);
+    const g = Math.floor((k - 1) / 4);
+    const lastInGroup = Math.min(n, g * 4 + 4);
+    // Groups of up to 4 head to distinct spots around the north half of the plaza ring.
+    const theta = -Math.PI / 2 + (g - (groups - 1) / 2) * 0.95;
     const plan: VisitorPlan = {
       arc: arcSpot(k, n),
       // Everyone in a group finishes celebrating together, then they walk to the plaza side by side.
       celebrate: 4 + (spawnAt[lastInGroup - 1]! - spawnAt[k - 1]!),
-      anchor: { x: -3.2 + (g % 3) * 3.2, z: -5.4 + (g % 2) * 0.9 },
-      slot: (k - 1) % 3,
+      anchor: { x: Math.cos(theta) * 5.6, z: Math.sin(theta) * 5.6 },
+      slot: (k - 1) % 4,
+      // They also leave together, group by group (waves).
+      leaveAt: w.simTime + VISITOR_STAY_SECONDS + g * 15,
     };
     schedule(w, spawnAt[k - 1]!, w2 => spawnVisitor(w2, group, k, base, plan));
   }
@@ -444,18 +453,30 @@ export function raiderName(group: string, k: number, base: string): string {
   return cleanText(full, 40);
 }
 
-interface VisitorPlan { arc: { x: number; z: number }; celebrate: number; anchor: { x: number; z: number }; slot: number }
+interface VisitorPlan { arc: { x: number; z: number }; celebrate: number; anchor: { x: number; z: number }; slot: number; leaveAt: number }
+
+export function raidVisitorCount(amount: number): number {
+  return Math.min(16, Math.max(3, Math.round(Math.sqrt(Math.max(0, amount)) * 2.2)));
+}
+
+const SLOT_OFFSETS = [{ x: -0.55, z: -0.45 }, { x: 0.55, z: -0.45 }, { x: -0.55, z: 0.5 }, { x: 0.55, z: 0.5 }] as const;
 
 /** Arrival point k of n on an arc in front of (south of) the portal ring — never stacked. */
 export function arcSpot(k: number, n: number): { x: number; z: number } {
   const portal = poi('portal').position;
-  const theta = Math.PI * (0.18 + (0.64 * (k - 0.5)) / Math.max(1, n));
-  return { x: portal.x + Math.cos(theta) * 2.8, z: portal.z + Math.sin(theta) * 2.8 };
+  // Two rows: up to 8 on an inner arc, the rest on a wider outer arc.
+  const inner = Math.min(n, 8);
+  const row2 = k > 8;
+  const count = row2 ? n - 8 : inner;
+  const i = row2 ? k - 9 : k - 1;
+  const theta = Math.PI * (row2 ? 0.15 + (0.7 * (i + 0.5)) / count : 0.12 + (0.76 * (i + 0.5)) / count);
+  const r = row2 ? 4.4 : 2.8;
+  return { x: portal.x + Math.cos(theta) * r, z: portal.z + Math.sin(theta) * r };
 }
 
 function spawnVisitor(w: World, group: string, k: number, base: string, plan?: VisitorPlan): void {
   const id = `${group}:${k}`;
-  if (w.agents.has(id) || !makeRoom(w, id)) return;
+  if (w.agents.has(id) || !makeRoom(w, id, group)) return;
   const spot = plan ? { ...plan.arc } : arrivalSpot(w, { id } as Agent);
   const appearance = { ...appearanceFromSeed(id), baseModelId: VISITOR_BASES[(k - 1) % VISITOR_BASES.length]! };
   const a = createAgent(w, {
@@ -466,13 +487,17 @@ function spawnVisitor(w: World, group: string, k: number, base: string, plan?: V
   });
   a.group = group;
   a.visitorIndex = k;
-  a.leaveAt = w.simTime + VISITOR_STAY_SECONDS + k * 2;
+  a.leaveAt = plan?.leaveAt ?? w.simTime + VISITOR_STAY_SECONDS + k * 2;
   w.agents.set(id, a);
   arrive(w, a, (w2, ag) => gesture(w2, ag, 'celebrating the raid', plan?.celebrate ?? 4, {
     priority: 1, effects: { energy: 0, social: 0.6, fun: 1 },
     ...(plan ? { onDone: (w3: World, v: Agent) => {
-      const target = { x: plan.anchor.x + (plan.slot - 1) * 0.95, z: plan.anchor.z + (plan.slot === 1 ? -0.5 : 0) };
-      goThen(w3, v, target, 'walking to Town Plaza', 'admiring Town Plaza', 4, { priority: 1, speed: WALK_SPEED, poiId: 'plaza', type: 'goto' });
+      const off = SLOT_OFFSETS[plan.slot % SLOT_OFFSETS.length]!;
+      const target = { x: plan.anchor.x + off.x, z: plan.anchor.z + off.z };
+      pushOut(target);
+      // Linger as a crowd that fills the plaza before exploring.
+      const vibe = ['admiring Town Plaza', 'cheering for the town', 'dancing in Town Plaza', 'waving hello'][plan.slot % 4]!;
+      goThen(w3, v, target, 'walking to Town Plaza', vibe, w3.rng.range(18, 26, 'raid-linger', v.id), { priority: 1, speed: WALK_SPEED, poiId: 'plaza', type: vibe.startsWith('dancing') ? 'dance' : 'goto', effects: { energy: -0.05, social: 0.4, fun: 0.6 } });
     } } : {}),
   }));
   if (k === 1) {

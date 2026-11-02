@@ -15,7 +15,7 @@ import type { ResidentStructure, SceneStore } from '../core/sceneStore';
 import { useAvatarRig, type AvatarLod } from '../avatars/index';
 import { hashString } from '../avatars/catalog';
 import { animationForVerb, parseActivityVerb, type AnimationFamily } from '../world/activities';
-import { findSeatNear, getPoi } from '../world/layout';
+import { BUILDINGS, findSeatNear, getPoi } from '../world/layout';
 import { AvatarAnimator, RUN_SPEED, WALK_SPEED, type GestureName } from './animation/AvatarAnimator';
 import { EmoteSystem, GiftSystem, InstancedEmoteSystem, makeBlobTexture, makeNameplateTexture, type EmoteKind } from './effects';
 
@@ -48,6 +48,40 @@ const BUBBLE_MAX_VISIBLE_LOW = 5;
 const BUBBLE_MAX_VISIBLE_OVERLAY = 3;
 /** Vertical gap (px) between stacked bubbles. */
 const BUBBLE_STACK_GAP = 6;
+/** Bubble safe area: viewport inset (px); HUD/banner/inspector rects are excluded too. */
+const SAFE_MARGIN = 12;
+const MAX_OBSTACLES = 8;
+/** Labels may slide below a bubble by at most this much (px) — farther would detach them from the body. */
+const LABEL_MAX_NUDGE = 42;
+
+/** Building boxes (from the layout) for cheap label occlusion: centre, yaw cos/sin, half extents, height. */
+const BUILDING_BOXES = BUILDINGS.map(b => ({
+  x: b.position.x, z: b.position.z, c: Math.cos(b.rotation), s: Math.sin(b.rotation),
+  hw: Math.max(0.5, b.width / 2 - 0.15), hd: Math.max(0.5, b.depth / 2 - 0.15), h: b.kind === 'arcade' ? 6 : 5.5,
+}));
+
+/** Segment A→B (world) vs rotated building boxes (slab test in each box frame). */
+function occludedByBuilding(ax: number, ay: number, az: number, bx: number, by: number, bz: number): boolean {
+  for (let i = 0; i < BUILDING_BOXES.length; i++) {
+    const B = BUILDING_BOXES[i]!;
+    const ux = ax - B.x, uz = az - B.z, vx = bx - B.x, vz = bz - B.z;
+    // world → box local (inverse yaw)
+    const p0x = ux * B.c - uz * B.s, p0z = ux * B.s + uz * B.c;
+    const p1x = vx * B.c - vz * B.s, p1z = vx * B.s + vz * B.c;
+    let t0 = 0, t1 = 1;
+    const slab = (p0: number, p1: number, lo: number, hi: number): boolean => {
+      const d = p1 - p0;
+      if (Math.abs(d) < 1e-9) return p0 >= lo && p0 <= hi;
+      let a = (lo - p0) / d, b = (hi - p0) / d;
+      if (a > b) { const tmp = a; a = b; b = tmp; }
+      if (a > t0) t0 = a;
+      if (b < t1) t1 = b;
+      return t0 <= t1;
+    };
+    if (slab(p0x, p1x, -B.hw, B.hw) && slab(ay, by, 0, B.h) && slab(p0z, p1z, -B.hd, B.hd)) return true;
+  }
+  return false;
+}
 const BUBBLE_MAX_DISTANCE = 45;
 /** On-screen bubble scale clamp (base text 14 px → never below 14 px, never huge up close). */
 const BUBBLE_MIN_SCALE = 1;
@@ -279,6 +313,29 @@ const _m = new THREE.Matrix4();
 const frameCache = { time: -1, frustum: _frustum, pxk: 600, layerTime: -1, layerPxk: 600 };
 const nowS = () => performance.now() / 1000;
 
+/**
+ * Screen rects speech bubbles must avoid, from the WorldScene container: the
+ * ResidentInspector card, HUD pills (`[data-testid=world-hud]`, `[data-hud]`) and the
+ * event banner. Without a HUD element (world mode) the top-right 360×90 px is excluded.
+ */
+function collectObstacles(canvas: HTMLElement, out: Float32Array, worldMode: boolean, crL: number, crT: number, W: number): number {
+  const root = (canvas.closest('[data-renderer]') as HTMLElement | null) ?? canvas.parentElement?.parentElement?.parentElement ?? null;
+  let n = 0;
+  let hud = false;
+  if (root) {
+    const els = root.querySelectorAll('.hw-insp, [data-testid="world-hud"], [data-testid="world-event-banner"], [data-hud]');
+    for (let i = 0; i < els.length && n < MAX_OBSTACLES; i++) {
+      const el = els[i]!;
+      const r = el.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0) continue;
+      if (el.matches('[data-testid="world-hud"], [data-hud]')) hud = true;
+      const o = n * 4; out[o] = r.left - 6; out[o + 1] = r.right + 6; out[o + 2] = r.top - 6; out[o + 3] = r.bottom + 6; n++;
+    }
+  }
+  if (worldMode && !hud && n < MAX_OBSTACLES) { const o = n * 4; out[o] = crL + W - 360; out[o + 1] = crL + W; out[o + 2] = crT; out[o + 3] = crT + 90; n++; }
+  return n;
+}
+
 /** Client rect of a visible ResidentInspector card near this canvas (bubbles avoid it). */
 function findInspectorRect(canvas: HTMLElement): DOMRect | null {
   let node: HTMLElement | null = canvas.parentElement;
@@ -365,7 +422,9 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
     return () => { delete (window as unknown as { __hwHub?: BubbleHub }).__hwHub; };
   }, [hub]);
 
-  const clock = useRef({ now: 0, lodTimer: 0, bubbleTimer: 0, plateTimer: 0, bubbleCount: 0, rectAt: -1, crL: 0, crT: 0, W: 1, H: 1, hasInsp: false, insL: 0, insR: 0, insT: 0, insB: 0 });
+  const clock = useRef({ now: 0, lodTimer: 0, bubbleTimer: 0, plateTimer: 0, bubbleCount: 0, rectAt: -1, crL: 0, crT: 0, W: 1, H: 1, nObs: 0 });
+  /** Screen rects bubbles must avoid (inspector card, HUD pills, event banner), refreshed at 4 Hz. */
+  const obsRects = useMemo(() => new Float32Array(4 * MAX_OBSTACLES), []);
   /** Registered residents as an array (allocation-free per-frame iteration). */
   const handleList = useMemo(() => [] as ResidentHandle[], []);
   const bubbleCands = useMemo(() => [] as string[], []);
@@ -585,7 +644,16 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
       }
       const chip = raidChips[slot++]!;
       chip.active = true;
-      chip.pos.set(mx, top + 0.75, mz);
+      // Beside the group (to its right on screen), at chest height, not over heads.
+      const e = camera.matrixWorld.elements;
+      let rx = e[0]!, rz = e[2]!;
+      const rl = Math.hypot(rx, rz) || 1; rx /= rl; rz /= rl;
+      let ext = 0;
+      for (const h of arr) {
+        if (Math.hypot(h.pos.x - cx, h.pos.z - cz) > RAID_CLUSTER_RADIUS) continue;
+        ext = Math.max(ext, (h.pos.x - mx) * rx + (h.pos.z - mz) * rz);
+      }
+      chip.pos.set(mx + rx * (ext + 1.1), Math.min(1.3, top * 0.72), mz + rz * (ext + 1.1));
       const text = `+${n} raiders from ${raidChannel(key)}`;
       if (text !== chip.text) {
         chip.text = text;
@@ -612,6 +680,11 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
     for (let i = 0; i < handleList.length; i++) {
       const h = handleList[i]!;
       if (!h.plateCand) { h.plateAllowed = false; h.plateNudgePx = 0; continue; }
+      // Body must be on screen (label anchored to the rendered body, never to an off-screen resident).
+      _v.set(h.pos.x, h.pos.y + 0.9, h.pos.z).project(camera);
+      if (_v.z > 1 || _v.x < -1 || _v.x > 1 || _v.y < -1 || _v.y > 1) { h.plateAllowed = false; continue; }
+      // Hidden behind a building (camera → label anchor crosses a building box).
+      if (occludedByBuilding(camera.position.x, camera.position.y, camera.position.z, h.pos.x, h.pos.y + h.plateY, h.pos.z)) { h.plateAllowed = false; continue; }
       _v.set(h.pos.x, h.pos.y + h.plateY, h.pos.z).project(camera);
       if (_v.z > 1) { h.plateAllowed = false; continue; }
       const age = c.now - h.lastActorAt;
@@ -625,6 +698,7 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
       const chip = raidChips[i]!;
       chip.allowed = false;
       if (!chip.active) continue;
+      if (occludedByBuilding(camera.position.x, camera.position.y, camera.position.z, chip.pos.x, chip.pos.y, chip.pos.z)) continue;
       _v.set(chip.pos.x, chip.pos.y, chip.pos.z).project(camera);
       if (_v.z > 1) continue;
       const cnd = take();
@@ -656,7 +730,7 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
       }
       if (nudge > 0) {
         t += nudge; b += nudge;
-        if (nudge > 160) ok = false;
+        if (nudge > LABEL_MAX_NUDGE) ok = false;   // would float away from the body: hide instead
         for (let k = 0; ok && k < nb; k++) {
           const o = k * 4;
           if (r > shownRects[o]! && l < shownRects[o + 1]! && b > shownRects[o + 2]! && t < shownRects[o + 3]!) ok = false;
@@ -725,13 +799,21 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
       const w = (L.w || 160) * L.sc, hh = ((L.h || 48) + 8) * L.sc;
       let l = L.x - w / 2, r = L.x + w / 2;
       const bt = L.y, t = L.y - hh;
-      // Dodge the inspector card sideways (tail/stem keep pointing at the speaker).
-      let dx = 0;
-      if (c.hasInsp && r > c.insL && l < c.insR && bt > c.insT && t < c.insB) {
-        dx = c.insL - 8 - r;
-        if (-dx > w / 2 - 18 * L.sc || l + dx < c.crL) continue;   // no room: collapsed
-        l += dx; r += dx;
+      // Safe area: keep inside the viewport (minus margins); the tail/stem must still reach the speaker.
+      const maxShift = w / 2 - 18 * L.sc;
+      const minL = c.crL + SAFE_MARGIN, maxR = c.crL + c.W - SAFE_MARGIN;
+      let dx = l < minL ? minL - l : r > maxR ? maxR - r : 0;
+      l += dx; r += dx;
+      // Slide sideways off HUD pills / event banner / inspector card.
+      for (let k = 0; k < c.nObs; k++) {
+        const o = k * 4;
+        if (r > obsRects[o]! && l < obsRects[o + 1]! && bt > obsRects[o + 2]! && t < obsRects[o + 3]!) {
+          const toLeft = obsRects[o]! - 8 - r, toRight = obsRects[o + 1]! + 8 - l;
+          const sh = Math.abs(dx + toLeft) <= Math.abs(dx + toRight) ? toLeft : toRight;
+          dx += sh; l += sh; r += sh;
+        }
       }
+      if (Math.abs(dx) > maxShift || l < minL - 0.5 || r > maxR + 0.5) continue;   // no slot: collapsed
       // Stack upward until clear of every placed bubble.
       let dy = 0;
       for (let iter = 0; iter < 10; iter++) {
@@ -745,7 +827,13 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
         }
         if (!moved) break;
       }
-      if (t + dy < c.crT + 4 || n >= 16) continue;                  // no room above: collapsed
+      if (t + dy < c.crT + SAFE_MARGIN || bt + dy > c.crT + c.H - SAFE_MARGIN || n >= 16) continue;   // no room: collapsed
+      let blocked = false;
+      for (let k2 = 0; k2 < c.nObs && !blocked; k2++) {
+        const o = k2 * 4;
+        if (r > obsRects[o]! && l < obsRects[o + 1]! && bt + dy > obsRects[o + 2]! && t + dy < obsRects[o + 3]!) blocked = true;
+      }
+      if (blocked) continue;
       L.shown = true; L.dx = dx; L.dyT = dy;
       const o = n * 4;
       shownRects[o] = l; shownRects[o + 1] = r; shownRects[o + 2] = t + dy; shownRects[o + 3] = bt + dy;
@@ -926,9 +1014,7 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
       c.rectAt = c.now;
       const cr = gl.domElement.getBoundingClientRect();
       c.crL = cr.left; c.crT = cr.top;
-      const ir = findInspectorRect(gl.domElement);
-      c.hasInsp = !!ir;
-      if (ir) { c.insL = ir.left; c.insR = ir.right; c.insT = ir.top; c.insB = ir.bottom; }
+      c.nObs = collectObstacles(gl.domElement, obsRects, !overlayRef.current, c.crL, c.crT, c.W);
     }
     layoutBubbles(dt);
 
@@ -1172,7 +1258,7 @@ const Resident = memo(function Resident(p: ResidentProps) {
       const sc = px / pxPerM;
       const aspect = plateCol.current && plateAlt.current ? plateAlt.current.aspect : plate.aspect;
       plateS.scale.set(sc * aspect, sc, 1);
-      const baseY = handle.height + 0.16 + sc * 0.55;
+      const baseY = handle.height + 0.16 + sc * 0.55 - (seated ? 0.42 : 0);
       // Declutter projects the un-nudged spot (no feedback loop); the sprite shows the nudged one.
       plateS.position.y = baseY - handle.plateNudgePx / pxPerM;
       handle.platePx = px; handle.plateAspect = aspect; handle.plateY = baseY;

@@ -24,6 +24,17 @@ export interface EnvState {
   keyDir: THREE.Vector3;
   /** 0…1 raid portal intensity (written by Portal). */
   raid: number;
+  /**
+   * Current camera world position (written by the camera rig every frame). Other layers can use it,
+   * e.g. to hide a resident's label when its body is right at the lens: see `isNearLens`.
+   */
+  camPos: THREE.Vector3;
+}
+
+/** True when a world point is within `radius` metres of the camera (for hiding labels of near-lens residents). */
+export function isNearLens(env: EnvState, x: number, y: number, z: number, radius = 2.2): boolean {
+  const c = env.camPos;
+  return (c.x - x) ** 2 + (c.y - y) ** 2 + (c.z - z) ** 2 < radius * radius;
 }
 
 export interface SharedUniforms {
@@ -195,7 +206,7 @@ export function createKit(): SceneKit {
 
   const env: EnvState = {
     t: 0, simTime: 0, hours: 8, day: 1, daylight: 1, lights: 0, rain: 0, snow: 0, sunset: 0,
-    keyDir: new THREE.Vector3(0.4, 0.8, 0.3).normalize(), raid: 0,
+    keyDir: new THREE.Vector3(0.4, 0.8, 0.3).normalize(), raid: 0, camPos: new THREE.Vector3(),
   };
   const fx: FxApi = { raidAt: -1e9, emitSparkles: () => {}, emitConfetti: () => {} };
 

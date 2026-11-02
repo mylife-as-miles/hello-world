@@ -87,6 +87,8 @@ export interface Agent {
   lastReplyAt: number;
   /** Sim time a low-need state (lonely / tired / bored) was last shown. */
   moodShownAt: number;
+  /** Personal bedtime in game hours (20–23.5); tiredness ramps up after it. */
+  bedtime: number;
 }
 
 export type EncounterKind = 'greet' | 'chat' | 'compliment' | 'gift' | 'befriend' | 'bicker' | 'makeup';

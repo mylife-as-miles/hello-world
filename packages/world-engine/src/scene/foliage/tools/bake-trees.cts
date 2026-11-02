@@ -134,8 +134,8 @@ SPECS.forEach((spec, row) => {
       lp[o] = px * s; lp[o + 1] = (py - minY) * s; lp[o + 2] = pz * s
       // bias normals outward from the crown's mid-height (vertical part damped + an upward lean)
       // so crowns shade like soft domes and low cards (e.g. spruce skirts) never face the ground
-      const ox = px, oy = (py - crownMidY) * 0.45, oz = pz; const ol = Math.hypot(ox, oy, oz) || 1
-      const bx = nx * 0.15 + (ox / ol) * 0.75, by = ny * 0.15 + (oy / ol) * 0.75 + 0.45, bz = nz * 0.15 + (oz / ol) * 0.75; const bl = Math.hypot(bx, by, bz) || 1
+      const hl = Math.hypot(px, pz) || 1, vy = (py - crownMidY) / (Math.hypot(px, py - crownMidY, pz) || 1)
+      const bx = nx * 0.15 + (px / hl) * 0.75, by = ny * 0.15 + 0.5 + vy * 0.3, bz = nz * 0.15 + (pz / hl) * 0.75; const bl = Math.hypot(bx, by, bz) || 1
       ln[o] = bx / bl; ln[o + 1] = by / bl; ln[o + 2] = bz / bl
       lc[o] = f.colors[c * 3]; lc[o + 1] = f.colors[c * 3 + 1]; lc[o + 2] = f.colors[c * 3 + 2]
       const uo = (c * 4 + k) * 2

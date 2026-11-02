@@ -77,12 +77,13 @@ function Stats({ q }: { q: string }) {
 function Measure({ setQ }: { setQ: (q: 'low' | 'high') => void }) {
   const gl = useThree((s) => s.gl);
   const scene = useThree((s) => s.scene);
-  const st = useRef({ phase: 0, frames: 0, group: null as THREE.Object3D | null, out: [] as string[] });
+  const st = useRef({ phase: 0, frames: 0, group: null as THREE.Object3D | null, done: null as THREE.Object3D | null, out: [] as string[] });
   useFrame(() => {
     const m = st.current;
     if (m.phase >= 2) return;
     const g = scene.getObjectByName('generated-trees');
-    if (!g || !g.userData.lod) { m.frames = 0; return; }
+    // wait for the forest rebuilt for the new quality (the old one lingers a frame or two)
+    if (!g || !g.userData.lod || g === m.done) { m.frames = 0; return; }
     if (g !== m.group) { m.group = g; m.frames = 0; }
     if (++m.frames < 5) return;
     const lod = g.userData.lod as { near: number; mid: number; far: number };
@@ -91,6 +92,8 @@ function Measure({ setQ }: { setQ: (q: 'low' | 'high') => void }) {
     if (el) el.textContent = m.out.join('  ·  ');
     console.log('[foliage-lab measure]', m.out[m.out.length - 1]);
     m.phase++;
+    m.done = g;
+    m.frames = 0;
     setQ(m.phase === 1 ? 'low' : 'high');
   });
   return null;

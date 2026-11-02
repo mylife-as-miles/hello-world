@@ -226,14 +226,15 @@ function densestCluster(store: SceneStore, out: THREE.Vector3): boolean {
 interface OverlayFit { minX: number; maxX: number; minZ: number; maxZ: number; init: boolean; at: number; xs: number[]; zs: number[] }
 const newOverlayFit = (): OverlayFit => ({ minX: -7, maxX: 7, minZ: -7, maxZ: 7, init: false, at: -1, xs: [], zs: [] });
 
-/** Trimmed (10th–90th percentile) resident bounds, padded; falls back to the plaza. */
+/** Trimmed (20th–80th percentile) resident bounds, padded; falls back to the plaza. */
 function residentBounds(store: SceneStore, f: OverlayFit, out: { minX: number; maxX: number; minZ: number; maxZ: number }) {
   const rs = store.current.residents;
   if (!rs.length) { out.minX = -7; out.maxX = 7; out.minZ = -7; out.maxZ = 7; return; }
   f.xs.length = 0; f.zs.length = 0;
   for (const r of rs) { f.xs.push(r.location.x); f.zs.push(r.location.z); }
   f.xs.sort((a, b) => a - b); f.zs.sort((a, b) => a - b);
-  const lo = Math.floor((rs.length - 1) * 0.1), hi = Math.ceil((rs.length - 1) * 0.9);
+  // 20th–80th percentile: frame the crowd, let stragglers walk out of frame
+  const lo = Math.floor((rs.length - 1) * 0.2), hi = Math.ceil((rs.length - 1) * 0.8);
   out.minX = f.xs[lo]! - 1.6; out.maxX = f.xs[hi]! + 1.6;
   out.minZ = f.zs[lo]! - 1.6; out.maxZ = f.zs[hi]! + 1.6;
   // keep a sensible minimum frame (about the plaza)
@@ -267,7 +268,7 @@ function overlayPose(store: SceneStore, f: OverlayFit, cam: THREE.PerspectiveCam
   const dzNear = f.maxZ - cz + 0.6;
   const dW = halfW / (0.92 * tanH);
   const dN = (0.9 + Math.tan(nearLim) * dzNear) / Math.max(0.05, Math.tan(nearLim) - Math.tan(cDep));
-  const D = Math.min(70, Math.max(12, dW, dN));
+  const D = Math.min(42, Math.max(12, dW, dN));
   const H = 0.9 + D * Math.tan(cDep);
   outPos.set(cx, H, cz + D);
   outLook.set(cx, H - D * Math.tan(OVERLAY_PITCH), cz);

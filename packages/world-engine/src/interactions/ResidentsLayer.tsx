@@ -388,8 +388,8 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
         if (Math.abs(sc - prev) > 0.004) { hub.scale.set(id, sc); el.style.setProperty('--s', sc.toFixed(3)); }
       }
     }
-    // Rank (viewer first, then newest/nearest), cap the count, skip bubbles that
-    // would overlap a higher-ranked one or sit under the ResidentInspector card.
+    // Rank (viewer, selected, then newest/nearest), cap the count, skip bubbles that
+    // would overlap a higher-ranked one; slide (or skip) bubbles under the inspector card.
     if ((c.bubbleTimer -= dt) <= 0 && hub.active.size) {
       c.bubbleTimer = 0.15;
       const maxVisible = quality === 'low' ? BUBBLE_MAX_VISIBLE_LOW : BUBBLE_MAX_VISIBLE;
@@ -399,7 +399,9 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
         if (!h) continue;
         const d = h.pos.distanceTo(camera.position);
         const age = c.now - b.start;
-        bubbleRank.push({ id, d, score: (id === viewerResidentId ? -1000 : 0) + d - (age < 1.5 ? 25 : 0) + age * 0.5 });
+        // Viewer's own bubble first, then the selected resident, then newest/nearest.
+        const priority = id === viewerResidentId ? -1000 : id === selectedResidentId ? -500 : 0;
+        bubbleRank.push({ id, d, score: priority + d - (age < 1.5 ? 25 : 0) + age * 0.5 });
       }
       bubbleRank.sort((a, b) => a.score - b.score);
       const cr = gl.domElement.getBoundingClientRect();
@@ -410,7 +412,7 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
         const b = hub.active.get(r.id);
         const h = registry.get(r.id);
         if (!el || !b || !h) continue;
-        let show = shown < maxVisible && r.d < BUBBLE_MAX_DISTANCE && h.visible;
+        let show = shown < maxVisible && r.d < (r.id === viewerResidentId ? 70 : BUBBLE_MAX_DISTANCE) && h.visible;
         if (show) {
           _v.set(h.pos.x, h.pos.y + h.height + 0.42, h.pos.z).project(camera);
           if (_v.z > 1) show = false;

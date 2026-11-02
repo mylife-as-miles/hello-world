@@ -192,7 +192,9 @@ function groundMin(x: number, z: number, hx: number, hz: number): { min: number;
   return { min, max };
 }
 
-function addBuilding(f: Writer, p: Writer, lot: DistrictLot, high: boolean) {
+interface RoofInfo { y: number; hx: number; hz: number }
+
+function addBuilding(f: Writer, p: Writer, lot: DistrictLot, high: boolean, bare = false): RoofInfo | null {
   const rnd = (() => { let s = Math.floor(lot.seed * 2147483646) + 1; return () => ((s = (s * 16807) % 2147483647) / 2147483647); })();
   const hx = lot.sx / 2, hz = lot.sz / 2;
   const { min, max } = groundMin(lot.x, lot.z, hx, hz);
@@ -271,16 +273,17 @@ function addBuilding(f: Writer, p: Writer, lot: DistrictLot, high: boolean) {
       const cx = lot.x + (rnd() - 0.5) * thx, cz = lot.z + thz * 0.35;
       p.box(cx - 0.45, top + 0.45, cz - 0.45, cx + 0.45, top + 0.45 + Math.min(5.5, thz * 0.75) + 0.9, cz + 0.45, lin('#9b5e4a'));
     }
-    return;
+    return null;
   }
 
   // Cornice + roof cap
   const ov = high ? 0.45 : 0.25;
   p.box(lot.x - thx - ov, top, lot.z - thz - ov, lot.x + thx + ov, top + 0.8, lot.z + thz + ov, trim);
   p.box(lot.x - thx + 0.3, top + 0.8, lot.z - thz + 0.3, lot.x + thx - 0.3, top + 0.9, lot.z + thz - 0.3, roof);
-  if (!high) return;
+  if (!high) return null;
 
   const roofY = top + 0.9;
+  if (bare) return { y: roofY, hx: thx, hz: thz };
   if (lot.style === 'tower') {
     const kind = rnd();
     if (kind < 0.4) {
@@ -331,6 +334,38 @@ function addBuilding(f: Writer, p: Writer, lot: DistrictLot, high: boolean) {
     const y0 = store + 0.6, y1 = y0 + Math.min(6, (top - store) * 0.6);
     p.box(sx - 0.18, y0, sz - (towardTown > 0 ? 0 : 1.3), sx + 0.18, y1, sz + (towardTown > 0 ? 1.3 : 0), mul(neon, 0.8), mul(neon, 1.9));
   }
+  return null;
+}
+
+/* ------------------------------------------------------------ rooftop sign */
+const SIGN_W = 17, SIGN_H = 4.2;
+function signTexture(): THREE.CanvasTexture {
+  const cv = document.createElement('canvas'); cv.width = 1024; cv.height = 256;
+  const c = cv.getContext('2d')!;
+  const rr = (x: number, y: number, w: number, h: number, r: number) => {
+    c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r);
+    c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath();
+  };
+  c.fillStyle = '#21183a'; rr(0, 0, 1024, 256, 46); c.fill();
+  c.lineWidth = 10; c.strokeStyle = '#5fe3ff'; c.shadowColor = '#5fe3ff'; c.shadowBlur = 18; rr(14, 14, 996, 228, 36); c.stroke();
+  c.font = 'bold 148px ui-rounded, "Arial Rounded MT Bold", "Trebuchet MS", system-ui, sans-serif';
+  c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.shadowColor = '#ff6fae'; c.shadowBlur = 34; c.fillStyle = '#ffd6ea';
+  c.fillText('HELLO WORLD', 512, 136, 900);
+  c.shadowBlur = 0; c.fillStyle = '#ffeef6'; c.fillText('HELLO WORLD', 512, 136, 900);
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+  return t;
+}
+/** The landmark lot for the sign: a mid-rise just behind the portal, facing the neighborhood. */
+function pickSignLot(lots: DistrictLot[]): DistrictLot | null {
+  let best: DistrictLot | null = null, score = Infinity;
+  for (const l of lots) {
+    if (l.style !== 'mid' || l.z > -50 || l.sx < 9) continue;
+    const sc = Math.abs(l.x) * 1.4 + Math.abs(l.z + 62);
+    if (sc < score) { score = sc; best = l; }
+  }
+  return best;
 }
 
 function addStreet(p: Writer, s: (typeof DISTRICT_STREETS)[number], high: boolean) {
@@ -388,6 +423,8 @@ export interface DistrictBuild {
   /** Shared emissive driver for `plainMat` (0 day … 1 night). */
   night: { value: number };
   buildingCount: number;
+  /** Rooftop "HELLO WORLD" sign (high quality only); colour scaled by the night factor. */
+  sign: { geometry: THREE.PlaneGeometry; material: THREE.MeshBasicMaterial; position: [number, number, number] } | null;
   dispose(): void;
 }
 
@@ -396,7 +433,20 @@ export function buildDistrict(quality: 'low' | 'high', heightAt: (x: number, z: 
   hAt = heightAt;
   const f = new Writer(true, true), p = new Writer(false, true);
   const lots = planDistrict(quality);
-  for (const lot of lots) addBuilding(f, p, lot, high);
+  const signLot = high ? pickSignLot(lots) : null;
+  let sign: DistrictBuild['sign'] = null;
+  for (const lot of lots) {
+    const roof = addBuilding(f, p, lot, high, lot === signLot);
+    if (lot === signLot && roof) {
+      // two posts + a back frame in the plain mesh; the sign face is its own (unlit) mesh
+      const zf = lot.z + roof.hz - 1.2, y0 = roof.y + 1.4;
+      for (const dx of [-SIGN_W * 0.32, SIGN_W * 0.32]) p.box(lot.x + dx - 0.2, roof.y, zf - 0.6, lot.x + dx + 0.2, y0 + SIGN_H * 0.6, zf - 0.2, POLE);
+      p.box(lot.x - SIGN_W / 2 - 0.25, y0 - 0.25, zf - 0.2, lot.x + SIGN_W / 2 + 0.25, y0 + SIGN_H + 0.25, zf - 0.02, lin('#2b2440'));
+      const tex = signTexture();
+      const material = new THREE.MeshBasicMaterial({ map: tex, toneMapped: false });
+      sign = { geometry: new THREE.PlaneGeometry(SIGN_W, SIGN_H), material, position: [lot.x, y0 + SIGN_H / 2, zf + 0.01] };
+    }
+  }
   for (const s of DISTRICT_STREETS) addStreet(p, s, high);
   for (const l of planLamps(quality)) addLamp(p, l.x, l.z, l.dx, l.dz, high);
   if (high) {
@@ -434,7 +484,10 @@ export function buildDistrict(quality: 'low' | 'high', heightAt: (x: number, z: 
   const facade = f.geometry(), plain = p.geometry();
   hAt = () => 0;
   return {
-    facade, plain, facadeMat, plainMat, night, buildingCount: lots.length,
-    dispose() { facade.dispose(); plain.dispose(); facadeMat.dispose(); plainMat.dispose(); tex.map.dispose(); tex.emissive.dispose(); },
+    facade, plain, facadeMat, plainMat, night, buildingCount: lots.length, sign,
+    dispose() {
+      facade.dispose(); plain.dispose(); facadeMat.dispose(); plainMat.dispose(); tex.map.dispose(); tex.emissive.dispose();
+      if (sign) { sign.geometry.dispose(); sign.material.map?.dispose(); sign.material.dispose(); }
+    },
   };
 }

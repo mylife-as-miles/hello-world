@@ -279,7 +279,9 @@ export function patchLandscapeFog(shader: THREE.WebGLProgramParametersWithUnifor
   #else
     float fogFactor = smoothstep( fogNear, fogNear + ( fogFar - fogNear ) * ${FOG_STRETCH.toFixed(2)}, vFogDepth );
   #endif
-  gl_FragColor.rgb = mix( gl_FragColor.rgb, fogColor, min( fogFactor, ${FOG_MAX.toFixed(2)} ) );
+  // Cap the haze for the ridges, but let the very edge of the world dissolve fully.
+  float lsFogCap = mix( ${FOG_MAX.toFixed(2)}, 1.0, smoothstep( 250.0, 345.0, vFogDepth ) );
+  gl_FragColor.rgb = mix( gl_FragColor.rgb, fogColor, min( fogFactor, lsFogCap ) );
 #endif`);
 }
 

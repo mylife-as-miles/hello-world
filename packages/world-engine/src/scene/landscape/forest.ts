@@ -98,7 +98,8 @@ export function buildForestPlacements(opts: ForestOptions = {}): ForestPlacement
     const x = Math.cos(a) * r, z = Math.sin(a) * r;
 
     const field = forestCover(x, z, seed);
-    const inStand = THINNEST + (1 - THINNEST) * Math.min(1, Math.max(0, field));
+    // Contrast-stretched stand field → readable groves and open glades.
+    const inStand = THINNEST + (1 - THINNEST) * smoothstep(0.08, 0.78, field);
     // Cheap rejection first, coverage (terrain queries) only for survivors.
     const roll = random();
     if (roll > inStand) continue;
@@ -113,7 +114,7 @@ export function buildForestPlacements(opts: ForestOptions = {}): ForestPlacement
     if (r < 72 && pick < 0.06) variant = BLOSSOM; // a few blossoms near town
     else if (pick < 0.16 + alpine * 0.6) variant = CONIFER;
     else if (pick < 0.29 + alpine * 0.6 || (lakeDistance(x, z) < 2.4 && pick < 0.55)) variant = BIRCH;
-    else if (pick > 0.86 - (1 - alpine) * 0.04) variant = AUTUMN; // warm accents in the lowlands
+    else if (pick > 0.92 - (1 - alpine) * 0.02) variant = AUTUMN; // warm accents in the lowlands
     else variant = BROADLEAF;
 
     const openness = 1 - Math.min(1, Math.max(0, field));

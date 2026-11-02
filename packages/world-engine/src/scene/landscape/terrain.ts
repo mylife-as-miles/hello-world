@@ -103,8 +103,9 @@ export function sampleTerrain(x: number, z: number): TerrainSample {
   const calm = lerp(0.5, 1, smoothstep(96, 150, r));
   const foothills = billow(X * 0.0034, Z * 0.0034, SEED + 211, 4) * FOOTHILL_AMPLITUDE * (0.35 + massif * 0.9) * calm;
   const plains = (fbm(X * 0.0062, Z * 0.0062, SEED + 307, 4, 2.15, 0.52) * 0.5 + 0.5) * PLAIN_AMPLITUDE * calm;
-  // A broad bowl so the horizon rises all the way round, even between peaks.
-  const bowl = Math.pow(smoothstep(52, 290, r), 1.25) * 24;
+  // A broad bowl so the horizon rises all the way round, even between peaks,
+  // with an outer rim so the mesh edge always reads as a ridge line.
+  const bowl = Math.pow(smoothstep(52, 290, r), 1.25) * 24 + smoothstep(270, 335, r) * 22;
 
   let height = mountains + foothills + plains + bowl;
 

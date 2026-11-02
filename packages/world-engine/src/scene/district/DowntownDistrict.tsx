@@ -1,6 +1,6 @@
 /**
  * DowntownDistrict — stylized downtown skyline ring around the neighborhood.
- * 2 draw calls (merged facade + merged plain/emissive geometry), no shadows.
+ * 2–3 draw calls (merged facade + merged plain/emissive geometry + rooftop sign on high), no shadows.
  * Windows, shop fronts, neon blades, beacons and street lamps light up at night:
  * driven by worldClock(store.current.simulationTime).daylight (+ weather) through
  * shared material values — no React state, no per-frame allocations.
@@ -43,6 +43,7 @@ export function DowntownDistrict({ quality, transparent, heightAt = FLAT }: Down
     s.lit = s.lit < 0 ? s.target : s.lit + (s.target - s.lit) * Math.min(1, dt * 1.5);
     built.facadeMat.emissiveIntensity = s.lit * 1.55;
     built.night.value = s.lit;
+    if (built.sign) built.sign.material.color.setScalar(0.8 + s.lit * 0.9);
   });
 
   if (!built) return null;
@@ -50,6 +51,7 @@ export function DowntownDistrict({ quality, transparent, heightAt = FLAT }: Down
     <group name="downtown-district">
       <mesh geometry={built.facade} material={built.facadeMat} />
       <mesh geometry={built.plain} material={built.plainMat} />
+      {built.sign && <mesh geometry={built.sign.geometry} material={built.sign.material} position={built.sign.position} />}
     </group>
   );
 }

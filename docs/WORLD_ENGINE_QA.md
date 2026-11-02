@@ -55,7 +55,48 @@ Most damaging problem: **cameras did not show the residents** (specks in the nei
 Top three improvements routed to owners: (1) resident-centric camera director (scene); (2) density and tension — more seeds, raid scaling, needs that don't saturate (simulation); (3) avatar close-up quality — pose, shoulders/hands, hair shells, accessory/hair resolution (avatars). Also routed: readable bubbles + distance-limited cheering + overlay standing poses (interactions); `WorldScene` memoization and per-frame allocation fixes (scene); low-quality draw-call budget (scene). Fixed by the coordinator: sim clock drift (bounded auto-tick catch-up + test).
 Verified working by the critic: autonomy (7/7 residents moved, relationships 3→11, memories 5→14, 23 simulation events in ~3 game hours); gift/greet → memories and relationship tiers; weather changes behaviour; creator sliders change geometry (9 edits → 9 rebuilds); mobile bottom sheet.
 
-_Cycle 2 results are appended below when available._
+### Cycle 2 (20:50–21:04 UTC, frozen build of handoff commit `dc28c56`) — **7.2 / 10 (+0.3)**
+
+| Category | Weight | Cycle 1 | Cycle 2 |
+| --- | ---: | ---: | ---: |
+| 3D world & visual quality | 20 % | 6.5 | 7.0 |
+| Character creator & avatar quality | 20 % | 6.5 | 6.8 |
+| Sims-like life simulation | 20 % | 7.5 | 7.7 |
+| Interactions & social behaviour | 20 % | 7.0 | 7.2 |
+| Performance & technical reliability | 10 % | 7.0 | 7.3 |
+| Persistence & memory | 10 % | 7.0 | 7.4 |
+
+Measured by projecting every resident group to screen space (720p):
+- **Neighborhood shot:** 12–13 of 13 residents on screen, median 52–54 px tall. In cycle 1 they were specks.
+- **Follow:** subject unobstructed at 162 px.
+- **Overlay:** 95.4 % of pixels transparent; all content sits in the lower band, with seats drawn.
+
+Confirmed fixed:
+- bubble legibility (14 px minimum)
+- distance-limited reactions
+- density (13 seeds: Townie, VRM and photoreal)
+- `WorldScene` memoization and per-frame allocations
+- backstory timestamps
+
+Simulation over 10 game hours: relationships 9 → 39, memories 12 → 53, all 13 residents switched activities within 30 s, evening home routines.
+
+Still open:
+- **Most damaging:** events don't pay off in the default `neighborhood` view (no cuts, raid size not drawn).
+- Street camera often empty.
+- Cinematic framing cluttered by lamp posts and string lights.
+- Repetitive intro dialogue.
+- Social need and friendship drift high.
+- Realistic bodies read as a body picker (no facial rig, waxy faces, stringy hair cards, default tint overrides their outfits).
+- Low quality is still 116–338 draw calls.
+
+Fixes routed to the owning agents at 21:05 UTC, with a 21:55 freeze:
+- scene: event cuts in all modes, always-on event banner, street/cinematic composition
+- simulation: dialogue variety, need/friendship balance
+- realistic: hair alpha, softer tint, labels
+- creator: realistic UX
+- interactions: smaller greeting glyph, larger nameplates
+
+_Cycle 3 (final build) results are appended below when available._
 
 ## 4. Performance findings (measured only)
 

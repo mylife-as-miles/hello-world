@@ -87,8 +87,9 @@ function CameraSetup() {
   useMemo(() => {
     if (view === 'far') camera.position.set(0, 130, 170);
     else if (view === 'east') camera.position.set(-40, 30, 30);
+    else if (view === 'north') camera.position.set(6, 16, -18);
     else camera.position.set(0, 38, 46);
-    camera.lookAt(view === 'east' ? new THREE.Vector3(60, 15, -30) : new THREE.Vector3(0, 0, -6));
+    camera.lookAt(view === 'east' ? new THREE.Vector3(60, 15, -30) : view === 'north' ? new THREE.Vector3(0, 26, -70) : new THREE.Vector3(0, 0, -6));
     camera.updateProjectionMatrix();
   }, [camera]);
   return null;
@@ -174,7 +175,7 @@ function App() {
         <Stats />
       </Canvas>
       <div className="hud">
-        <a href="?">day</a><a href="?night=1">night</a><a href="?t=690">dusk</a><a href="?q=low">low</a><a href="?view=far">far</a><a href="?view=far&night=1">far night</a><a href="?view=east">east</a>
+        <a href="?">day</a><a href="?night=1">night</a><a href="?t=690">dusk</a><a href="?q=low">low</a><a href="?view=far">far</a><a href="?view=far&night=1">far night</a><a href="?view=east">east</a><a href="?view=north">north</a><a href="?view=north&night=1">north night</a>
         <span id="stats" />
       </div>
     </SceneStoreContext.Provider>

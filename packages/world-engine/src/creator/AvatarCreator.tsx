@@ -12,7 +12,7 @@ import {
   ACCESSORIES, BASE_MODELS, BOTTOMS, DEFAULT_APPEARANCE, EYE_COLORS, HAIR_COLORS, HAIR_STYLES, OUTFIT_COLORS,
   PERSONALITY_TRAITS, SHOES, SKIN_TONES, TOPS, normalizeAppearance,
 } from '../avatars/catalog';
-import { isVrmBase } from '../avatars';
+import { isVrmBase, type HumanoidRig } from '../avatars';
 import type { GestureName } from '../interactions/animation/AvatarAnimator';
 import { CreatorPreview, type CameraPreset, type PreviewBase, type PreviewCommand, type PreviewExpression } from './CreatorPreview';
 import { CHARACTER_PRESETS, MAX_ACCESSORIES, MAX_TRAITS, randomAppearance, sanitizeTraits, toggleCapped } from './presets';
@@ -153,6 +153,14 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
     ro.observe(stage); ro.observe(top); ro.observe(dock);
     return () => ro.disconnect();
   }, []);
+  // Rig swaps are reported straight to the DOM (no React re-render): useful for
+  // tests/QA to confirm the rig only rebuilds when the appearance changes.
+  const rigBuilds = useRef(0);
+  const onRigReady = useCallback((rig: HumanoidRig) => {
+    rigBuilds.current += 1;
+    const el = stageRef.current;
+    if (el) { el.dataset.rigBuilds = String(rigBuilds.current); el.dataset.rigKind = rig.kind; }
+  }, []);
   const flashTimers = useRef<{ expr?: number; wave?: number }>({});
   useEffect(() => () => { window.clearTimeout(flashTimers.current.expr); window.clearTimeout(flashTimers.current.wave); }, []);
 
@@ -226,8 +234,14 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
   };
   const pickCamera = (id: CameraPreset) => { setCamera(id); setCameraNonce(n => n + 1); };
   // Smart framing (inZOI-style): face edits are tiny at full-body zoom, so engaging
-  // the Face section frames the face — only from the default full-body view.
-  const frameFace = () => { if (camera === 'full') pickCamera('face'); };
+  // the Face section frames the face — once, and only from the full-body view, so a
+  // user who deliberately goes back to full body is never overridden.
+  const autoFramed = useRef(false);
+  const frameFace = () => {
+    if (autoFramed.current) return;
+    autoFramed.current = true;
+    if (camera === 'full') pickCamera('face');
+  };
 
   // ---- category nav + scroll spy
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -269,9 +283,10 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
       <style>{CREATOR_CSS}</style>
       <div className="hwc-layout">
         {/* ------------------------------------------------ preview */}
-        <div className="hwc-stage" ref={stageRef}>
+        <div className="hwc-stage" ref={stageRef} data-testid="creator-stage">
           <CreatorPreview appearance={appearance} appearanceKey={appearanceKey} camera={camera} cameraNonce={cameraNonce}
-            autoRotate={autoRotate} base={base} gesture={gesture} expression={expression} accent={ACCENT} loadingEl={loadingEl} insets={insets} />
+            autoRotate={autoRotate} base={base} gesture={gesture} expression={expression} accent={ACCENT} loadingEl={loadingEl} insets={insets}
+            onRigReady={onRigReady} />
           <div className="hwc-stage-top" ref={topRef}>
             <div className="hwc-brand">
               <span className="hwc-eyebrow">Hello World</span>

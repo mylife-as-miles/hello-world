@@ -68,3 +68,21 @@ This is not a test failure and cannot be fixed in workflow code. GitHub-hosted C
 ## Integration verification record
 
 Pending complete engine integration. The release engineer will append actual clean-checkout and production-route observations here; no full-application pass is claimed yet. See [QA](QA.md), [independent critique](CRITIQUE.md), and [delivery evidence](DELIVERY.md).
+
+## Isolated integration preflight — 20:17 UTC
+
+The detached preflight checkout combined engine snapshot `854b5af` with the current Codex-owned application/server files. No Claude-owned source was edited. This was a WIP compatibility check, not the final merged-main release gate.
+
+Observed commands and results, under the managed environment’s Node 24.19.0 and pnpm 11.25.0 (the declared Node 22 / pnpm 10 clean check is still pending):
+
+- `pnpm typecheck`: contracts, engine, web and server all passed.
+- `pnpm build`: all workspaces passed. Web main script 1,764,577 bytes (515.30 kB gzip), CSS 59,786 bytes (12.43 kB gzip), dynamic VRM rig 194.56 kB (50.25 kB gzip). A nonfatal large-chunk warning remains.
+- Built server launched on port 3012 with exact `WEB_ORIGIN=http://localhost:3012` and a dedicated temporary `DATA_DIR`.
+- `/`, `/world`, `/director`, `/overlay?camera=neighborhood&quality=low`: HTTP 200, `text/html`.
+- Generated index JS and CSS: HTTP 200, correct `text/javascript` / `text/css` content types, nonempty bodies.
+- Missing JS, `/package.json`, unknown API: HTTP 404.
+- `/api/health`: `ok=true`, `mode=demo`, no persistence error, a completed save timestamp.
+- Correct-origin WebSocket with signed session: authoritative snapshot received with seven seeded residents.
+- Wrong WebSocket Origin: HTTP 403. Missing session: HTTP 401.
+
+The isolated port-3012 process was stopped after verification. Existing development/QA servers were not changed. This check does not establish visual quality, live Twitch event delivery, OBS-host operation, or a clean install of the final merged revision.

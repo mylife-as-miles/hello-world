@@ -284,6 +284,18 @@ export default function App() {
       ? (queryCamera as CameraMode)
       : "neighborhood",
   );
+  const [requestedLowQuality] = useState(
+    () => new URLSearchParams(window.location.search).get("quality") === "low",
+  );
+  const [smallViewport, setSmallViewport] = useState(
+    () => window.matchMedia("(max-width: 700px)").matches,
+  );
+  useEffect(() => {
+    const query = window.matchMedia("(max-width: 700px)");
+    const changed = () => setSmallViewport(query.matches);
+    query.addEventListener("change", changed);
+    return () => query.removeEventListener("change", changed);
+  }, []);
   const [selectedId, setSelectedId] = useState<string | undefined>(
     () =>
       new URLSearchParams(window.location.search).get("resident") || undefined,
@@ -408,6 +420,8 @@ export default function App() {
     saveDisplayName(displayName);
     // A stable-ID join updates appearance and personality while preserving relationships.
     sendEvent("join", { appearance, personality }, { displayName });
+    setSelectedId(residentId || undefined);
+    setCamera("follow");
     setModal(null);
     navigate("world");
     setLocalNotice(
@@ -655,7 +669,11 @@ export default function App() {
                     cameraMode={camera}
                     selectedResidentId={selectedId}
                     onResidentSelect={setSelectedId}
-                    quality="high"
+                    quality={
+                      modal || smallViewport || requestedLowQuality
+                        ? "low"
+                        : "high"
+                    }
                   />
                 </SceneBoundary>
                 <div className="scene-top">
@@ -679,7 +697,7 @@ export default function App() {
                     <span className="status-dot" />
                     {connection === "connecting"
                       ? "Connecting to the neighborhood…"
-                      : "Connection lost. Showing your last saved world."}
+                      : "World server offline. Reconnecting automatically."}
                   </div>
                 )}
                 {page === "home" && (

@@ -109,6 +109,6 @@ export function createKit(): SceneKit {
 
   return {
     env, uniforms, fx, solid, ground, glass, bulbs, track,
-    dispose() { for (const d of disposables.splice(0)) d.dispose(); },
+    dispose() { for (const d of disposables) d.dispose(); },
   };
 }

@@ -38,7 +38,7 @@ export type AttachSlot = 'head' | 'leftHand' | 'rightHand' | 'back';
 export interface HumanoidRig {
   /** Add this to the scene. Feet at y=0, facing +Z. */
   readonly root: Object3D;
-  readonly kind: 'procedural' | 'vrm';
+  readonly kind: 'procedural' | 'vrm' | 'realistic';
   /** Approximate standing height in meters (top of head), after body scaling. */
   readonly height: number;
   /** Set a bone's local rotation relative to the T-pose rest (canonical frame). Missing bones are ignored. */

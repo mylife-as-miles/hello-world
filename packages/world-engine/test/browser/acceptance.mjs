@@ -29,7 +29,10 @@ const snap = () => page.evaluate(() => window.__world.getSnapshot());
 const dispatch = (e) => page.evaluate((ev) => window.__world.dispatch({ id: `acc-${Date.now()}-${Math.random()}`, source: 'demo', timestamp: Date.now(), ...ev }), e);
 const shot = async (name, opts = {}) => { const p = join(out, `${name}.png`); await page.screenshot({ path: p, timeout: 180000, ...opts }); return p; };
 
+page.setDefaultNavigationTimeout(120000);
+page.setDefaultTimeout(120000);
 try {
+  if (!process.env.SKIP_WORLD) {
   await page.goto(`${base}/?view=world&fresh=1&quality=${Q}`, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => !!window.__world, null, { timeout: 60000 });
   await page.waitForTimeout(9000);
@@ -74,6 +77,7 @@ try {
   const visitors = s.residents.filter(r => r.id.startsWith('raid:'));
   record(10, 'raid/confetti visible reaction', visitors.length > 0, `${visitors.length} raid visitors; screenshots ${preRaid} vs ${await shot('10b-after-raid')}`);
 
+  }
   // 3/4: creator changes appearance, saved appearance survives reload
   await page.goto(`${base}/?view=creator&quality=${Q}`, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(8000);

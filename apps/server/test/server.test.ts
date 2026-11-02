@@ -89,6 +89,63 @@ async function connect(
   return { ws, messages, waitFor, send };
 }
 describe("HTTP/WebSocket adapter", () => {
+  it.each(["malformed JSON", "binary"])(
+    "closes a %s frame flood before parsing can bypass ingress limits",
+    async (frameKind) => {
+      const { app, base } = await setup();
+      const viewer = await identity(base);
+      const client = await connect(base, viewer.cookie);
+      const closed = new Promise<number>((resolve, reject) => {
+        const timeout = setTimeout(
+          () => reject(new Error("Flooded socket was not closed")),
+          2500,
+        );
+        client.ws.once("close", (code) => {
+          clearTimeout(timeout);
+          resolve(code);
+        });
+      });
+      for (let index = 0; index < 130; index++) {
+        if (frameKind === "binary") client.ws.send(Buffer.from([0, 1, 2]));
+        else client.ws.send("{invalid-json");
+      }
+      expect(await closed).toBe(1008);
+      expect(
+        client.messages.filter((message) => message.type === "error").length,
+      ).toBeLessThanOrEqual(120);
+      expect(app.room.getSnapshot().eventHistory).toEqual([]);
+      // A flood cannot prevent an independent session from using the world.
+      const otherIdentity = await identity(base);
+      const other = await connect(base, otherIdentity.cookie);
+      other.send({ type: "event", event: event("join") });
+      await other.waitFor(
+        (message) =>
+          message.type === "snapshot" &&
+          message.snapshot.residents.length === 1,
+      );
+      expect((await fetch(`${base}/api/health`)).status).toBe(200);
+    },
+  );
+  it.each(["{broken-json", '{"schemaVersion":999,"residents":[]}'])(
+    "refuses a corrupt saved snapshot and preserves its original bytes (%s)",
+    async (original) => {
+      const dataDir = await mkdtemp(
+        join(tmpdir(), "hello-world-corrupt-test-"),
+      );
+      dirs.push(dataDir);
+      const snapshotPath = join(dataDir, "world.json");
+      await writeFile(snapshotPath, original);
+      const config = readConfig({
+        PORT: "0",
+        DATA_DIR: dataDir,
+        WORLD_ID: "test",
+      });
+      await expect(
+        createWorldServer(config, testFactory, { twitchEnv: {} }),
+      ).rejects.toThrow("Saved world is invalid");
+      expect(await readFile(snapshotPath, "utf8")).toBe(original);
+    },
+  );
   it("provides stable signed sessions and reports honest Demo Mode", async () => {
     const { base } = await setup();
     const first = await identity(base);

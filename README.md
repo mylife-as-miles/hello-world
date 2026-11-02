@@ -57,7 +57,7 @@ Channel Points actions are mapped by approved reward ID. Chat text and redemptio
 3. Set URL to **http://localhost:5173/overlay?camera=neighborhood** for development, or `http://localhost:3001/overlay?camera=neighborhood` when using the production command.
 4. Start with **1920 × 1080, 30 FPS**. Keep Browser Source's default transparent background CSS.
 
-Camera choices: `neighborhood`, `orbit`, `street`, `follow`, `cinematic`. Add `&quality=low` for a lighter source. The app's OBS setup dialog generates the URL for the host currently in use. If OBS runs on another computer, use a reachable application URL configured as the server's `WEB_ORIGIN`.
+Camera choices: `neighborhood`, `orbit`, `street`, `follow`, `cinematic`. The generated URL preserves the selected resident for follow framing; `&resident=<resident-id>` can also be supplied. Add `&quality=low` for a lighter source. The app's OBS setup dialog generates the URL for the host currently in use. If OBS runs on another computer, use a reachable application URL configured as the server's `WEB_ORIGIN`.
 
 Direct OBS WebSocket control is not included. Browser Source works independently of OBS remote-control permissions.
 

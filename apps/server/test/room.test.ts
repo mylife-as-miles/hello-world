@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
-import type { ServerMessage } from "@hello-world/contracts";
+import type { ServerMessage, WorldSnapshot } from "@hello-world/contracts";
 import { WorldRoom } from "../src/room.js";
-import type { Peer } from "../src/room.js";
+import type { Peer, RuntimeFactory } from "../src/room.js";
 import { appearance, event, testFactory } from "./fixture.js";
 
 const rooms: WorldRoom[] = [];
@@ -37,6 +37,95 @@ function setup() {
   return { room, peer, messages, send };
 }
 describe("authoritative world permissions", () => {
+  it("reset discards queued interactions and detaches the previous runtime", async () => {
+    const instances: Array<{
+      runtime: ReturnType<RuntimeFactory>;
+      listeners: Set<(snapshot: WorldSnapshot) => void>;
+      disposed: boolean;
+    }> = [];
+    const factory: RuntimeFactory = (options) => {
+      const base = testFactory(options);
+      const instance = {
+        runtime: base,
+        listeners: new Set<(snapshot: WorldSnapshot) => void>(),
+        disposed: false,
+      };
+      const runtime = {
+        ...base,
+        subscribe(listener: (snapshot: WorldSnapshot) => void) {
+          instance.listeners.add(listener);
+          const unsubscribe = base.subscribe(listener);
+          return () => {
+            instance.listeners.delete(listener);
+            unsubscribe();
+          };
+        },
+        dispose() {
+          instance.disposed = true;
+        },
+      };
+      instance.runtime = runtime;
+      instances.push(instance);
+      return runtime;
+    };
+    const room = new WorldRoom({
+      runtime: factory({ worldId: "test" }),
+      factory,
+      worldId: "test",
+      directorKey: "private-test-director",
+      settings: {
+        approvalRequired: true,
+        cooldownSeconds: 0,
+        maxResidents: 50,
+        paused: false,
+      },
+    });
+    rooms.push(room);
+    const messages: ServerMessage[] = [];
+    const viewer: Peer = {
+      id: "viewer-peer",
+      viewerId: "viewer:reset-test",
+      director: false,
+      send: (message) => messages.push(message),
+    };
+    const director: Peer = {
+      id: "director-peer",
+      viewerId: "viewer:director",
+      director: true,
+      send: (message) => messages.push(message),
+    };
+    room.add(viewer);
+    room.add(director);
+    room.receive(viewer, { type: "event", event: event("join") });
+    room.receive(viewer, { type: "event", event: event("dance") });
+    const queuedId = [...room.pending.keys()][0];
+    expect(queuedId).toBeTruthy();
+    expect(instances[0].listeners.size).toBe(1);
+    room.receive(director, { type: "reset" });
+    expect(instances[0].disposed).toBe(true);
+    expect(instances[0].listeners.size).toBe(0);
+    expect(instances[1].listeners.size).toBe(1);
+    expect(room.pending.size).toBe(0);
+    room.receive(director, { type: "approve", eventId: queuedId });
+    expect(room.getSnapshot().eventHistory).toEqual([]);
+    expect(
+      messages.some(
+        (message) =>
+          message.type === "error" &&
+          message.message.includes("no longer awaiting approval"),
+      ),
+    ).toBe(true);
+    // A late emission from the old runtime cannot leak its previous residents/actions back into the new world.
+    instances[0].runtime.dispatch(
+      event("join", { actorId: "viewer:stale", actorDisplayName: "Stale" }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 75));
+    expect(room.getSnapshot().residents).toEqual([]);
+    const lastSnapshot = messages
+      .filter((message) => message.type === "snapshot")
+      .at(-1);
+    expect(lastSnapshot?.snapshot.residents).toEqual([]);
+  });
   it("replaces forged browser identity, source, event ID and timestamp", () => {
     const { room, send } = setup();
     send("join", {

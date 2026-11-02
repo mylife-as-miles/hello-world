@@ -17,7 +17,10 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
   const port = Number(env.PORT || 3001);
   if (!Number.isInteger(port) || port < 0 || port > 65535)
     throw new Error("PORT must be 0–65535");
-  const webOrigin = new URL(env.WEB_ORIGIN || "http://localhost:5173").origin;
+  const originUrl = new URL(env.WEB_ORIGIN || "http://localhost:5173");
+  if (!["http:", "https:"].includes(originUrl.protocol))
+    throw new Error("WEB_ORIGIN must use http or https");
+  const webOrigin = originUrl.origin;
   const directorKey = env.DIRECTOR_KEY || "";
   if (directorKey && directorKey.length < 16)
     throw new Error("DIRECTOR_KEY must contain at least 16 characters");

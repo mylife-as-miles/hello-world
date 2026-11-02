@@ -284,7 +284,10 @@ export default function App() {
       ? (queryCamera as CameraMode)
       : "neighborhood",
   );
-  const [selectedId, setSelectedId] = useState<string>();
+  const [selectedId, setSelectedId] = useState<string | undefined>(
+    () =>
+      new URLSearchParams(window.location.search).get("resident") || undefined,
+  );
   const [modal, setModal] = useState<ModalName>(null);
   const [name, setName] = useState(readDisplayName);
   const [creatorStep, setCreatorStep] = useState<"name" | "appearance">("name");
@@ -323,7 +326,7 @@ export default function App() {
         .sort((a, b) => b.friendship - a.friendship)
         .slice(0, 3)
     : [];
-  const overlayUrl = `${window.location.origin}/overlay?camera=${camera}`;
+  const overlayUrl = `${window.location.origin}/overlay?camera=${camera}${selectedId ? `&resident=${encodeURIComponent(selectedId)}` : ""}`;
   const authorization = world.capabilities.authorization;
   const broadcasterName = authorization?.startsWith("authorized ")
     ? authorization.slice("authorized ".length)

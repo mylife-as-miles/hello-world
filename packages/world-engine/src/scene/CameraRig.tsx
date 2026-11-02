@@ -49,7 +49,7 @@ function blocked(ax: number, ay: number, az: number, bx: number, by: number, bz:
   for (let i = 0; i < EXTRA.length; i++) {
     const o = EXTRA[i]!;
     // the camera itself must keep clear of props (no canopy / post filling the lens)
-    if (ay < o.h + 0.6 && Math.hypot(ax - o.x, az - o.z) < o.r + 1.0) return true;
+    if (ay < o.h + 0.6 && Math.hypot(ax - o.x, az - o.z) < o.r + 2.2) return true;
     const dx = bx - ax, dz = bz - az;
     const fx = ax - o.x, fz = az - o.z;
     const A = dx * dx + dz * dz, B = 2 * (fx * dx + fz * dz), C = fx * fx + fz * fz - o.r * o.r;
@@ -159,6 +159,22 @@ function propsNear(ax: number, ay: number, az: number, bx: number, by: number, b
   return false;
 }
 
+/** Lamp posts / planters / trees standing in the central third of the frame (between camera and subject). */
+function centralClutter(ax: number, az: number, bx: number, bz: number): boolean {
+  const dx = bx - ax, dz = bz - az;
+  const D = Math.hypot(dx, dz) || 1;
+  const fx = dx / D, fz = dz / D;
+  for (let i = 0; i < EXTRA.length; i++) {
+    const o = EXTRA[i]!;
+    if (o.h < 1.2) continue;
+    const ox = o.x - ax, oz = o.z - az;
+    const f = ox * fx + oz * fz;
+    if (f < 0.8 || f > D - 1.2) continue;
+    if (Math.abs(ox * fz - oz * fx) < f * 0.22 + o.r * 0.6) return true;
+  }
+  return false;
+}
+
 const PORTAL_CANDIDATES = [0.32, -0.32, 0.55, -0.55, 0.14, -0.14, 0.8, -0.8, 1.05, -1.05];
 
 /** Tall props in the near half of a shot (camera → subject) would loom in the foreground. */
@@ -184,16 +200,16 @@ function foregroundClutter(cx: number, cz: number, tx: number, tz: number): bool
  */
 function portalPose(raid: boolean, outPos: THREE.Vector3, outLook: THREE.Vector3) {
   const tx = PORTAL_POS.x, tz = PORTAL_POS.z + 2.6, ty = 1.0;
-  const D = raid ? 17 : 11.5, H = raid ? 6.4 : 3.8;
+  const D = raid ? 13.5 : 10, H = raid ? 4.4 : 3.2;
   let a = PORTAL_CANDIDATES[0]!;
   for (let i = 0; i < PORTAL_CANDIDATES.length; i++) {
     const c = PORTAL_CANDIDATES[i]!;
     const cx = tx + Math.sin(c) * D, cz = tz + Math.cos(c) * D;
-    if (!blocked(cx, H, cz, tx, ty + 0.6, tz) && !propsNear(cx, H, cz, tx, ty, tz, 1.2) && !foregroundClutter(cx, cz, tx, tz)) { a = c; break; }
+    if (!blocked(cx, H, cz, tx, ty + 0.6, tz) && !propsNear(cx, H, cz, tx, ty, tz, 1.2) && !foregroundClutter(cx, cz, tx, tz) && !centralClutter(cx, cz, tx, tz)) { a = c; break; }
   }
   outPos.set(tx + Math.sin(a) * D, H, tz + Math.cos(a) * D);
   // aim ~1 m below the arrivals so they sit slightly above centre (upper-middle third)
-  outLook.set(tx, ty - (raid ? 1.0 : 0.6), tz);
+  outLook.set(tx, ty - (raid ? 0.7 : 0.5), tz);
 }
 
 /** Keep the camera outside building volumes (push out along the shallowest axis). */
@@ -235,13 +251,18 @@ interface Framer {
   rel: number;             // chosen relative yaw (camera side)
   yaw: number;             // smoothed absolute camera yaw
   init: boolean;
+  /** 0 = shoulder-height shot, 1 = elevated look-down (used while every low angle is blocked by props). */
+  elev: number;
+  elevTarget: number;
 }
-const newFramer = (): Framer => ({ pos: new THREE.Vector3(), prev: new THREE.Vector3(), vel: new THREE.Vector3(), heading: 0, rel: 0.62, yaw: 0, init: false });
+const newFramer = (): Framer => ({ pos: new THREE.Vector3(), prev: new THREE.Vector3(), vel: new THREE.Vector3(), heading: 0, rel: 0.62, yaw: 0, init: false, elev: 0, elevTarget: 0 });
 const REL_CANDIDATES = [0.62, -0.62, 1.15, -1.15, 1.7, -1.7, 2.4, -2.4, Math.PI];
 
-function clearAt(f: Framer, rel: number, dist: number, height: number, ly: number): boolean {
+function clearAt(f: Framer, rel: number, dist: number, height: number, ly: number, strict = false): boolean {
   const a = f.heading + rel;
-  return !blocked(f.pos.x + Math.sin(a) * dist, height, f.pos.z + Math.cos(a) * dist, f.pos.x, ly, f.pos.z);
+  const cx = f.pos.x + Math.sin(a) * dist, cz = f.pos.z + Math.cos(a) * dist;
+  if (blocked(cx, height, cz, f.pos.x, ly, f.pos.z)) return false;
+  return !strict || !centralClutter(cx, cz, f.pos.x, f.pos.z);
 }
 
 function frame(f: Framer, tx: number, tz: number, dt: number, dist: number, height: number, lookY: number, outPos: THREE.Vector3, outLook: THREE.Vector3, snap: boolean) {
@@ -258,13 +279,22 @@ function frame(f: Framer, tx: number, tz: number, dt: number, dist: number, heig
   if (speed > 0.35) f.heading = angleLerp(f.heading, Math.atan2(f.vel.x, f.vel.z), 1 - Math.exp(-dt * 1.6));
   const ly = lookY;
   // keep the current side while it is clear, else search (same side first)
-  if (!clearAt(f, f.rel, dist, height, ly)) {
+  if (!clearAt(f, f.rel, dist, height, ly, true)) {
     const side = f.rel < 0 ? -1 : 1;
-    for (let i = 0; i < REL_CANDIDATES.length; i++) {
-      const cand = REL_CANDIDATES[i]! * side;
-      if (clearAt(f, cand, dist, height, ly)) { f.rel = cand; break; }
+    let found = false;
+    // pass 1: clear AND no lamp post / planter in the central third; pass 2: merely clear
+    for (let pass = 0; pass < 2 && !found; pass++) {
+      for (let i = 0; i < REL_CANDIDATES.length; i++) {
+        const cand = REL_CANDIDATES[i]! * side;
+        if (clearAt(f, cand, dist, height, ly, pass === 0)) { f.rel = cand; found = true; break; }
+      }
     }
-  }
+    // nothing clear at shoulder height: rise and look down over the props
+    f.elevTarget = found ? 0 : 1;
+  } else f.elevTarget = 0;
+  f.elev += (f.elevTarget - f.elev) * (snap ? 1 : 1 - Math.exp(-dt * 1.5));
+  height = height + (5.8 - height) * f.elev;
+  dist = dist + (7.6 - dist) * f.elev;
   const targetYaw = f.heading + f.rel;
   f.yaw = snap ? targetYaw : angleLerp(f.yaw, targetYaw, 1 - Math.exp(-dt * 1.8));
   const ahead = Math.min(2, speed * 0.6);
@@ -364,7 +394,7 @@ const outsideStageRing = (x: number, z: number) => Math.hypot(x - STAGE_POS.x, z
  */
 function orbitClear(o: OrbitState, a: number, dist: number, h: number, lookY: number): boolean {
   const cx = o.clusterS.x + Math.sin(a) * dist, cz = o.clusterS.z + Math.cos(a) * dist;
-  return outsideStageRing(cx, cz) && !blocked(cx, h, cz, o.clusterS.x, lookY, o.clusterS.z);
+  return outsideStageRing(cx, cz) && !blocked(cx, h, cz, o.clusterS.x, lookY, o.clusterS.z) && !centralClutter(cx, cz, o.clusterS.x, o.clusterS.z);
 }
 
 function orbitShot(o: OrbitState, dt: number, speed: number, dist: number, h: number, lookY: number) {
@@ -495,7 +525,7 @@ export function CameraRig({ mode, selectedResidentId, transparent = false, quali
     const dt = Math.min(rawDt, 1);
     const t = state.clock.elapsedTime;
     EXTRA = kit.occluders;
-    kit.uniforms.uCutNear.value = mode === 'overlay' ? 0 : 3;
+    kit.uniforms.uCutNear.value = 0; // no screen-door near the lens: camera placement avoids props instead
     if (mode === 'orbit') {
       kit.uniforms.uCutOn.value = Math.max(0, kit.uniforms.uCutOn.value - dt * 3);
       kit.uniforms.uCutA.value.copy(camera.position);

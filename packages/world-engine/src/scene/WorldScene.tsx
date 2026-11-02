@@ -246,7 +246,7 @@ function OverlaySeating() {
   const kit = useKit();
   const geo = useMemo(() => buildOverlayProps(), []);
   useEffect(() => () => geo.dispose(), [geo]);
-  return <mesh geometry={geo} material={kit.solid} castShadow receiveShadow />;
+  return <mesh geometry={geo} material={kit.solidKeep} castShadow receiveShadow />;
 }
 
 /** Overlay mode: soft contact-shadow patches under the drawn benches, café furniture and stage (1 draw call). */
@@ -300,12 +300,14 @@ function OverlayContactShadows() {
 function RenderStats() {
   const gl = useThree(s => s.gl);
   const scene = useThree(s => s.scene);
+  const camera = useThree(s => s.camera);
   useEffect(() => {
-    // QA only (?hwdebug): expose the scene on the canvas element for draw-call breakdowns.
+    // QA only (?hwdebug): expose scene + camera on the canvas element (draw-call breakdowns, click targeting).
     if (typeof location === 'undefined' || !location.search.includes('hwdebug')) return;
-    (gl.domElement as unknown as { __hwScene?: THREE.Scene }).__hwScene = scene;
-    return () => { delete (gl.domElement as unknown as { __hwScene?: THREE.Scene }).__hwScene; };
-  }, [gl, scene]);
+    const el = gl.domElement as unknown as { __hwScene?: THREE.Scene; __hwCamera?: THREE.Camera };
+    el.__hwScene = scene; el.__hwCamera = camera;
+    return () => { delete el.__hwScene; delete el.__hwCamera; };
+  }, [gl, scene, camera]);
   const acc = useRef({ frames: 0, calls: 0, tris: 0 });
   useEffect(() => {
     const info = (gl as unknown as { info?: { autoReset: boolean } }).info;

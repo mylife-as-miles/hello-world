@@ -52,6 +52,25 @@ export interface CreatorPreviewProps {
 }
 
 const EXPRESSION_HOLD = 1.8;
+/** Resting smile for the studio hero (Townie faces): eyes open, small smile, light blush. */
+const FRIENDLY_HAPPY = 0.35;
+
+/**
+ * Wraps a Townie rig for the animator so the idle auto-mood can't make the hero
+ * look drowsy: 'relaxed' (which lowers the upper lids) only reaches the face
+ * while the user is previewing Relaxed. Everything else is forwarded untouched
+ * (incl. optional fields like hipsHeight that the animator measures).
+ */
+function friendlyFace(rig: HumanoidRig, allowRelaxed: () => boolean): HumanoidRig {
+  const setExpression = (name: ExpressionName, w: number) => rig.setExpression(name, name === 'relaxed' && !allowRelaxed() ? 0 : w);
+  return new Proxy(rig, {
+    get(target, prop) {
+      if (prop === 'setExpression') return setExpression;
+      const v = Reflect.get(target, prop, target) as unknown;
+      return typeof v === 'function' ? (v as (...args: unknown[]) => unknown).bind(target) : v;
+    },
+  });
+}
 const NO_INSETS = { top: 0, bottom: 0 };
 const REBUILD_MS = 70;
 
@@ -120,6 +139,7 @@ function Studio(props: CreatorPreviewProps) {
   const presetRef = useRef<CameraPreset>(preset);
   const elapsed = useRef(0);
   const interacting = useRef(false);
+  const friendly = useRef(false);
   const lastInteract = useRef(-10);
   const gestureRef = useRef<{ name: GestureName; until: number } | null>(null);
   // Expression envelopes: weight eases toward target; target drops to 0 after the hold.
@@ -185,7 +205,8 @@ function Studio(props: CreatorPreviewProps) {
         rigRef.current = rig;
         rigHeight.current = Number.isFinite(rig.height) && rig.height > 0.3 ? rig.height : 1.75;
         rigFamily.current = isRealisticBase(requested.baseModelId) && rig.kind !== 'procedural' ? 'real' : rig.kind === 'vrm' ? 'vrm' : 'townie';
-        const anim = new AvatarAnimator(rig, 7);
+        friendly.current = rig.kind === 'procedural';
+        const anim = new AvatarAnimator(friendly.current ? friendlyFace(rig, () => exprs.current.has('relaxed')) : rig, 7);
         anim.setBase(baseRef.current);
         const g = gestureRef.current;
         if (g && g.until > elapsed.current) anim.playGesture(g.name, { duration: g.until - elapsed.current });
@@ -260,6 +281,7 @@ function Studio(props: CreatorPreviewProps) {
     if (!rig || !anim) return;
     // Expressions go through the animator's manual channel (it blends them with
     // its own moods/auto-blink and forwards to rig.setExpression in update()).
+    let happyEnv = 0, otherMax = 0;
     for (const [name, e] of exprs.current) {
       if (e.blinkT !== undefined) {
         e.blinkT += dt;
@@ -274,9 +296,20 @@ function Studio(props: CreatorPreviewProps) {
       if (e.target > 0 && now > e.until) e.target = 0;
       const rate = e.target > e.w ? 7 : 4.5;
       e.w += (e.target - e.w) * (1 - Math.exp(-dt * rate));
-      if (e.target === 0 && e.w < 0.01) { anim.setExpression(name, 0); exprs.current.delete(name); continue; }
+      const done = e.target === 0 && e.w < 0.01;
+      if (name === 'happy') { happyEnv = done ? 0 : e.w; if (done) exprs.current.delete(name); continue; }
+      if (done) {
+        anim.setExpression(name, 0);
+        exprs.current.delete(name);
+        // the animator won't resend its constant idle 'relaxed' mood: clear it on the face
+        if (name === 'relaxed' && friendly.current) rig.setExpression('relaxed', 0);
+        continue;
+      }
       anim.setExpression(name, e.w);
+      otherMax = Math.max(otherMax, e.w);
     }
+    // Friendly resting face on Townies; other previewed emotions fade it out and back in.
+    anim.setExpression('happy', Math.max(happyEnv, friendly.current ? FRIENDLY_HAPPY * (1 - otherMax) : 0));
     if (gestureRef.current && now > gestureRef.current.until) gestureRef.current = null;
     // Gentle "look at camera" while the user isn't dragging: head/neck turn toward the
     // viewer (smoothed by the animator); behind the character or mid-drag → auto look-around.

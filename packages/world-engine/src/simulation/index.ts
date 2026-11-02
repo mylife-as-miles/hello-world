@@ -48,6 +48,8 @@ function createWorld(opts: Parameters<CreateSimulation>[0]): World {
     memoryAt: new Map(),
     bestFriends: new Set(),
     feuds: new Map(),
+    clashAt: new Map(),
+    pairLines: new Map(),
     nextFrictionAt: 90,
     giftAt: new Map(),
     seats: new Map(),
@@ -64,7 +66,7 @@ function createWorld(opts: Parameters<CreateSimulation>[0]): World {
     scheduleSeq: 0,
     nextSocialAt: 3,
     lineUsedAt: new Map(),
-    facts: { raidAt: -1e9, raidChannel: '', confettiAt: -1e9, newcomer: null, lastGrumbleAt: -1e9, lastAmbientAt: -1e9, lastChatReplyAt: -1e9, lastWelcomeAt: -1e9, lastGiftAt: -1e9 },
+    facts: { raidAt: -1e9, raidChannel: '', confettiAt: -1e9, newcomer: null, lastGrumbleAt: -1e9, lastAmbientAt: -1e9, lastChatReplyAt: -1e9, lastWelcomeAt: -1e9, lastGiftAt: -1e9, lastMutterAt: -1e9 },
     llm: { provider: null, inFlight: 0, ready: [], nextAt: 0 },
   };
 }

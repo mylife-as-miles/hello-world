@@ -134,6 +134,7 @@ export interface WorldFacts {
   lastChatReplyAt: number;
   lastWelcomeAt: number;
   lastGiftAt: number;
+  lastMutterAt: number;
   /** Crowd info of the latest raid (shared by its celebrate + arrival events). */
   raidCrowd?: { visitors: number; amount: number; channel: string };
 }
@@ -153,6 +154,10 @@ export interface World {
   feuds: Map<string, { at: number; a: string; b: string; attempts: number }>;
   /** Sim time when the next personality clash may happen (≈ every 2 game hours). */
   nextFrictionAt: number;
+  /** pairKey → sim time of the pair's last clash (per-pair cooldown, no spirals). */
+  clashAt: Map<string, number>;
+  /** pairKey → template tags already used by that pair (no repeated apologies). */
+  pairLines: Map<string, Set<string>>;
   /** Pairs that already had their best-friends moment. */
   bestFriends: Set<string>;
   /** pairKey → sim time of the last autonomous gift. */

@@ -175,6 +175,8 @@ export function scoreChoices(w: World, a: Agent, c: WorldClock): Choice[] {
         // A low need dominates: actions that fix it get a boost, the rest are damped.
         const low = lowestNeed(a);
         if (low.value < 22 && attention(a, low.key) >= 1) s *= def.effects[low.key] >= 0.2 ? 1.8 : 0.55;
+        // Exhausted (and not a night owl at night): resting beats fun-seeking.
+        if (a.needs.energy < 25 && !(t.nightOwl > 0.5 && c.period === 'night')) s *= def.effects.energy >= 0.2 ? 2 : def.effects.fun >= 0.2 ? 0.3 : 1;
         s *= def.pref(t, p);
         s *= timeFactor(def.type, p, c, t);
         if (a.visitor) s *= def.type === 'dance' ? 1.4 : def.type === 'watch' || def.type === 'admire' || def.type === 'play' ? 1.2 : def.type === 'sit' || def.type === 'rest' || def.type === 'read' ? 0.6 : 1;
@@ -182,7 +184,8 @@ export function scoreChoices(w: World, a: Agent, c: WorldClock): Choice[] {
         else s *= 1 - (0.2 * occ) / p.capacity;
       }
       s *= weatherFactor(def.type, p, w, t);
-      s -= dist(a, p.position) * 0.006;
+      // Distressed residents look for a remedy close by instead of crossing town.
+      s -= dist(a, p.position) * (Math.min(a.needs.energy, a.needs.social, a.needs.fun) < 25 ? 0.03 : 0.006);
       if (a.lastPoiId === p.id) s *= 0.55;
       if (a.lastType === def.type) s *= 0.7;
       s += w.rng.float('noise', a.id) * 0.2 * (1 + t.chaos);

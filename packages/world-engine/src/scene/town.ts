@@ -27,6 +27,8 @@ export interface SignDef {
 
 export interface TownGeometry {
   solid: THREE.BufferGeometry;
+  /** Seats, tables, stage and fountain: never see-through (residents sit / dance / rest on them). */
+  seats: THREE.BufferGeometry;
   /** Small props (flowers, tufts, pebbles): lit + receive shadows but never cast (cheaper shadow pass). */
   detail: THREE.BufferGeometry;
   far: THREE.BufferGeometry;
@@ -127,7 +129,7 @@ export interface TownOptions {
 }
 
 interface Ctx {
-  solid: Batch; detail: Batch; far: Batch; flat: Batch; glass: Batch; bulbs: Batch;
+  solid: Batch; detail: Batch; far: Batch; flat: Batch; glass: Batch; bulbs: Batch; seats: Batch;
   P: Prims; r: () => number; space: Space; q: number;
   lamps: THREE.Vector3[]; chimneys: THREE.Vector3[]; signs: SignDef[];
   occ?: Array<{ x: number; z: number; r: number; h: number }>;
@@ -226,21 +228,21 @@ function addBench(c: Ctx, x: number, z: number, yaw: number, len: number) {
   const M = mtx(x, 0, z, yaw);
   const at = (m: THREE.Matrix4) => M.clone().multiply(m);
   // seat surface top at exactly y = 0.45 (animator seats hips there)
-  for (let i = 0; i < 3; i++) c.solid.add(c.P.rbox(len, 0.05, 0.13, 0.02), '#c08752', at(mtx(0, 0.425, -0.13 + i * 0.14)));
-  for (let i = 0; i < 2; i++) c.solid.add(c.P.rbox(len, 0.12, 0.04, 0.02), '#c08752', at(mtx(0, 0.68 + i * 0.17, -0.27, 0, 1, 1, 1, -0.12)));
+  for (let i = 0; i < 3; i++) c.seats.add(c.P.rbox(len, 0.05, 0.13, 0.02), '#c08752', at(mtx(0, 0.425, -0.13 + i * 0.14)));
+  for (let i = 0; i < 2; i++) c.seats.add(c.P.rbox(len, 0.12, 0.04, 0.02), '#c08752', at(mtx(0, 0.68 + i * 0.17, -0.27, 0, 1, 1, 1, -0.12)));
   for (const s of [-1, 1]) {
-    c.solid.add(c.P.box(), '#3b3f3c', at(mtx(s * (len / 2 - 0.12), 0.2, -0.02, 0, 0.06, 0.4, 0.42)));
-    c.solid.add(c.P.box(), '#3b3f3c', at(mtx(s * (len / 2 - 0.12), 0.62, -0.28, 0, 0.06, 0.5, 0.05, -0.12)));
-    c.solid.add(c.P.box(), '#3b3f3c', at(mtx(s * (len / 2 - 0.12), 0.6, 0.0, 0, 0.06, 0.05, 0.42)));
+    c.seats.add(c.P.box(), '#3b3f3c', at(mtx(s * (len / 2 - 0.12), 0.2, -0.02, 0, 0.06, 0.4, 0.42)));
+    c.seats.add(c.P.box(), '#3b3f3c', at(mtx(s * (len / 2 - 0.12), 0.62, -0.28, 0, 0.06, 0.5, 0.05, -0.12)));
+    c.seats.add(c.P.box(), '#3b3f3c', at(mtx(s * (len / 2 - 0.12), 0.6, 0.0, 0, 0.06, 0.05, 0.42)));
   }
 }
 
 function addChair(c: Ctx, x: number, z: number, yaw: number, color: string) {
   const M = mtx(x, 0, z, yaw);
   const at = (m: THREE.Matrix4) => M.clone().multiply(m);
-  c.solid.add(c.P.rbox(0.46, 0.06, 0.44, 0.02), color, at(mtx(0, 0.42, 0))); // seat top at y = 0.45
-  c.solid.add(c.P.rbox(0.46, 0.46, 0.05, 0.02), color, at(mtx(0, 0.74, -0.2, 0, 1, 1, 1, -0.08)));
-  for (const sx of [-1, 1]) for (const sz of [-1, 1]) c.solid.add(c.P.box(), '#3d3a36', at(mtx(sx * 0.19, 0.2, sz * 0.18, 0, 0.04, 0.4, 0.04)));
+  c.seats.add(c.P.rbox(0.46, 0.06, 0.44, 0.02), color, at(mtx(0, 0.42, 0))); // seat top at y = 0.45
+  c.seats.add(c.P.rbox(0.46, 0.46, 0.05, 0.02), color, at(mtx(0, 0.74, -0.2, 0, 1, 1, 1, -0.08)));
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) c.seats.add(c.P.box(), '#3d3a36', at(mtx(sx * 0.19, 0.2, sz * 0.18, 0, 0.04, 0.4, 0.04)));
 }
 
 function addLamp(c: Ctx, x: number, z: number) {
@@ -511,9 +513,9 @@ function buildTerrace(c: Ctx) {
   for (let i = 0; i + 1 < seats.length; i += 2) {
     const s1 = seats[i]!, s2 = seats[i + 1]!;
     const tx = (s1.x + s2.x) / 2, tz = (s1.z + s2.z) / 2;
-    c.solid.add(c.P.cyl(14), '#fbf7ef', mtx(tx, 0.76, tz, 0, 0.55, 0.05, 0.55));
-    c.solid.add(c.P.cyl(8), '#3d3a36', mtx(tx, 0.38, tz, 0, 0.05, 0.76, 0.05));
-    c.solid.add(c.P.cyl(10), '#3d3a36', mtx(tx, 0.03, tz, 0, 0.3, 0.05, 0.3));
+    c.seats.add(c.P.cyl(14), '#fbf7ef', mtx(tx, 0.76, tz, 0, 0.55, 0.05, 0.55));
+    c.seats.add(c.P.cyl(8), '#3d3a36', mtx(tx, 0.38, tz, 0, 0.05, 0.76, 0.05));
+    c.seats.add(c.P.cyl(10), '#3d3a36', mtx(tx, 0.03, tz, 0, 0.3, 0.05, 0.3));
     c.solid.add(c.P.cyl(6), '#efe7da', mtx(tx, 1.55, tz, 0, 0.035, 1.6, 0.035));
     const col = umbrellas[(i / 2) % 2]!;
     c.solid.add(c.P.cone(8), col, mtx(tx, 2.48, tz, Math.PI / 8, 1.45, 0.5, 1.45), true);
@@ -582,14 +584,14 @@ function buildPlaza(c: Ctx) {
   // Fountain stonework
   const lathe = (pts: Array<[number, number]>, seg = 40) => new THREE.LatheGeometry(pts.map(([x, y]) => new THREE.Vector2(x, y)), seg);
   const basin = lathe([[0, 0.14], [1.88, 0.14], [1.9, 0.5], [1.97, 0.6], [2.2, 0.6], [2.3, 0.52], [2.3, 0.07], [2.36, 0.0]].reverse() as Array<[number, number]>);
-  c.solid.add(basin, '#ddd3c3', mtx(0, 0.04, 0));
-  c.solid.add(c.P.cyl(14), '#d4c9b8', mtx(0, 0.85, 0, 0, 0.3, 1.4, 0.3));
-  c.solid.add(c.P.cyl(14), '#cbbfad', mtx(0, 0.35, 0, 0, 0.45, 0.4, 0.45));
+  c.seats.add(basin, '#ddd3c3', mtx(0, 0.04, 0));
+  c.seats.add(c.P.cyl(14), '#d4c9b8', mtx(0, 0.85, 0, 0, 0.3, 1.4, 0.3));
+  c.seats.add(c.P.cyl(14), '#cbbfad', mtx(0, 0.35, 0, 0, 0.45, 0.4, 0.45));
   const bowl = lathe([[0, 0.26], [0.88, 0.26], [0.95, 0.36], [1.06, 0.33], [1.0, 0.18], [0.32, 0.0]].reverse() as Array<[number, number]>, 32);
-  c.solid.add(bowl, '#e1d8c9', mtx(0, 1.36, 0));
-  c.solid.add(c.P.cyl(12), '#d4c9b8', mtx(0, 1.85, 0, 0, 0.15, 0.6, 0.15));
-  c.solid.add(bowl, '#e1d8c9', mtx(0, 2.0, 0, 0, 0.5, 0.6, 0.5));
-  c.solid.add(c.P.sphere(12, 8), '#e9dfcf', mtx(0, 2.42, 0, 0, 0.13, 0.16, 0.13));
+  c.seats.add(bowl, '#e1d8c9', mtx(0, 1.36, 0));
+  c.seats.add(c.P.cyl(12), '#d4c9b8', mtx(0, 1.85, 0, 0, 0.15, 0.6, 0.15));
+  c.seats.add(bowl, '#e1d8c9', mtx(0, 2.0, 0, 0, 0.5, 0.6, 0.5));
+  c.seats.add(c.P.sphere(12, 8), '#e9dfcf', mtx(0, 2.42, 0, 0, 0.13, 0.16, 0.13));
   basin.dispose(); bowl.dispose();
   // Plaza planters with little trees + flowers
   const angles = [-Math.PI * 0.64, -Math.PI * 0.36, Math.PI * 0.1, Math.PI * 0.68, Math.PI * 1.12];
@@ -615,15 +617,15 @@ function buildStage(c: Ctx) {
   const M = mtx(sx, 0, sz, yaw);
   const at = (m: THREE.Matrix4) => M.clone().multiply(m);
   c.space.circle(sx, sz, 3.2);
-  c.solid.add(c.P.cyl(24), '#8a6a52', at(mtx(0, 0.18, 0, 0, 2.82, 0.36, 2.82)));
-  c.solid.add(c.P.cyl(24), '#e0b98d', at(mtx(0, 0.4, 0, 0, 2.62, 0.08, 2.62)));
+  c.seats.add(c.P.cyl(24), '#8a6a52', at(mtx(0, 0.18, 0, 0, 2.82, 0.36, 2.82)));
+  c.seats.add(c.P.cyl(24), '#e0b98d', at(mtx(0, 0.4, 0, 0, 2.62, 0.08, 2.62)));
   for (let i = -6; i <= 6; i++) {
     const x = i * 0.4;
     const chord = 2 * Math.sqrt(Math.max(0, 2.62 * 2.62 - x * x)) - 0.12;
-    c.solid.add(c.P.box(), '#c49a6c', at(mtx(x, 0.445, 0, 0, 0.025, 0.01, chord)));
+    c.seats.add(c.P.box(), '#c49a6c', at(mtx(x, 0.445, 0, 0, 0.025, 0.01, chord)));
   }
-  c.solid.add(c.P.rbox(1.9, 0.14, 0.5, 0.03), '#b9b2a6', at(mtx(0, 0.07, 3.0)));
-  c.solid.add(c.P.rbox(1.9, 0.27, 0.42, 0.03), '#c9c2b6', at(mtx(0, 0.135, 2.62)));
+  c.seats.add(c.P.rbox(1.9, 0.14, 0.5, 0.03), '#b9b2a6', at(mtx(0, 0.07, 3.0)));
+  c.seats.add(c.P.rbox(1.9, 0.27, 0.42, 0.03), '#c9c2b6', at(mtx(0, 0.135, 2.62)));
   for (const pole of stagePoles()) {
     c.occ?.push({ x: pole.x, z: pole.z, r: 0.2, h: STAGE_POLE_HEIGHT + 0.2 });
     c.solid.add(c.P.cyl(8), '#6b4f3a', mtx(pole.x, STAGE_POLE_HEIGHT / 2, pole.z, 0, 0.07, STAGE_POLE_HEIGHT, 0.07));
@@ -861,7 +863,7 @@ export function buildTown(quality: 'low' | 'high', options: TownOptions = {}): T
   const terrainAt = options.terrainAt;
   const inFlat = (x: number, z: number) => horizon || Math.hypot(x, z) < 34.5;
   const ctx: Ctx = {
-    solid: new Batch(), detail: new Batch(), far: new Batch(), flat: new Batch(), glass: new Batch(), bulbs: new Batch(),
+    solid: new Batch(), detail: new Batch(), far: new Batch(), flat: new Batch(), glass: new Batch(), bulbs: new Batch(), seats: new Batch(),
     P: new Prims(low), r: rng(20261102), space: new Space(), q, lamps: [], chimneys: [], signs: [], occ: [],
   };
   const c = ctx;
@@ -1020,7 +1022,7 @@ export function buildTown(quality: 'low' | 'high', options: TownOptions = {}): T
   });
 
   const out: TownGeometry = {
-    solid: c.solid.build(), detail: c.detail.build(), far: c.far.build(), flat: c.flat.build(), glass: c.glass.build(), bulbs: c.bulbs.build(),
+    solid: c.solid.build(), seats: c.seats.build(), detail: c.detail.build(), far: c.far.build(), flat: c.flat.build(), glass: c.glass.build(), bulbs: c.bulbs.build(),
     ground: buildGround(q, horizon, terrainAt), lamps: c.lamps, chimneys: c.chimneys, signs: c.signs, occluders: c.occ ?? [],
   };
   c.P.dispose();
@@ -1051,7 +1053,7 @@ export function poiAt(x: number, z: number): string | null {
  */
 export function buildOverlayProps(): THREE.BufferGeometry {
   const c: Ctx = {
-    solid: new Batch(), detail: new Batch(), far: new Batch(), flat: new Batch(), glass: new Batch(), bulbs: new Batch(),
+    solid: new Batch(), detail: new Batch(), far: new Batch(), flat: new Batch(), glass: new Batch(), bulbs: new Batch(), seats: new Batch(),
     P: new Prims(), r: rng(7), space: new Space(), q: 0.5, lamps: [], chimneys: [], signs: [],
   };
   for (const poi of POIS) {
@@ -1066,18 +1068,18 @@ export function buildOverlayProps(): THREE.BufferGeometry {
     for (let i = 0; i + 1 < cafe.seats.length; i += 2) {
       const s1 = cafe.seats[i]!, s2 = cafe.seats[i + 1]!;
       const tx = (s1.x + s2.x) / 2, tz = (s1.z + s2.z) / 2;
-      c.solid.add(c.P.cyl(14), '#fbf7ef', mtx(tx, 0.76, tz, 0, 0.55, 0.05, 0.55));
-      c.solid.add(c.P.cyl(8), '#3d3a36', mtx(tx, 0.38, tz, 0, 0.05, 0.76, 0.05));
+      c.seats.add(c.P.cyl(14), '#fbf7ef', mtx(tx, 0.76, tz, 0, 0.55, 0.05, 0.55));
+      c.seats.add(c.P.cyl(8), '#3d3a36', mtx(tx, 0.38, tz, 0, 0.05, 0.76, 0.05));
       addChair(c, s1.x, s1.z, s1.facing, '#4e8f7a');
       addChair(c, s2.x, s2.z, s2.facing, '#d9644f');
     }
   }
   const st = getPoi('stage');
   if (st) {
-    c.solid.add(c.P.cyl(24), '#8a6a52', mtx(st.position.x, 0.18, st.position.z, 0, 2.82, 0.36, 2.82));
-    c.solid.add(c.P.cyl(24), '#e0b98d', mtx(st.position.x, 0.4, st.position.z, 0, 2.62, 0.08, 2.62));
+    c.seats.add(c.P.cyl(24), '#8a6a52', mtx(st.position.x, 0.18, st.position.z, 0, 2.82, 0.36, 2.82));
+    c.seats.add(c.P.cyl(24), '#e0b98d', mtx(st.position.x, 0.4, st.position.z, 0, 2.62, 0.08, 2.62));
   }
-  const g = c.solid.build();
+  const g = c.seats.build();
   c.P.dispose();
   return g;
 }

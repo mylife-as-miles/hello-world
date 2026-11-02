@@ -28,7 +28,7 @@ export function Town({ quality, onLocationSelect, horizon = true, reservedTrees,
   const kit = useKit();
   const town = useMemo(() => buildTown(quality, { horizon, reservedTrees, occupied, terrainAt, farTrees }), [quality, horizon, reservedTrees, occupied, terrainAt, farTrees]);
   useEffect(() => () => {
-    for (const g of [town.solid, town.detail, town.far, town.flat, town.glass, town.bulbs, town.ground]) g.dispose();
+    for (const g of [town.solid, town.seats, town.detail, town.far, town.flat, town.glass, town.bulbs, town.ground]) g.dispose();
   }, [town]);
   useEffect(() => {
     kit.occluders = town.occluders;
@@ -64,6 +64,7 @@ export function Town({ quality, onLocationSelect, horizon = true, reservedTrees,
       <mesh geometry={town.flat} material={kit.ground} receiveShadow />
       <mesh geometry={plaza.geo} material={plaza.mat} position={[0, 0.052, 0]} receiveShadow />
       <mesh geometry={town.solid} material={kit.solid} castShadow receiveShadow />
+      <mesh geometry={town.seats} material={kit.solidKeep} castShadow receiveShadow />
       <mesh geometry={town.detail} material={kit.solid} receiveShadow />
       <mesh geometry={town.far} material={kit.solid} />
       <mesh geometry={town.glass} material={kit.glass} receiveShadow />

@@ -62,10 +62,11 @@ function planLines(w: World, kind: EncounterKind, A: Agent, B: Agent, positive: 
     return { lines: out, topicLabel: topic, quote: out[0]!.text };
   }
   if (kind === 'makeup') {
-    out.push({ speaker: 'a', kind: 'social', text: lines.apology(w, A, varsA), payload: { action: 'compliment', sentiment: 'positive', reaction: 'apology' }, speakerActivity: `chatting with ${B.displayName}` });
+    const pk = pairKey(A.id, B.id);
+    out.push({ speaker: 'a', kind: 'social', text: lines.apology(w, A, varsA, pk), payload: { action: 'compliment', sentiment: 'positive', reaction: 'apology' }, speakerActivity: `chatting with ${B.displayName}` });
     out.push(positive
-      ? { speaker: 'b', kind: 'chat', text: lines.apologyReply(w, B, true, varsB), payload: { sentiment: 'positive', reaction: 'make-up' }, speakerActivity: `laughing with ${A.displayName}`, listenerActivity: `laughing with ${B.displayName}` }
-      : { speaker: 'b', kind: 'social', text: lines.apologyReply(w, B, false, varsB), payload: { action: 'greet', sentiment: 'negative', reaction: 'make-up' } });
+      ? { speaker: 'b', kind: 'chat', text: lines.apologyReply(w, B, true, varsB, pk), payload: { sentiment: 'positive', reaction: 'make-up' }, speakerActivity: `laughing with ${A.displayName}`, listenerActivity: `laughing with ${B.displayName}` }
+      : { speaker: 'b', kind: 'social', text: lines.apologyReply(w, B, false, varsB, pk), payload: { action: 'greet', sentiment: 'negative', reaction: 'make-up' } });
     return { lines: out, topicLabel: 'making up', quote: out[1]!.text };
   }
   if (kind === 'befriend') {
@@ -158,7 +159,7 @@ function finishEncounter(w: World, enc: Encounter, A: Agent, B: Agent): void {
   if (enc.kind === 'makeup') memory = memoryLine(w, 'makeup', enc.positive, mv);
   if (memory) addMemory(w, A, B, memory);
   const key = pairKey(A.id, B.id);
-  if (enc.kind === 'bicker') w.feuds.set(key, { at: w.simTime, a: A.id, b: B.id, attempts: 0 });
+  if (enc.kind === 'bicker') { w.feuds.set(key, { at: w.simTime, a: A.id, b: B.id, attempts: 0 }); w.clashAt.set(key, w.simTime); }
   else if (enc.kind === 'makeup' && !enc.positive) { const f = w.feuds.get(key); w.feuds.set(key, { at: w.simTime, a: A.id, b: B.id, attempts: (f?.attempts ?? 0) + 1 }); }
   feel(A, enc.positive ? 0.25 : -0.15);
   feel(B, enc.positive ? 0.2 : -0.1);
@@ -286,7 +287,8 @@ export function directSocial(w: World): void {
 /** Feuds cool off, then the warmer resident walks over to apologise (arcs: clash → make-up). */
 function makeUps(w: World): boolean {
   for (const [key, f] of [...w.feuds]) {
-    if (w.simTime - f.at < 75) continue;
+    // First apology after ~75 s; after a refusal wait ≥ 3 game hours.
+    if (w.simTime - f.at < (f.attempts > 0 ? 180 : 75)) continue;
     const A = w.agents.get(f.a), B = w.agents.get(f.b);
     if (!A || !B || f.attempts >= 2) { w.feuds.delete(key); continue; }
     if (!socialAvailable(w, A) || !socialAvailable(w, B) || isSleeping(A) || isSleeping(B) || dist(A, B) > 30) continue;
@@ -304,10 +306,11 @@ function friction(w: World): boolean {
   const list = [...w.agents.values()].filter(a => !a.visitor && socialAvailable(w, a) && !isSleeping(a));
   for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
     const a = list[i]!, b = list[j]!;
-    if (dist(a, b) > 9 || !hasConflict(a.personality, b.personality) || w.feuds.has(pairKey(a.id, b.id))) continue;
+    const pk = pairKey(a.id, b.id);
+    if (dist(a, b) > 9 || !hasConflict(a.personality, b.personality) || w.feuds.has(pk) || w.simTime - (w.clashAt.get(pk) ?? -1e9) < 360) continue;
     const f = friendshipOf(w, a.id, b.id) ?? 45;
     if (f < 15 || f > 75) continue; // never pile on enemies, never break up close friends
-    const s = a.temperament.grumpiness + b.temperament.grumpiness + (1 - (a.mood + b.mood) / 2) * 0.5 + pairNoise(w, a, b) * 0.3;
+    const s = a.temperament.grumpiness + b.temperament.grumpiness + (1 - (a.mood + b.mood) / 2) * 0.5 + pairNoise(w, a, b) * 0.3 - (w.clashAt.has(pk) ? 0.6 : 0);
     if (!best || s > best.s) best = { a, b, s };
   }
   if (!best) { w.nextFrictionAt = w.simTime + 10; return false; }

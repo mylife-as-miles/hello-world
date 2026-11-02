@@ -42,9 +42,12 @@ export interface ResidentsLayerProps {
 }
 
 const TELEPORT_DISTANCE = 8;
-/** Max simultaneous speech bubbles (nearest/newest win; viewer's own always first). */
+/** Max simultaneous speech bubbles: world high / world low / overlay. Over the cap the OLDEST collapse into "Name …". */
 const BUBBLE_MAX_VISIBLE = 6;
-const BUBBLE_MAX_VISIBLE_LOW = 4;
+const BUBBLE_MAX_VISIBLE_LOW = 5;
+const BUBBLE_MAX_VISIBLE_OVERLAY = 3;
+/** Vertical gap (px) between stacked bubbles. */
+const BUBBLE_STACK_GAP = 6;
 const BUBBLE_MAX_DISTANCE = 45;
 /** On-screen bubble scale clamp (base text 14 px → never below 14 px, never huge up close). */
 const BUBBLE_MIN_SCALE = 1;
@@ -133,18 +136,30 @@ function safeIdPart(s: string): string {
 }
 interface BubbleData { key: number; text: string; name: string; start: number; duration: number; sim: boolean }
 
+/** Per-bubble layout state (allocated once per bubble, mutated per frame). */
+interface BubbleLayout {
+  el: HTMLDivElement | null;
+  /** Unscaled size (px), measured once. */
+  w: number; h: number;
+  sc: number; dx: number; dy: number; dyT: number;
+  /** Anchor in client px (this frame). */
+  x: number; y: number;
+  cls: number; start: number;
+  vis: boolean; shown: boolean; placedOnce: boolean;
+  /** Last written CSS values (NaN = force write). */
+  wsc: number; wdx: number; wdy: number; wop: number;
+}
+
 class BubbleHub {
   private subs = new Map<string, (b: BubbleData | null) => void>();
   readonly active = new Map<string, BubbleData>();
-  readonly els = new Map<string, HTMLDivElement>();
-  /** Unscaled bubble size (px), measured once per bubble. */
-  readonly sizes = new Map<string, { w: number; h: number }>();
-  /** Last on-screen scale written to each bubble. */
-  readonly scale = new Map<string, number>();
-  /** Horizontal offset (px) applied to dodge the inspector card. */
-  readonly dx = new Map<string, number>();
+  readonly layout = new Map<string, BubbleLayout>();
+  /** Active bubble ids (insertion order), iterated per frame without allocation. */
+  readonly list: string[] = [];
   /** Ids whose bubble is currently visible (their nameplate hides meanwhile). */
   readonly shown = new Set<string>();
+  /** Ids whose bubble is active but collapsed (over the cap / no room): nameplate shows "Name …". */
+  readonly collapsed = new Set<string>();
   private seq = 0;
   subscribe(id: string, cb: (b: BubbleData | null) => void): () => void {
     this.subs.set(id, cb);
@@ -156,14 +171,35 @@ class BubbleHub {
     const duration = Math.min(7, Math.max(5, 3.6 + text.length / 30));
     const b: BubbleData = { key: ++this.seq, text, name, start: now, duration, sim };
     this.active.set(id, b);
-    this.sizes.delete(id);
+    let L = this.layout.get(id);
+    if (!L) {
+      L = { el: null, w: 0, h: 0, sc: 1, dx: 0, dy: 0, dyT: 0, x: 0, y: 0, cls: 2, start: now, vis: false, shown: false, placedOnce: false, wsc: NaN, wdx: NaN, wdy: NaN, wop: NaN };
+      this.layout.set(id, L);
+    }
+    L.el = null; L.w = 0; L.h = 0; L.dx = 0; L.dy = 0; L.dyT = 0; L.start = now; L.placedOnce = false;
+    L.wsc = NaN; L.wdx = NaN; L.wdy = NaN; L.wop = NaN;
+    if (this.list.indexOf(id) < 0) this.list.push(id);
     this.subs.get(id)?.(b);
     return duration;
   }
   tick(now: number) {
-    for (const [id, b] of this.active) {
-      if (now - b.start > b.duration) { this.active.delete(id); this.els.delete(id); this.sizes.delete(id); this.scale.delete(id); this.dx.delete(id); this.shown.delete(id); this.subs.get(id)?.(null); }
+    for (let i = this.list.length - 1; i >= 0; i--) {
+      const id = this.list[i]!;
+      const b = this.active.get(id);
+      if (b && now - b.start <= b.duration) continue;
+      this.list.splice(i, 1);
+      this.active.delete(id); this.layout.delete(id); this.shown.delete(id); this.collapsed.delete(id);
+      this.subs.get(id)?.(null);
     }
+  }
+}
+
+function insertionSort<T>(a: T[], n: number, cmp: (x: T, y: T) => number) {
+  for (let i = 1; i < n; i++) {
+    const v = a[i]!;
+    let j = i - 1;
+    while (j >= 0 && cmp(a[j]!, v) > 0) { a[j + 1] = a[j]!; j--; }
+    a[j + 1] = v;
   }
 }
 
@@ -196,11 +232,12 @@ function ensureStyles() {
   const s = document.createElement('style');
   s.dataset.helloWorld = 'residents';
   s.textContent = `
-.hw-bubble{--s:1;--dx:0px;position:relative;transform-origin:50% 100%;transform:translateX(var(--dx)) translateY(-100%) scale(var(--s));width:max-content;max-width:230px;min-width:96px;padding:8px 12px 9px;border-radius:16px;
+.hw-bubble{--s:1;--dx:0px;--dy:0px;--stem:0px;position:relative;transform-origin:50% 100%;transform:translate(var(--dx),var(--dy)) translateY(-100%) scale(var(--s));width:max-content;max-width:230px;min-width:96px;padding:8px 12px 9px;border-radius:16px;
 background:linear-gradient(180deg,rgba(255,255,255,.97),rgba(244,247,250,.95));color:#1d2329;box-shadow:0 6px 22px rgba(10,20,30,.28),0 1px 0 rgba(255,255,255,.6) inset;
 font:500 14px/1.32 ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;letter-spacing:.005em;white-space:normal;word-wrap:break-word;overflow-wrap:anywhere;
-pointer-events:none;user-select:none;animation:hw-bubble-in .32s cubic-bezier(.2,1.4,.4,1) backwards;transition:opacity .3s ease,transform .18s ease-out}
+pointer-events:none;user-select:none;animation:hw-bubble-in .32s cubic-bezier(.2,1.4,.4,1) backwards;transition:opacity .3s ease}
 .hw-bubble::after{content:'';position:absolute;left:calc(50% - var(--dx) / var(--s));bottom:-7px;width:14px;height:14px;margin-left:-7px;background:#f4f7fa;transform:rotate(45deg);border-radius:0 0 4px 0;box-shadow:3px 3px 6px rgba(10,20,30,.12)}
+.hw-bubble .hw-stem{position:absolute;top:100%;left:calc(50% - var(--dx) / var(--s));width:2px;margin-left:-1px;height:var(--stem);background:linear-gradient(rgba(255,255,255,.95),rgba(255,255,255,.6));border-radius:1px;box-shadow:0 0 2px rgba(10,20,30,.25)}
 .hw-bubble .hw-name{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font:700 11px/1.2 ui-sans-serif,system-ui,sans-serif;letter-spacing:.06em;text-transform:uppercase;color:#7a5cff;margin-bottom:2px}
 .hw-bubble.hw-sim .hw-name{color:#2f9e8a}
 .hw-bubble.hw-me{background:linear-gradient(180deg,#ffffff,#effffa);box-shadow:0 0 0 2.5px #5ef2c6,0 8px 26px rgba(10,20,30,.34)}
@@ -210,7 +247,7 @@ pointer-events:none;user-select:none;animation:hw-bubble-in .32s cubic-bezier(.2
 .hw-plate{position:absolute;left:0;top:0;transform:translate3d(-9999px,0,0);padding:2px 9px 3px;border-radius:999px;background:rgba(12,16,20,.86);border:1.5px solid rgba(255,255,255,.28);color:#fff;font:650 12.5px/1.25 ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;white-space:nowrap;max-width:240px;overflow:hidden;text-overflow:ellipsis;will-change:transform;user-select:none}
 .hw-plate.hw-me{border-color:rgba(94,242,198,.85)}
 .hw-plate.hw-chip{border-color:rgba(195,155,255,.85)}
-@keyframes hw-bubble-in{from{opacity:0;transform:translateX(var(--dx)) translateY(-92%) scale(calc(var(--s) * .85))}to{opacity:1;transform:translateX(var(--dx)) translateY(-100%) scale(var(--s))}}
+@keyframes hw-bubble-in{from{transform:translate(var(--dx),var(--dy)) translateY(-92%) scale(calc(var(--s) * .85))}to{transform:translate(var(--dx),var(--dy)) translateY(-100%) scale(var(--s))}}
 `;
   document.head.appendChild(s);
 }
@@ -307,7 +344,9 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
     const root = document.createElement('div');
     root.className = 'hw-plates';
     const els = Array.from({ length: NAMEPLATE_MAX_VISIBLE_LOW + 2 }, () => { const d = document.createElement('div'); d.className = 'hw-plate'; d.style.display = 'none'; root.appendChild(d); return d; });
-    return { root, els, keys: els.map(() => ''), assigned: [] as Array<{ h: ResidentHandle | null; chip: RaidChip | null }> };
+    const m = els.length;
+    return { root, els, n: 0, aH: new Array<ResidentHandle | null>(m).fill(null), aC: new Array<RaidChip | null>(m).fill(null),
+      kH: new Array<ResidentHandle | null>(m).fill(null), kC: new Array<RaidChip | null>(m).fill(null), kCol: new Array<boolean>(m).fill(false), kText: new Array<string>(m).fill('') };
   }, [quality]);
   useEffect(() => {
     if (!domPlates) return;
@@ -320,7 +359,11 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
   useEffect(() => () => gifts.dispose(), [gifts]);
   useEffect(() => { ensureStyles(); }, []);
 
-  const clock = useRef({ now: 0, lodTimer: 0, bubbleTimer: 0, plateTimer: 0, bubbleCount: 0 });
+  const clock = useRef({ now: 0, lodTimer: 0, bubbleTimer: 0, plateTimer: 0, bubbleCount: 0, rectAt: -1, crL: 0, crT: 0, W: 1, H: 1, hasInsp: false, insL: 0, insR: 0, insT: 0, insB: 0 });
+  /** Registered residents as an array (allocation-free per-frame iteration). */
+  const handleList = useMemo(() => [] as ResidentHandle[], []);
+  const bubbleCands = useMemo(() => [] as string[], []);
+  const bubblePlace = useMemo(() => [] as string[], []);
   const pendingGifts = useMemo(() => [] as Array<{ actor: string; target: string; until: number }>, []);
   /** Recently flown gift arcs (giver→receiver) so a late 'thanks' after a fallback doesn't fly twice. */
   const recentGifts = useMemo(() => [] as Array<{ giver: string; receiver: string; at: number }>, []);
@@ -477,6 +520,8 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
   const raidGroups = useMemo(() => new Map<string, ResidentHandle[]>(), []);
   const raidChannels = useMemo(() => new Map<string, string>(), []);
   const plateCands = useMemo(() => [] as PlateCand[], []);
+  const plateCandPool = useMemo(() => [] as PlateCand[], []);
+  const cmpCand = (a: PlateCand, b: PlateCand) => a.score - b.score;
 
   const raidChannel = (group: string): string => {
     let ch = raidChannels.get(group);
@@ -539,36 +584,59 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
 
   /** Greedy screen-space label selection: viewer > selected > raid chip > recent actor > nearest; shown bubbles block. */
   const declutterPlates = () => {
-    const cr = gl.domElement.getBoundingClientRect();
-    const W = cr.width, H = cr.height;
-    plateCands.length = 0;
-    const project = (x: number, y: number, z: number) => { _v.set(x, y, z).project(camera); return _v.z <= 1; };
-    for (const h of registry.values()) {
-      if (!h.plateCand) { h.plateAllowed = false; continue; }
-      if (!project(h.pos.x, h.pos.y + h.plateY, h.pos.z)) { h.plateAllowed = false; continue; }
-      const age = clock.current.now - h.lastActorAt;
+    const c = clock.current;
+    const W = c.W, H = c.H;
+    let nCand = 0;
+    const take = () => {
+      let cnd = plateCandPool[nCand];
+      if (!cnd) { cnd = { h: null, chip: null, x: 0, y: 0, w: 0, hh: 0, score: 0 }; plateCandPool[nCand] = cnd; }
+      plateCands[nCand] = cnd; nCand++;
+      return cnd;
+    };
+    for (let i = 0; i < handleList.length; i++) {
+      const h = handleList[i]!;
+      if (!h.plateCand) { h.plateAllowed = false; h.plateNudgePx = 0; continue; }
+      _v.set(h.pos.x, h.pos.y + h.plateY, h.pos.z).project(camera);
+      if (_v.z > 1) { h.plateAllowed = false; continue; }
+      const age = c.now - h.lastActorAt;
       const score = h.id === viewerResidentId ? -1e6 : h.id === selectedResidentId ? -5e5
-        : age < 10 ? -1e4 + age * 100 : h.pos.distanceTo(camera.position);
-      plateCands.push({ h, chip: null, x: cr.left + ((_v.x + 1) / 2) * W, y: cr.top + ((1 - _v.y) / 2) * H, w: h.platePx * h.plateAspect, hh: h.platePx, score });
+        : hub.collapsed.has(h.id) ? -3e4 : age < 10 ? -1e4 + age * 100 : h.pos.distanceTo(camera.position);
+      const cnd = take();
+      cnd.h = h; cnd.chip = null; cnd.x = c.crL + ((_v.x + 1) / 2) * W; cnd.y = c.crT + ((1 - _v.y) / 2) * H;
+      cnd.w = h.platePx * h.plateAspect; cnd.hh = h.platePx; cnd.score = score;
     }
-    for (const chip of raidChips) {
+    for (let i = 0; i < raidChips.length; i++) {
+      const chip = raidChips[i]!;
       chip.allowed = false;
-      if (!chip.active || !project(chip.pos.x, chip.pos.y, chip.pos.z)) continue;
-      plateCands.push({ h: null, chip, x: cr.left + ((_v.x + 1) / 2) * W, y: cr.top + ((1 - _v.y) / 2) * H, w: chip.px * chip.aspect, hh: chip.px, score: -2e5 });
+      if (!chip.active) continue;
+      _v.set(chip.pos.x, chip.pos.y, chip.pos.z).project(camera);
+      if (_v.z > 1) continue;
+      const cnd = take();
+      cnd.h = null; cnd.chip = chip; cnd.x = c.crL + ((_v.x + 1) / 2) * W; cnd.y = c.crT + ((1 - _v.y) / 2) * H;
+      cnd.w = chip.px * chip.aspect; cnd.hh = chip.px; cnd.score = -2e5;
     }
-    plateCands.sort((a, b) => a.score - b.score);
+    insertionSort(plateCands, nCand, cmpCand);
     let shownPlates = 0;
-    if (domPlates) domPlates.assigned.length = 0;
-    const nb = clock.current.bubbleCount;
-    for (const cnd of plateCands) {
+    if (domPlates) domPlates.n = 0;
+    const nb = c.bubbleCount;
+    const cap = quality === 'low' ? NAMEPLATE_MAX_VISIBLE_LOW : NAMEPLATE_MAX_VISIBLE;
+    for (let ci = 0; ci < nCand; ci++) {
+      const cnd = plateCands[ci]!;
       const l = cnd.x - cnd.w / 2 - 2, r = cnd.x + cnd.w / 2 + 2;
       let t = cnd.y - cnd.hh / 2 - 1, b = cnd.y + cnd.hh / 2 + 1;
-      let ok = shownPlates < (quality === 'low' ? NAMEPLATE_MAX_VISIBLE_LOW : NAMEPLATE_MAX_VISIBLE);
-      // Under a speech bubble: nudge the label just below it instead of hiding it.
+      let ok = shownPlates < cap;
+      // Clear of ALL bubbles: nudge the label just below the overlapping bubble(s), else hide.
       let nudge = 0;
-      for (let k = 0; ok && k < nb; k++) {
-        const o = k * 4;
-        if (r > shownRects[o]! && l < shownRects[o + 1]! && b > shownRects[o + 2]! && t < shownRects[o + 3]!) nudge = Math.max(nudge, shownRects[o + 3]! + 3 - t);
+      for (let iter = 0; ok && iter < 4; iter++) {
+        let moved = false;
+        for (let k = 0; k < nb; k++) {
+          const o = k * 4;
+          if (r > shownRects[o]! && l < shownRects[o + 1]! && b + nudge > shownRects[o + 2]! && t + nudge < shownRects[o + 3]!) {
+            nudge = shownRects[o + 3]! + 3 - t;
+            moved = true;
+          }
+        }
+        if (!moved) break;
       }
       if (nudge > 0) {
         t += nudge; b += nudge;
@@ -584,9 +652,112 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
       }
       if (cnd.h) { cnd.h.plateAllowed = ok; cnd.h.plateNudgePx = ok ? nudge : 0; }
       else if (cnd.chip) { cnd.chip.allowed = ok; cnd.chip.nudgePx = ok ? nudge : 0; }
-      if (ok && domPlates && domPlates.assigned.length < domPlates.els.length) domPlates.assigned.push({ h: cnd.h, chip: cnd.chip });
+      if (ok && domPlates && domPlates.n < domPlates.els.length) { domPlates.aH[domPlates.n] = cnd.h; domPlates.aC[domPlates.n] = cnd.chip; domPlates.n++; }
       if (ok && shownPlates < 16) { const o = shownPlates * 4; plateRects[o] = l; plateRects[o + 1] = r; plateRects[o + 2] = t; plateRects[o + 3] = b; }
       if (ok) shownPlates++;
+    }
+  };
+
+
+  /** Selection order: class (viewer > viewer/twitch chat or selected > sim chatter), then NEWEST first. */
+  const cmpSelect = (a: string, b: string) => {
+    const A = hub.layout.get(a)!, B = hub.layout.get(b)!;
+    return A.cls !== B.cls ? A.cls - B.cls : B.start - A.start;
+  };
+  /** Placement order (stable, so no stacking jitter): class, then OLDEST first; later bubbles stack above. */
+  const cmpPlace = (a: string, b: string) => {
+    const A = hub.layout.get(a)!, B = hub.layout.get(b)!;
+    return A.cls !== B.cls ? A.cls - B.cls : A.start - B.start;
+  };
+
+  /**
+   * Per-frame speech-bubble layout (allocation-free): readable scale, cap with
+   * collapse-oldest, inspector dodge, and upward stacking so bubbles never overlap.
+   */
+  const layoutBubbles = (dt: number) => {
+    const c = clock.current;
+    const list = hub.list;
+    c.bubbleCount = 0;
+    if (!list.length) return;
+    const cap = overlayRef.current ? BUBBLE_MAX_VISIBLE_OVERLAY : quality === 'low' ? BUBBLE_MAX_VISIBLE_LOW : BUBBLE_MAX_VISIBLE;
+    let nc = 0;
+    for (let i = 0; i < list.length; i++) {
+      const id = list[i]!;
+      const L = hub.layout.get(id), b = hub.active.get(id), h = registry.get(id);
+      if (!L || !b) continue;
+      L.vis = false; L.shown = false;
+      if (!h || !L.el || !h.visible) continue;
+      const d = h.pos.distanceTo(camera.position);
+      if (d > (id === viewerResidentId ? 70 : BUBBLE_MAX_DISTANCE)) continue;
+      _v.set(h.pos.x, h.pos.y + h.height + 0.42, h.pos.z).project(camera);
+      if (_v.z > 1) continue;
+      L.x = c.crL + ((_v.x + 1) / 2) * c.W; L.y = c.crT + ((1 - _v.y) / 2) * c.H;
+      L.sc = Math.min(BUBBLE_MAX_SCALE, Math.max(BUBBLE_MIN_SCALE, BUBBLE_SCALE_DISTANCE / Math.max(0.5, d))) * (id === viewerResidentId ? 1.08 : 1);
+      if (!L.w && L.el.offsetWidth > 0) { L.w = L.el.offsetWidth; L.h = L.el.offsetHeight; }
+      L.cls = id === viewerResidentId ? 0 : (!b.sim || id === selectedResidentId) ? 1 : 2;
+      L.start = b.start;
+      L.vis = true;
+      bubbleCands[nc++] = id;
+    }
+    insertionSort(bubbleCands, nc, cmpSelect);
+    let np = 0;
+    for (let i = 0; i < nc && np < cap; i++) bubblePlace[np++] = bubbleCands[i]!;
+    insertionSort(bubblePlace, np, cmpPlace);
+    let n = 0;
+    for (let i = 0; i < np; i++) {
+      const L = hub.layout.get(bubblePlace[i]!)!;
+      const w = (L.w || 160) * L.sc, hh = ((L.h || 48) + 8) * L.sc;
+      let l = L.x - w / 2, r = L.x + w / 2;
+      const bt = L.y, t = L.y - hh;
+      // Dodge the inspector card sideways (tail/stem keep pointing at the speaker).
+      let dx = 0;
+      if (c.hasInsp && r > c.insL && l < c.insR && bt > c.insT && t < c.insB) {
+        dx = c.insL - 8 - r;
+        if (-dx > w / 2 - 18 * L.sc || l + dx < c.crL) continue;   // no room: collapsed
+        l += dx; r += dx;
+      }
+      // Stack upward until clear of every placed bubble.
+      let dy = 0;
+      for (let iter = 0; iter < 10; iter++) {
+        let moved = false;
+        for (let k = 0; k < n; k++) {
+          const o = k * 4;
+          if (r > shownRects[o]! + 2 && l < shownRects[o + 1]! - 2 && bt + dy > shownRects[o + 2]! && t + dy < shownRects[o + 3]!) {
+            dy = shownRects[o + 2]! - BUBBLE_STACK_GAP - bt;
+            moved = true;
+          }
+        }
+        if (!moved) break;
+      }
+      if (t + dy < c.crT + 4 || n >= 16) continue;                  // no room above: collapsed
+      L.shown = true; L.dx = dx; L.dyT = dy;
+      const o = n * 4;
+      shownRects[o] = l; shownRects[o + 1] = r; shownRects[o + 2] = t + dy; shownRects[o + 3] = bt + dy;
+      n++;
+    }
+    c.bubbleCount = n;
+    const k = 1 - Math.exp(-dt * 14);
+    for (let i = 0; i < list.length; i++) {
+      const id = list[i]!;
+      const L = hub.layout.get(id), b = hub.active.get(id);
+      if (!L || !b || !L.el) continue;
+      const fading = c.now - b.start > b.duration - 0.5;
+      const show = L.vis && L.shown && !fading;
+      if (show) { hub.shown.add(id); hub.collapsed.delete(id); }
+      else { hub.shown.delete(id); if (L.vis && !fading) hub.collapsed.add(id); else hub.collapsed.delete(id); }
+      if (show) {
+        if (!L.placedOnce) { L.dy = L.dyT; L.placedOnce = true; } else L.dy += (L.dyT - L.dy) * k;
+      }
+      const el = L.el;
+      if (L.wsc !== L.wsc || Math.abs(L.sc - L.wsc) > 0.004) { L.wsc = L.sc; el.style.setProperty('--s', L.sc.toFixed(3)); }
+      if (L.wdx !== L.wdx || Math.abs(L.dx - L.wdx) > 0.5) { L.wdx = L.dx; el.style.setProperty('--dx', `${L.dx.toFixed(1)}px`); }
+      if (L.wdy !== L.wdy || Math.abs(L.dy - L.wdy) > 0.5) {
+        L.wdy = L.dy;
+        el.style.setProperty('--dy', `${L.dy.toFixed(1)}px`);
+        el.style.setProperty('--stem', `${Math.max(0, -L.dy / L.sc - 5).toFixed(1)}px`);
+      }
+      const op = show ? 1 : 0;
+      if (op !== L.wop) { L.wop = op; el.style.opacity = op ? '1' : '0'; }
     }
   };
 
@@ -617,7 +788,8 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
     // Blob shadows (quality 'low') for residents without real shadows.
     if (blob) {
       let n = 0;
-      for (const h of registry.values()) {
+      for (let i = 0; i < handleList.length; i++) {
+        const h = handleList[i]!;
         if (h.shadowOn || !h.visible || n >= BLOB_CAPACITY) continue;
         const k = h.height / 1.7;
         _bp.set(h.pos.x, h.pos.y + 0.025, h.pos.z); _bs.set(k, 1, k);
@@ -689,7 +861,8 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
     }
 
     // Raid chips follow their group; keep their on-screen size readable.
-    for (const chip of raidChips) {
+    for (let ci = 0; ci < raidChips.length; ci++) {
+      const chip = raidChips[ci]!;
       chip.sprite.visible = !domPlates && chip.active && chip.allowed;
       if (!chip.active) continue;
       const pxPerM = frameCacheLayer(state, camera) / Math.max(1, chip.pos.distanceTo(camera.position));
@@ -702,7 +875,7 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
 
     // Nameplate declutter + raid collapse (~10 Hz).
     if ((c.plateTimer -= dt) <= 0) {
-      c.plateTimer = 0.1;
+      c.plateTimer = 0.05;
       updateRaidGroups();
       declutterPlates();
     }
@@ -710,97 +883,39 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
       const W = state.size.width, H = state.size.height;
       for (let i = 0; i < domPlates.els.length; i++) {
         const el = domPlates.els[i]!;
-        const a = domPlates.assigned[i];
-        if (!a) { if (el.style.display !== 'none') el.style.display = 'none'; domPlates.keys[i] = ''; continue; }
-        const h = a.h, chip = a.chip;
+        const h = i < domPlates.n ? domPlates.aH[i]! : null, chip = i < domPlates.n ? domPlates.aC[i]! : null;
+        if (!h && !chip) { if (el.style.display !== 'none') el.style.display = 'none'; domPlates.kH[i] = null; domPlates.kC[i] = null; continue; }
         if (h) _v.set(h.pos.x, h.pos.y + h.plateY, h.pos.z); else if (chip) _v.copy(chip.pos);
         _v.project(camera);
         if (_v.z > 1) { el.style.display = 'none'; continue; }
-        const key = h ? `r:${h.id}` : `c:${chip?.text ?? ''}`;
-        if (domPlates.keys[i] !== key) {
-          domPlates.keys[i] = key;
-          el.textContent = h ? (store.getResident(h.id)?.displayName ?? '') : chip?.text ?? '';
+        const col = !!h && hub.collapsed.has(h.id);
+        if (domPlates.kH[i] !== h || domPlates.kC[i] !== chip || domPlates.kCol[i] !== col || (chip && chip.text !== domPlates.kText[i])) {
+          domPlates.kH[i] = h; domPlates.kC[i] = chip; domPlates.kCol[i] = col;
+          const label = h ? `${store.getResident(h.id)?.displayName ?? ''}${col ? ' …' : ''}` : chip?.text ?? '';
+          domPlates.kText[i] = label;
+          el.textContent = label;
           el.className = `hw-plate${h && h.id === viewerResidentId ? ' hw-me' : ''}${chip ? ' hw-chip' : ''}`;
         }
-        el.style.display = '';
+        if (el.style.display === 'none') el.style.display = '';
         const ny = h ? h.plateNudgePx : chip?.nudgePx ?? 0;
         el.style.transform = `translate3d(${(((_v.x + 1) / 2) * W).toFixed(1)}px,${(((1 - _v.y) / 2) * H + ny).toFixed(1)}px,0) translate(-50%,-50%)`;
       }
     }
 
+
     hub.tick(c.now);
-    if (hub.active.size) {
-      for (const [id, el] of hub.els) {
-        const h = registry.get(id);
-        if (!h) continue;
-        const d = Math.max(0.5, camera.position.distanceTo(_v.set(h.pos.x, h.pos.y + h.height, h.pos.z)));
-        const sc = Math.min(BUBBLE_MAX_SCALE, Math.max(BUBBLE_MIN_SCALE, BUBBLE_SCALE_DISTANCE / d)) * (id === viewerResidentId ? 1.08 : 1);
-        const prev = hub.scale.get(id) ?? 0;
-        if (Math.abs(sc - prev) > 0.004) { hub.scale.set(id, sc); el.style.setProperty('--s', sc.toFixed(3)); }
-      }
-    }
-    // Rank (viewer, selected, then newest/nearest), cap the count, skip bubbles that
-    // would overlap a higher-ranked one; slide (or skip) bubbles under the inspector card.
-    if (!hub.active.size) c.bubbleCount = 0;
-    if ((c.bubbleTimer -= dt) <= 0 && hub.active.size) {
-      c.bubbleTimer = 0.15;
-      const maxVisible = quality === 'low' ? BUBBLE_MAX_VISIBLE_LOW : BUBBLE_MAX_VISIBLE;
-      bubbleRank.length = 0;
-      for (const [id, b] of hub.active) {
-        const h = registry.get(id);
-        if (!h) continue;
-        const d = h.pos.distanceTo(camera.position);
-        const age = c.now - b.start;
-        // Viewer's own bubble first, then the selected resident, then newest/nearest.
-        const priority = id === viewerResidentId ? -1000 : id === selectedResidentId ? -500 : 0;
-        bubbleRank.push({ id, d, score: priority + d - (age < 1.5 ? 25 : 0) + age * 0.5 });
-      }
-      bubbleRank.sort((a, b) => a.score - b.score);
+    c.W = state.size.width; c.H = state.size.height;
+    if (c.now - c.rectAt > 0.25) {
+      // Cached DOM rects (4 Hz): no per-frame layout reads.
+      c.rectAt = c.now;
       const cr = gl.domElement.getBoundingClientRect();
+      c.crL = cr.left; c.crT = cr.top;
       const ir = findInspectorRect(gl.domElement);
-      let shown = 0;
-      for (const r of bubbleRank) {
-        const el = hub.els.get(r.id);
-        const b = hub.active.get(r.id);
-        const h = registry.get(r.id);
-        if (!el || !b || !h) continue;
-        let show = shown < maxVisible && r.d < (r.id === viewerResidentId ? 70 : BUBBLE_MAX_DISTANCE) && h.visible;
-        if (show) {
-          _v.set(h.pos.x, h.pos.y + h.height + 0.42, h.pos.z).project(camera);
-          if (_v.z > 1) show = false;
-          else {
-            let sz = hub.sizes.get(r.id);
-            if (!sz && el.offsetWidth > 0) { sz = { w: el.offsetWidth, h: el.offsetHeight }; hub.sizes.set(r.id, sz); }
-            const sc = hub.scale.get(r.id) ?? 1;
-            const w = (sz?.w ?? 160) * sc, hh = ((sz?.h ?? 48) + 8) * sc;
-            const x = cr.left + ((_v.x + 1) / 2) * cr.width, y = cr.top + ((1 - _v.y) / 2) * cr.height;
-            let l = x - w / 2, rt = x + w / 2;
-            const t = y - hh, bt = y;
-            // Dodge the inspector card: slide left (tail keeps pointing at the speaker), else skip.
-            let dx = 0;
-            if (ir && rt > ir.left && l < ir.right && bt > ir.top && t < ir.bottom) {
-              dx = ir.left - 8 - rt;
-              if (-dx > w / 2 - 18 * sc || l + dx < cr.left) { show = false; dx = 0; }
-              else { l += dx; rt += dx; }
-            }
-            if ((hub.dx.get(r.id) ?? 0) !== dx) { hub.dx.set(r.id, dx); el.style.setProperty('--dx', `${dx.toFixed(1)}px`); }
-            for (let k = 0; show && k < shown && k < 16; k++) {
-              const o = k * 4;
-              const ox = Math.min(rt, shownRects[o + 1]!) - Math.max(l, shownRects[o]!);
-              const oy = Math.min(bt, shownRects[o + 3]!) - Math.max(t, shownRects[o + 2]!);
-              // Any real overlap hides the lower-ranked bubble (text must never be covered).
-              if (ox > 6 && oy > 4) show = false;
-            }
-            if (show && shown < 16) { const o = shown * 4; shownRects[o] = l; shownRects[o + 1] = rt; shownRects[o + 2] = t; shownRects[o + 3] = bt; }
-          }
-        }
-        if (show) shown++;
-        c.bubbleCount = Math.min(16, shown);
-        const fadingOut = c.now - b.start > b.duration - 0.5;
-        el.style.opacity = show && !fadingOut ? '1' : '0';
-        if (show && !fadingOut) hub.shown.add(r.id); else hub.shown.delete(r.id);
-      }
+      c.hasInsp = !!ir;
+      if (ir) { c.insL = ir.left; c.insR = ir.right; c.insT = ir.top; c.insB = ir.bottom; }
     }
+    layoutBubbles(dt);
+
   });
 
   const ringGeo = useMemo(() => new THREE.RingGeometry(0.5, 0.62, 48), []);
@@ -811,7 +926,7 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
 
   return <group name="residents-layer">
     {structure.map(s => <Resident key={s.id} id={s.id} displayName={s.displayName} appearance={s.resident.appearance}
-      store={store} registry={registry} pending={pending} hub={hub} lodBus={lodBus} emotes={emotes} overlayRef={overlayRef} domPlates={!!domPlates} distress={distress}
+      store={store} registry={registry} pending={pending} hub={hub} lodBus={lodBus} emotes={emotes} overlayRef={overlayRef} domPlates={!!domPlates} distress={distress} handleList={handleList}
       isViewer={s.id === viewerResidentId} onSelect={onResidentSelect} />)}
     <primitive object={emotes.group} />
     {blob && <primitive object={blob.mesh} />}
@@ -840,6 +955,7 @@ interface ResidentProps {
   overlayRef: { readonly current: boolean };
   /** quality 'low': labels are DOM pills drawn by the layer; the sprite stays hidden. */
   domPlates: boolean;
+  handleList: ResidentHandle[];
   distress: DistressBudget;
   isViewer: boolean;
   onSelect?: (id: string) => void;
@@ -881,8 +997,13 @@ const Resident = memo(function Resident(p: ResidentProps) {
 
   useEffect(() => {
     registry.set(id, handle);
-    return () => { if (registry.get(id) === handle) registry.delete(id); };
-  }, [registry, id, handle]);
+    p.handleList.push(handle);
+    return () => {
+      if (registry.get(id) === handle) registry.delete(id);
+      const i = p.handleList.indexOf(handle);
+      if (i >= 0) p.handleList.splice(i, 1);
+    };
+  }, [registry, id, handle, p.handleList]);
 
   useEffect(() => {
     if (!rig) return;
@@ -907,6 +1028,10 @@ const Resident = memo(function Resident(p: ResidentProps) {
 
   const plate = useMemo(() => makeNameplateTexture(p.displayName, p.isViewer ? '#5ef2c6' : undefined), [p.displayName, p.isViewer]);
   useEffect(() => () => plate.texture.dispose(), [plate]);
+  /** "Name …" variant shown while this resident's bubble is collapsed (created lazily). */
+  const plateAlt = useRef<{ texture: THREE.CanvasTexture; aspect: number } | null>(null);
+  const plateCol = useRef(false);
+  useEffect(() => () => { plateAlt.current?.texture.dispose(); plateAlt.current = null; }, [plate]);
   // Labels draw on top of scenery (lamp posts/umbrellas must not cut names); declutter keeps them few.
   const plateMat = useMemo(() => new THREE.SpriteMaterial({ map: plate.texture, transparent: true, depthWrite: false, depthTest: false, opacity: 0.9, toneMapped: false }), [plate]);
   useEffect(() => () => plateMat.dispose(), [plateMat]);
@@ -1014,17 +1139,25 @@ const Resident = memo(function Resident(p: ResidentProps) {
     if (plateS) {
       const fade = 1 - Math.min(1, Math.max(0, (camDist - NAMEPLATE_SOLID) / (NAMEPLATE_FAR - NAMEPLATE_SOLID)));
       handle.plateCand = fade > 0.02 && handle.visible && !hub.shown.has(id) && !handle.raidCollapsed;
+      const col = hub.collapsed.has(id);
+      if (col !== plateCol.current && !p.domPlates) {
+        plateCol.current = col;
+        if (col && !plateAlt.current) plateAlt.current = makeNameplateTexture(`${p.displayName} …`, p.isViewer ? '#5ef2c6' : undefined);
+        plateMat.map = col && plateAlt.current ? plateAlt.current.texture : plate.texture;
+        plateMat.needsUpdate = true;
+      }
       plateS.visible = !p.domPlates && handle.plateCand && handle.plateAllowed;
       plateMat.opacity = fade;
       // Readable in wide shots: clamp the on-screen pill height, keep depth cue in between.
       const pxPerM = frameCache.pxk / Math.max(1, camDist);
       const px = Math.min(NAMEPLATE_MAX_PX, Math.max(NAMEPLATE_MIN_PX, NAMEPLATE_WORLD_H * pxPerM));
       const sc = px / pxPerM;
-      plateS.scale.set(sc * plate.aspect, sc, 1);
+      const aspect = plateCol.current && plateAlt.current ? plateAlt.current.aspect : plate.aspect;
+      plateS.scale.set(sc * aspect, sc, 1);
       const baseY = handle.height + 0.16 + sc * 0.55;
       // Declutter projects the un-nudged spot (no feedback loop); the sprite shows the nudged one.
       plateS.position.y = baseY - handle.plateNudgePx / pxPerM;
-      handle.platePx = px; handle.plateAspect = plate.aspect; handle.plateY = baseY;
+      handle.platePx = px; handle.plateAspect = aspect; handle.plateY = baseY;
     }
 
     const anim = handle.animator;
@@ -1088,11 +1221,13 @@ function SpeechBubble({ hub, id, height, isViewer }: { hub: BubbleHub; id: strin
   useEffect(() => hub.subscribe(id, setB), [hub, id]);
   if (!b) return null;
   const cls = `hw-bubble${b.sim ? ' hw-sim' : ''}${isViewer ? ' hw-me' : ''}`;
+  // Hidden until the layout pass places it (opacity is driven by the layer).
   return <Html position={[0, height + 0.42, 0]} center={false} zIndexRange={[30, 10]}
     style={{ pointerEvents: 'none', transform: 'translateX(-50%)' }}>
-    <div key={b.key} className={cls} style={{ ['--s' as string]: String(hub.scale.get(id) ?? 1) }}
-      ref={el => { if (el) { hub.els.set(id, el); hub.scale.delete(id); hub.dx.delete(id); } }}>
-      <span className="hw-name">{b.name}</span>{b.text}
+    <div key={b.key} className={cls} style={{ opacity: 0 }}
+      ref={el => { const L = hub.layout.get(id); if (el && L) { L.el = el; L.wsc = NaN; L.wdx = NaN; L.wdy = NaN; L.wop = NaN; } }}>
+      <span className="hw-name">{b.name}</span>{b.text}<i className="hw-stem" />
     </div>
   </Html>;
+
 }

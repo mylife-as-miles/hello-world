@@ -69,7 +69,7 @@ export type NeedKey = keyof Needs;
 export function attention(a: Agent, k: NeedKey): number {
   const v = a.needs[k];
   const p = a.personality;
-  if (k === 'energy' && p.includes('competitive') && v > 14) return p.includes('playful') || p.includes('chaotic') ? 0.4 : 0.55;
+  if (k === 'energy' && p.includes('competitive') && v >= 25) return p.includes('playful') || p.includes('chaotic') ? 0.4 : 0.55;
   if (k === 'social' && (p.includes('bookish') || p.includes('shy') || p.includes('grumpy')) && v > 12) return 0.45;
   if (k === 'fun' && (p.includes('lazy') || p.includes('bookish')) && v > 12) return 0.35;
   return 1;
@@ -88,9 +88,14 @@ export function primaryNeed(type: string): NeedKey | null {
 export const DISTRESS_THRESHOLD = 25;
 
 /** The need in distress (lowest need under 25), if any. */
-export function distressNeed(a: Agent): NeedKey | null {
-  const low = lowestNeed(a);
-  return low.value < DISTRESS_THRESHOLD ? low.key : null;
+export function distressNeed(a: Agent, night = false): NeedKey | null {
+  const owlAwake = night && a.temperament.nightOwl > 0.5;
+  // Exhaustion wins: rest/nap before fun-seeking (night owls at night excepted).
+  if (a.needs.energy < DISTRESS_THRESHOLD && !owlAwake) return 'energy';
+  const n = a.needs;
+  if (n.social < DISTRESS_THRESHOLD && (n.social <= n.fun || n.fun >= DISTRESS_THRESHOLD)) return 'social';
+  if (n.fun < DISTRESS_THRESHOLD) return 'fun';
+  return null;
 }
 
 /** Action types that address a need (so they are not interrupted to show distress). */

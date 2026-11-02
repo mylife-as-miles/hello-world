@@ -35,6 +35,18 @@ export function choose(w: World, key: string, bank: Bank, salt: string): string 
   return bank[idx]!;
 }
 
+/** Pick a template a given pair has never used (resets when exhausted) — e.g. apologies never repeat within a pair. */
+export function choosePair(w: World, pair: string, key: string, bank: Bank, salt: string): string {
+  let used = w.pairLines.get(pair);
+  if (!used) { used = new Set(); w.pairLines.set(pair, used); if (w.pairLines.size > 600) w.pairLines.delete(w.pairLines.keys().next().value!); }
+  let free = bank.map((_, i) => i).filter(i => !used!.has(`${key}#${i}`));
+  if (!free.length) { for (let i = 0; i < bank.length; i++) used.delete(`${key}#${i}`); free = bank.map((_, i) => i); }
+  const idx = free[w.rng.int(free.length, `pair-line:${key}`, salt)]!;
+  used.add(`${key}#${idx}`);
+  w.lineUsedAt.set(`${key}#${idx}`, w.simTime);
+  return bank[idx]!;
+}
+
 /** True when the bank still has a template not used in the last ~3 minutes. */
 export function hasFresh(w: World, key: string, bank: Bank): boolean {
   for (let i = 0; i < bank.length; i++) { const at = w.lineUsedAt.get(`${key}#${i}`); if (at === undefined || w.simTime - at >= LINE_REUSE_SECONDS) return true; }
@@ -150,6 +162,13 @@ const APOLOGIES: Bank = [
 ];
 const APOLOGY_YES: Bank = ['Apology accepted. Friends?', 'Aw, it’s okay. I was cranky too.', 'Truce! Cocoa’s on me.', 'Already forgotten, {name}.', 'Deal. No more squabbles.'];
 const APOLOGY_NO: Bank = ['...Not yet, {name}.', 'I’ll think about it.', 'Hmph. We’ll see.'];
+export const DISTRESS_MUTTERS: Record<'energy' | 'social' | 'fun', Bank> = {
+  energy: ['*yawn* I need a nap.', 'So... sleepy...', 'Can’t keep my eyes open.', 'Bed. Now. Please.', 'Who turned up gravity today?'],
+  social: ['Is anyone around? ...No? Okay.', 'Nobody’s talked to me all day.', 'I could really use a friend right now.', 'Hello? Anyone want to hang out?', 'Feeling a bit invisible today.'],
+  fun: ['So. Bored.', 'There must be something fun to do around here.', 'Ugh, nothing’s happening.', 'I’ve counted every cobblestone. Twice.', 'Entertain me, town!'],
+};
+const LONELY_REPLIES: Bank = ['Oh! Someone’s talking to me! Hi, {name}!', 'Hi {name}! You made my day just by saying that.', 'Aw, {name}. I needed that.'];
+const BORED_REPLIES: Bank = ['Finally, something interesting! Hi, {name}!', 'Ooh, {name}, tell me more. Anything.', 'Yes! Excitement! Thanks, {name}.'];
 const TIRED_REPLIES: Bank = ['Mm. *yawn*', 'Too tired for this, {name}.', 'Sure, sure... zzz.', 'Talk tomorrow, {name}?'];
 const INTROS: Bank = [
   'Hi! I’m {me}. I don’t think we’ve met!', 'Hello there! {me}, nice to meet you.', 'Hey, are you new around here? I’m {me}!',
@@ -411,9 +430,9 @@ export function pickTopic(ctx: TopicContext): Topic {
   const pt = PLACE_TOPICS[place.kind];
   if (pt) cands.push({ w: fresh(pt, 0.9), make: () => heTopic(pt, w, speaker, vars) });
   const needs = speaker.needs;
-  if (needs.energy < 30) cands.push({ w: fresh(NEED_TOPICS.energy, 1.1), make: () => heTopic(NEED_TOPICS.energy, w, speaker, vars) });
-  if (needs.fun < 30) cands.push({ w: fresh(NEED_TOPICS.fun, 1), make: () => heTopic(NEED_TOPICS.fun, w, speaker, vars) });
-  if (needs.social < 25) cands.push({ w: fresh(NEED_TOPICS.social, 0.9), make: () => heTopic(NEED_TOPICS.social, w, speaker, vars) });
+  if (needs.energy < 30) cands.push({ w: fresh(NEED_TOPICS.energy, needs.energy < 25 ? 4 : 1.1), make: () => heTopic(NEED_TOPICS.energy, w, speaker, vars) });
+  if (needs.fun < 30) cands.push({ w: fresh(NEED_TOPICS.fun, needs.fun < 25 ? 4 : 1), make: () => heTopic(NEED_TOPICS.fun, w, speaker, vars) });
+  if (needs.social < 25) cands.push({ w: fresh(NEED_TOPICS.social, 4), make: () => heTopic(NEED_TOPICS.social, w, speaker, vars) });
   for (const trait of speaker.personality) {
     const t = TRAIT_TOPICS[trait];
     if (t) cands.push({ w: fresh(t, 0.8), make: () => heTopic(t, w, speaker, vars) });
@@ -481,8 +500,8 @@ export function placeVars(w: World, speaker: Agent, listener: Agent | null, at: 
 
 export const lines = {
   opener(w: World, s: Agent, vars: Vars): string {
-    const d = distressNeed(s);
-    if (d && w.rng.chance(0.8, 'distress-open', s.id)) return fill(chooseFrom(w, [[`open-distress:${d}`, DISTRESS_OPENERS[d]], ['open:any', OPENERS_ANY]], s.id), vars);
+    const d = distressNeed(s, worldClock(w.simTime).period === 'night');
+    if (d && w.rng.chance(0.85, 'distress-open', s.id)) return fill(chooseFrom(w, [[`open-distress:${d}`, DISTRESS_OPENERS[d]], ['open:any', OPENERS_ANY]], s.id), vars);
     const period = worldClock(w.simTime).period;
     return fill(flavored(w, s, `open:${period}`, OPENERS[period], OPENERS_BY_TRAIT, 0.45, ['open:any', OPENERS_ANY]), vars);
   },
@@ -492,8 +511,8 @@ export const lines = {
   },
   response(w: World, s: Agent, positive: boolean, vars: Vars): string {
     if (!positive) return fill(s.needs.energy < 20 ? choose(w, 'resp-tired', RESPONSES_TIRED, s.id) : choose(w, 'resp-neg', RESPONSES_NEG, s.id), vars);
-    const d = distressNeed(s);
-    if (d && w.rng.chance(0.8, 'distress-resp', s.id)) return fill(chooseFrom(w, [[`resp-distress:${d}`, DISTRESS_RESPONSES[d]], ['resp-any', RESPONSES_ANY]], s.id), vars);
+    const d = distressNeed(s, worldClock(w.simTime).period === 'night');
+    if (d && w.rng.chance(0.85, 'distress-resp', s.id)) return fill(chooseFrom(w, [[`resp-distress:${d}`, DISTRESS_RESPONSES[d]], ['resp-any', RESPONSES_ANY]], s.id), vars);
     return fill(flavored(w, s, 'resp-pos', RESPONSES_POS, RESPONSES_POS_BY_TRAIT, 0.5, ['resp-any', RESPONSES_ANY]), vars);
   },
   compliment(w: World, s: Agent, vars: Vars): string { return fill(flavored(w, s, 'compliment', COMPLIMENTS, COMPLIMENTS_BY_TRAIT, 0.45), vars); },
@@ -520,7 +539,10 @@ export const lines = {
   snub(w: World, s: Agent, vars: Vars): string { return fill(choose(w, 'snub', SNUBS, s.id), vars); },
   chatReply(w: World, s: Agent, heard: string, positive: boolean, vars: Vars): string {
     if (!positive) return fill(choose(w, 'chat-neg', CHAT_REPLIES.negative!, s.id), vars);
-    if (s.needs.energy < 25) return fill(choose(w, 'chat-tired', TIRED_REPLIES, s.id), vars);
+    const d = distressNeed(s, worldClock(w.simTime).period === 'night');
+    if (d === 'energy') return fill(choose(w, 'chat-tired', TIRED_REPLIES, s.id), vars);
+    if (d === 'social') return fill(choose(w, 'chat-lonely', LONELY_REPLIES, s.id), vars);
+    if (d === 'fun') return fill(choose(w, 'chat-bored', BORED_REPLIES, s.id), vars);
     if (s.temperament.grumpiness > 0.5 && w.rng.chance(0.6, 'chat-grump', s.id)) return fill(choose(w, 'chat-grumpy', CHAT_REPLIES.grumpy!, s.id), vars);
     let cat = 'generic';
     for (const [re, c] of CHAT_PATTERNS) if (re.test(heard)) { cat = c; break; }
@@ -537,8 +559,9 @@ export const lines = {
   bicker(w: World, s: Agent, vars: Vars): string { return fill(choose(w, 'bicker', BICKER_OPENERS, s.id), vars); },
   retort(w: World, s: Agent, vars: Vars): string { return fill(choose(w, 'retort', BICKER_RETORTS, s.id), vars); },
   lastWord(w: World, s: Agent, vars: Vars): string { return fill(choose(w, 'last-word', BICKER_LAST, s.id), vars); },
-  apology(w: World, s: Agent, vars: Vars): string { return fill(choose(w, 'apology', APOLOGIES, s.id), vars); },
-  apologyReply(w: World, s: Agent, yes: boolean, vars: Vars): string { return fill(yes ? choose(w, 'apology-yes', APOLOGY_YES, s.id) : choose(w, 'apology-no', APOLOGY_NO, s.id), vars); },
+  apology(w: World, s: Agent, vars: Vars, pair: string): string { return fill(choosePair(w, pair, 'apology', APOLOGIES, s.id), vars); },
+  apologyReply(w: World, s: Agent, yes: boolean, vars: Vars, pair: string): string { return fill(yes ? choosePair(w, pair, 'apology-yes', APOLOGY_YES, s.id) : choosePair(w, pair, 'apology-no', APOLOGY_NO, s.id), vars); },
+  mutter(w: World, s: Agent, need: 'energy' | 'social' | 'fun'): string { return choose(w, `mutter:${need}`, DISTRESS_MUTTERS[need], s.id); },
   celebrateReply(w: World, s: Agent, vars: Vars): string { return fill(choose(w, 'celebrate', CELEBRATE_REPLIES, s.id), vars); },
 };
 

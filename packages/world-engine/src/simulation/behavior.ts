@@ -3,12 +3,12 @@
  * need effects), wander hops, and choosing what to do next.
  */
 import type { WorldClock } from '../world/time';
-import { cancelEncounter, clearAction, gesture, goThen, interrupt, removeAgent, scoreChoices, socializeCandidate, startAction, startChoice, startSocialize } from './actions';
+import { cancelEncounter, clearAction, gesture, goThen, interrupt, removeAgent, scoreChoices, sleepCap, sleepersCount, socializeCandidate, startAction, startChoice, startSocialize } from './actions';
 import { lines, placeVars } from './dialogue';
-import { moveAlong, planPath, STROLL_SPEED } from './movement';
+import { moveAlong, planPath, STROLL_SPEED, WALK_SPEED } from './movement';
 import { applyEffects, distressNeed, fixes, lowestNeed, primaryNeed, type NeedKey } from './needs';
 import { worldClock } from '../world/time';
-import { atPlace, nearestPoi, pickSpot, placeName, poi, portalSpot, spotAround } from './places';
+import { atPlace, freeSeat, nearestPoi, pickSpot, placeName, poi, portalSpot, spotAround } from './places';
 import { POIS, type PoiDef } from '../world/layout';
 import { startWelcomeWalk } from './social';
 import { dist, emit, type Agent, type World } from './state';
@@ -38,8 +38,8 @@ export function updateAgent(w: World, a: Agent, dt: number, clock: WorldClock): 
   }
   applyEffects(a, act.effects, dt);
   // Distress interrupts unrelated autonomous activities so it stays visible.
-  if (!a.visitor && act.priority === 0 && !act.hold && !act.distress && act.remaining > 0.5 && w.simTime - a.moodShownAt >= 8) {
-    const low = distressNeed(a);
+  if (!a.visitor && act.priority === 0 && !act.hold && !act.distress && act.remaining > 0.5 && w.simTime - a.moodShownAt >= 6) {
+    const low = distressNeed(a, clock.period === 'night');
     if (low && !fixes(act.type, low)) act.remaining = 0.5;
   }
   // Satiation: an activity ends early once the need it serves is full.
@@ -68,8 +68,8 @@ export function decide(w: World, a: Agent, clock: WorldClock): void {
   if (a.needsWelcome) { a.needsWelcome = false; startWelcomeWalk(w, a); return; }
   if (!a.visitor) {
     // Distress stays visible: while a need is under 25 its state is re-shown ~10 s after the last one ended.
-    const low = distressNeed(a);
-    if (low && w.simTime - a.moodShownAt >= 6) { showLowNeed(w, a, low); return; }
+    const low = distressNeed(a, clock.period === 'night');
+    if (low && w.simTime - a.moodShownAt >= 4) { showLowNeed(w, a, low); return; }
     const sleepyHour = (clock.period === 'evening' || clock.period === 'night') && a.temperament.nightOwl < 0.5;
     if (!low && sleepyHour && a.needs.energy < 56 && w.simTime - a.moodShownAt > 40 && w.rng.chance(0.65, 'mood-tired', a.id)) { showLowNeed(w, a, 'energy'); return; }
   }
@@ -85,41 +85,119 @@ export function decide(w: World, a: Agent, clock: WorldClock): void {
 
 /** Make a low need visible before acting on it: lonely → sulk by a bench, tired → think about a nap, bored → aimless wander. */
 function showLowNeed(w: World, a: Agent, need: NeedKey): void {
+  const clock = worldClock(w.simTime);
+  const r = w.rng.float('distress-variant', a.id);
+  const dur = (lo: number, hi: number) => w.rng.range(lo, hi, 'distress-dur', a.id);
   const mark = (seconds: number) => { a.moodShownAt = w.simTime + seconds; if (a.action) a.action.distress = need; };
+  mutter(w, a, need);
   if (need === 'social') {
     a.socialReadyAt = Math.min(a.socialReadyAt, w.simTime);
+    const cafe = poi('cafe');
+    const seat = r < 0.3 && dist(a, cafe.position) < 15 ? freeSeat(w, cafe, a) : null;
+    if (seat) {
+      const d = dur(12, 18);
+      interrupt(w, a);
+      startAction(w, a, { type: 'sit', phase: 'travel', travelActivity: `walking to ${cafe.name}`, activity: `sitting alone at ${cafe.name}`, poiId: cafe.id, seatKey: seat.key,
+        spot: { x: seat.seat.x, z: seat.seat.z }, remaining: d, effects: { energy: 0.3, social: 0, fun: 0 }, speed: WALK_SPEED * a.temperament.speed, priority: 0, travelTimeout: 40, anchored: true });
+      mark(d + dist(a, seat.seat) / 1.3);
+      return;
+    }
+    if (r < 0.6 && Math.hypot(a.x, a.z) < 11) {
+      // People-watch for a bit, then go and talk to someone.
+      const plaza = poi('plaza');
+      const d = dur(8, 12);
+      goThen(w, a, spotAround(w, { x: a.x, z: a.z }, 0, 1.2, a, 'crowd'), `walking to ${plaza.name}`, `watching the crowd at ${plaza.name}`, d, {
+        priority: 0, poiId: plaza.id, effects: { energy: 0, social: 0.05, fun: 0 },
+        onDone: (w2, ag) => { const t = socializeCandidate(w2, ag); if (t) startSocialize(w2, ag, t.target); },
+      });
+      mark(d + 1);
+      return;
+    }
     let bench: PoiDef | null = null;
-    let bd = 18;
+    let bd = 12;
     for (const p of POIS) if (p.kind === 'bench') { const d = dist(a, p.position); if (d < bd) { bd = d; bench = p; } }
-    if (bench && w.rng.chance(0.6, 'lonely-bench', a.id)) {
+    const d = dur(12, 20);
+    if (bench && r < 0.85) {
       const spot = spotAround(w, bench.position, 1, 1.5, a, 'lonely');
-      goThen(w, a, spot, `walking to ${placeName(bench)}`, `sulking near ${placeName(bench)}`, 18, { priority: 0, effects: { energy: 0.1, social: 0, fun: 0 } });
-      mark(18 + dist(a, spot) / 1.3);
-    } else { gesture(w, a, `sulking alone ${atPlace(nearestPoi(a.x, a.z))}`, 18, { priority: 0 }); mark(18); }
+      goThen(w, a, spot, `walking to ${placeName(bench)}`, `sulking near ${placeName(bench)}`, d, { priority: 0, effects: { energy: 0.1, social: 0, fun: 0 } });
+      mark(d + dist(a, spot) / 1.3);
+    } else { gesture(w, a, `sulking alone ${atPlace(nearestPoi(a.x, a.z))}`, d, { priority: 0 }); mark(d); }
     return;
   }
   if (need === 'energy') {
-    // Yawn, then actually rest (bench/café seat nearby if free, else on the spot).
-    gesture(w, a, 'thinking about a nap', 9, { priority: 0, effects: { energy: 0.2, social: 0, fun: 0 }, onDone: (w2, ag) => restNow(w2, ag) });
-    mark(9);
+    const owl = a.temperament.nightOwl > 0.5;
+    if (clock.period === 'night' && !owl && r < 0.6 && sleepersCount(w) < sleepCap(w) + 1) {
+      const sleep = scoreChoices(w, a, clock).find(c => c.def.type === 'sleep');
+      if (sleep && startChoice(w, a, sleep, clock)) { mark(20); return; }
+    }
+    if (r < 0.4) {
+      const d = dur(6, 10);
+      gesture(w, a, 'thinking about a nap', d, { priority: 0, effects: { energy: 0.2, social: 0, fun: 0 }, onDone: (w2, ag) => restNow(w2, ag) });
+      mark(d);
+      return;
+    }
+    let best: { key: string; seat: { x: number; z: number }; poi: PoiDef } | null = null;
+    let bd = 12;
+    for (const p of POIS) {
+      if (p.kind !== 'bench') continue;
+      const s2 = freeSeat(w, p, a);
+      const d = dist(a, p.position);
+      if (s2 && d < bd) { bd = d; best = { key: s2.key, seat: s2.seat, poi: p }; }
+    }
+    if (best) {
+      const d = dur(14, 22);
+      interrupt(w, a);
+      startAction(w, a, { type: 'rest', phase: 'travel', travelActivity: `walking to ${placeName(best.poi)}`, activity: `resting ${atPlace(best.poi)}`, poiId: best.poi.id, seatKey: best.key,
+        spot: { x: best.seat.x, z: best.seat.z }, remaining: d, effects: { energy: 0.7, social: 0, fun: 0 }, speed: WALK_SPEED * a.temperament.speed, priority: 0, travelTimeout: 40, anchored: true });
+      mark(d + bd / 1.3);
+      return;
+    }
+    const d = dur(6, 10);
+    gesture(w, a, 'thinking about a nap', d, { priority: 0, effects: { energy: 0.2, social: 0, fun: 0 }, onDone: (w2, ag) => restNow(w2, ag) });
+    mark(d);
     return;
   }
-  let place = poi('plaza');
-  let bd = Infinity;
-  for (const p of POIS) if (p.kind === 'plaza' || p.kind === 'park' || p.kind === 'garden') { const d = dist(a, p.position); if (d < bd) { bd = d; place = p; } }
-  interrupt(w, a);
-  startAction(w, a, {
-    type: 'gesture', phase: 'travel', travelActivity: 'wandering around looking for fun', activity: 'wandering around looking for fun', poiId: place.id,
-    spot: pickSpot(w, place, a), remaining: 20, effects: { energy: -0.03, social: 0, fun: 0.08 }, speed: STROLL_SPEED, priority: 0, travelTimeout: 30, anchored: false,
-    hop: { center: place.position, radius: place.radius, next: w.simTime + 4, poiId: place.id },
-  });
-  mark(20);
+  // Bored.
+  const fountain = poi('fountain');
+  const pg = poi('playground');
+  if (r < 0.35 && dist(a, fountain.position) < 25) {
+    const d = dur(10, 16);
+    goThen(w, a, pickSpot(w, fountain, a), `wandering over to ${placeName(fountain)}`, 'watching the fountain, bored', d, { priority: 0, poiId: fountain.id, speed: STROLL_SPEED * 1.3, effects: { energy: 0.05, social: 0, fun: 0.05 } });
+    mark(d + dist(a, fountain.position) / 1.2);
+  } else if (r < 0.6 && dist(a, pg.position) < 18) {
+    const d = dur(12, 18);
+    goThen(w, a, pickSpot(w, pg, a), `wandering over to ${placeName(pg)}`, `playing alone ${atPlace(pg)}`, d, { priority: 0, poiId: pg.id, type: 'play', speed: STROLL_SPEED * 1.3, effects: { energy: -0.1, social: -0.05, fun: 0.35 } });
+    mark(d + dist(a, pg.position) / 1.2);
+  } else if (r < 0.78) {
+    const d = dur(6, 10);
+    gesture(w, a, 'thinking about something fun to do', d, { priority: 0, effects: { energy: 0, social: 0, fun: 0.05 } });
+    mark(d);
+  } else {
+    let place = poi('plaza');
+    let bd = Infinity;
+    for (const p of POIS) if (p.kind === 'plaza' || p.kind === 'park' || p.kind === 'garden') { const d = dist(a, p.position); if (d < bd) { bd = d; place = p; } }
+    const d = dur(14, 22);
+    interrupt(w, a);
+    startAction(w, a, {
+      type: 'gesture', phase: 'travel', travelActivity: 'wandering around looking for fun', activity: 'wandering around looking for fun', poiId: place.id,
+      spot: pickSpot(w, place, a), remaining: d, effects: { energy: -0.03, social: 0, fun: 0.08 }, speed: STROLL_SPEED, priority: 0, travelTimeout: 30, anchored: false,
+      hop: { center: place.position, radius: place.radius, next: w.simTime + 4, poiId: place.id },
+    });
+    mark(d);
+  }
+}
+
+/** Distressed residents sometimes say it out loud (rate-limited town-wide so history isn't flooded). */
+function mutter(w: World, a: Agent, need: NeedKey): void {
+  if (w.simTime - w.facts.lastMutterAt < 25 || !w.rng.chance(0.6, 'mutter', a.id)) return;
+  w.facts.lastMutterAt = w.simTime;
+  emit(w, 'chat', a, { text: lines.mutter(w, a, need), payload: { reaction: need === 'energy' ? 'tired' : need === 'social' ? 'lonely' : 'bored', sentiment: 'negative' } });
 }
 
 function restNow(w: World, a: Agent): void {
   const clock = worldClock(w.simTime);
   const rest = scoreChoices(w, a, clock)
-    .filter(c => (c.def.type === 'rest' || c.def.type === 'sit' || c.def.type === 'sleep') && dist(a, c.poi.position) < 16)
+    .filter(c => (c.def.type === 'rest' || c.def.type === 'sit' || c.def.type === 'sleep') && dist(a, c.poi.position) < 8)
     .sort((x, y) => y.score - x.score)[0];
   if (rest && startChoice(w, a, rest, clock)) return;
   gesture(w, a, `resting ${atPlace(nearestPoi(a.x, a.z))}`, 12, { priority: 0, type: 'rest', effects: { energy: 0.7, social: 0, fun: 0 } });

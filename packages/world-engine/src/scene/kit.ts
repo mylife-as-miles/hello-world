@@ -51,14 +51,14 @@ uniform float uCutKeep;
 uniform float uCutOn;
 uniform float uCutNear;
 varying vec3 vCutW;
-float hwBayer2(vec2 a) { a = floor(a); return fract(dot(a, vec2(0.5, a.y * 0.75))); }
-float hwBayer4(vec2 a) { return hwBayer2(0.5 * a) * 0.25 + hwBayer2(a); }
+// interleaved gradient noise: per-pixel, blue-noise-like (no coarse screen-door pattern)
+float hwIGN(vec2 p) { return fract(52.9829189 * fract(dot(floor(p), vec2(0.06711056, 0.00583715)))); }
 `;
 const CUT_FRAG = /* glsl */ `
   if (uCutNear > 0.0) {
     float hwN = distance(vCutW, uCutA);
     float hwKN = 1.0 - smoothstep(uCutNear * 0.6, uCutNear, hwN);
-    if (hwKN > 0.0 && hwKN * 1.05 > hwBayer4(gl_FragCoord.xy + 1.5)) discard;
+    if (hwKN > 0.0 && hwKN * 1.05 > hwIGN(gl_FragCoord.xy + 17.0)) discard;
   }
   if (uCutOn > 0.001) {
     vec3 hwAB = uCutB - uCutA;
@@ -70,7 +70,7 @@ const CUT_FRAG = /* glsl */ `
       float hwD = length(hwAP - hwDir * hwT);
       float hwRad = mix(uCutR.x, uCutR.y, clamp(hwT / hwL, 0.0, 1.0));
       float hwK = (1.0 - smoothstep(hwRad * 0.55, hwRad, hwD)) * uCutOn;
-      if (hwK > 0.0 && hwK * 1.05 > hwBayer4(gl_FragCoord.xy)) discard;
+      if (hwK > 0.0 && hwK * 1.05 > hwIGN(gl_FragCoord.xy)) discard;
     }
   }
 `;
@@ -128,6 +128,8 @@ export interface SceneKit {
   solid: THREE.MeshStandardMaterial;
   /** Vertex-coloured lit material for ground-level surfaces (paths, beds). */
   ground: THREE.MeshStandardMaterial;
+  /** Like `solid` but never see-through: seats, tables, stage, fountain (residents sit/stand on them). */
+  solidKeep: THREE.MeshStandardMaterial;
   /** Window glass: dark glass by day, emissive = vertex colour × intensity at night. */
   glass: THREE.MeshStandardMaterial;
   /** Unlit bulbs/neon (vertex colours, colour scalar = brightness, not tone mapped → bloom). */
@@ -174,6 +176,8 @@ export function createKit(): SceneKit {
   patchWeather(solid, uniforms, 1, true);
   const ground = track(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0 }));
   patchWeather(ground, uniforms);
+  const solidKeep = track(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, metalness: 0 }));
+  patchWeather(solidKeep, uniforms);
 
   const glass = track(new THREE.MeshStandardMaterial({
     vertexColors: true, color: '#4f6d86', roughness: 0.18, metalness: 0.15, emissive: '#ffffff', emissiveIntensity: 0,
@@ -196,7 +200,7 @@ export function createKit(): SceneKit {
   const fx: FxApi = { raidAt: -1e9, emitSparkles: () => {}, emitConfetti: () => {} };
 
   return {
-    env, uniforms, fx, solid, ground, glass, bulbs, track, occluders: [],
+    env, uniforms, fx, solid, ground, solidKeep, glass, bulbs, track, occluders: [],
     dispose() { for (const d of disposables) d.dispose(); },
   };
 }

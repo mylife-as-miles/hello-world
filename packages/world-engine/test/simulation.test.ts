@@ -169,13 +169,13 @@ describe('simulation: life', () => {
     const { rt, tick } = runtime({ initialSnapshot: snap });
     const seen = new Map<string, string[]>();
     for (let i = 0; i < 240; i++) { tick(1); for (const r of rt.getSnapshot().residents) seen.set(r.id, [...(seen.get(r.id) ?? []), r.activity]); }
-    expect(seen.get('seed:nova')!.some(a => a.startsWith('sulking'))).toBe(true);
+    expect(seen.get('seed:nova')!.some(a => /^(sulking|sitting alone|watching the crowd)/.test(a))).toBe(true);
     expect(seen.get('seed:mochi')!.some(a => a === 'thinking about a nap' || /^(resting|sitting|sleeping|drinking|eating)/.test(a))).toBe(true);
-    expect(seen.get('seed:kiki')!.some(a => a === 'wandering around looking for fun' || /^(playing|dancing)/.test(a))).toBe(true);
+    expect(seen.get('seed:kiki')!.some(a => /^(wandering around looking for fun|wandering over to|watching the fountain, bored|thinking about something fun|playing|dancing)/.test(a))).toBe(true);
     const end = rt.getSnapshot().residents;
     // Recovery is under way (residents may still be dipping — that's the drama).
     expect(end.find(r => r.id === 'seed:mochi')!.needs.energy).toBeGreaterThan(14);
-    expect(end.find(r => r.id === 'seed:kiki')!.needs.fun).toBeGreaterThan(11);
+    expect(end.find(r => r.id === 'seed:kiki')!.needs.fun).toBeGreaterThan(6);
   });
 
   it('dialogue never repeats a line within 3 sim-minutes and memories vary their phrasing', () => {
@@ -239,24 +239,59 @@ describe('simulation: life', () => {
     expect(starts.greet).toBeLessThan(starts.compliment + starts.gift + starts.befriend + 30);
   });
 
-  it('distress is visible: when a need is under 25 its matching state shows about half the time', () => {
+  it('distress is visible, varied, and spoken: matching states show for much of the low-need time', () => {
     const { rt, tick } = runtime();
-    const VIS = { energy: /^(thinking about a nap|resting|sleeping|sitting)/, social: /^sulking/, fun: /^(wandering around looking for fun|sulking)/ };
+    const VIS = {
+      energy: /^(thinking about a nap|resting|sleeping|sitting)/,
+      social: /^(sulking|sitting alone|watching the crowd)/,
+      fun: /^(wandering around looking for fun|wandering over to|watching the fountain, bored|playing alone|thinking about something fun|sulking)/,
+    };
     let low = 0, visible = 0;
-    const kinds = new Set<string>();
+    const phrases = new Map<string, number>();
+    const seen = new Set<string>();
+    let spoken = 0;
     for (let i = 0; i < 1680; i++) {
       tick(1);
+      const snap = rt.getSnapshot();
+      for (const e of snap.eventHistory) {
+        if (e.source !== 'simulation' || seen.has(e.id)) continue;
+        seen.add(e.id);
+        if (['tired', 'lonely', 'bored'].includes(String(e.payload?.reaction))) { spoken++; expect(e.kind).toBe('chat'); expect(e.text!.length).toBeGreaterThan(3); }
+      }
       if (i % 2) continue;
-      for (const r of rt.getSnapshot().residents) {
-        const k = (['energy', 'social', 'fun'] as const).reduce((m, x) => (r.needs[x] < r.needs[m] ? x : m), 'energy' as 'energy' | 'social' | 'fun');
-        if (r.needs[k] >= 25) continue;
+      for (const r of snap.residents) {
+        const owlNight = r.personality.includes('night-owl') && (snap.simulationTime + 480) % 1440 >= 1260;
+        const k = r.needs.energy < 25 && !owlNight ? 'energy' : r.needs.social < 25 && (r.needs.social <= r.needs.fun || r.needs.fun >= 25) ? 'social' : r.needs.fun < 25 ? 'fun' : null;
+        if (!k) continue;
         low++;
-        if (VIS[k].test(r.activity)) { visible++; kinds.add(r.activity.split(' ')[0]!); }
+        if (VIS[k].test(r.activity)) {
+          visible++;
+          const key = r.activity.replace(/ (at|on|near|by|in|to) .*$/, '');
+          phrases.set(key, (phrases.get(key) ?? 0) + 1);
+        }
       }
     }
     expect(low).toBeGreaterThan(100);
-    expect(visible / low).toBeGreaterThan(0.45);
-    expect(kinds.size).toBeGreaterThanOrEqual(3);
+    expect(visible / low).toBeGreaterThan(0.42);
+    const top = Math.max(...phrases.values());
+    expect(top / visible).toBeLessThan(0.35); // no single distress phrase dominates
+    expect(phrases.size).toBeGreaterThanOrEqual(6);
+    expect(spoken).toBeGreaterThanOrEqual(5); // tired / lonely / bored lines reach the event history
+  });
+
+  it('when exhausted, rest beats fun-seeking even if bored too (non night-owl, daytime)', () => {
+    const base = runtime().rt.getSnapshot();
+    const nova = { ...base.residents.find(r => r.id === 'seed:nova')!, needs: { energy: 8, social: 70, fun: 6 }, activity: 'thinking' };
+    const { rt, tick } = runtime({ initialSnapshot: { ...base, residents: [nova, base.residents.find(r => r.id === 'seed:rex')!], relationships: [], eventHistory: [] } });
+    const acts: string[] = [];
+    for (let i = 0; i < 60; i++) {
+      tick(1);
+      const r = rt.getSnapshot().residents.find(x => x.id === 'seed:nova')!;
+      if (r.needs.energy < 25) acts.push(r.activity);
+    }
+    expect(acts.length).toBeGreaterThan(10);
+    expect(acts.some(a => /^(thinking about a nap|resting|sitting|sleeping)/.test(a))).toBe(true);
+    expect(acts.some(a => /(looking for fun|fountain, bored|playing alone|something fun)/.test(a))).toBe(false);
   });
 
   it('friction: incompatible residents occasionally bicker (rate-limited) and later make up', () => {
@@ -264,6 +299,7 @@ describe('simulation: life', () => {
     const seen = new Set<string>();
     const bickers: Array<{ a: string; b: string; t: number }> = [];
     let apologies = 0;
+    const apologyLog = new Map<string, Array<{ t: number; text: string }>>();
     for (let i = 0; i < 1680; i++) {
       tick(1);
       const s = rt.getSnapshot();
@@ -275,13 +311,21 @@ describe('simulation: life', () => {
           expect(e.payload?.sentiment).toBe('negative');
           bickers.push({ a: e.actorId, b: e.targetId!, t: s.simulationTime });
         }
-        if (e.payload?.reaction === 'apology') apologies++;
+        if (e.payload?.reaction === 'apology') {
+          apologies++;
+          const k = [e.actorId, e.targetId!].sort().join('|');
+          apologyLog.set(k, [...(apologyLog.get(k) ?? []), { t: s.simulationTime, text: e.text! }]);
+        }
       }
     }
     expect(bickers.length).toBeGreaterThanOrEqual(1);
     expect(bickers.length).toBeLessThanOrEqual(9); // ≈ one per 2 game hours over 14 h
     for (let i = 1; i < bickers.length; i++) expect(bickers[i]!.t - bickers[i - 1]!.t).toBeGreaterThan(100);
     expect(apologies).toBeGreaterThanOrEqual(1);
+    for (const log of apologyLog.values()) {
+      expect(new Set(log.map(l => l.text)).size).toBe(log.length); // never the same apology twice within a pair
+      for (let i = 1; i < log.length; i++) expect(log[i]!.t - log[i - 1]!.t).toBeGreaterThan(170); // ≥ ~3 game hours between attempts
+    }
     const mems = rt.getSnapshot().relationships.flatMap(r => r.memories);
     expect(mems.some(m => /(bickered|snapped at|argued over|told .+ off|had a spat|complained to)/.test(m))).toBe(true);
     expect(mems.some(m => /(apologized|made up|called a truce|said sorry|peace offering|patched things up)/.test(m))).toBe(true);

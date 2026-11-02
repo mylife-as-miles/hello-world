@@ -277,8 +277,8 @@ const CLS_ROUGH = [0.6, 0.88, 0.12, 0.55];
 /** 'o' opaque body slot, 'h' hair core (alpha-tested, depth-writing, alpha-to-coverage), 'hs' hair soft-edge pass. */
 type MatKind = 'o' | 'h' | 'hs';
 
-function baseMaterial(body: BodyAsset, slot: number, tile: number, kind: MatKind, tex: THREE.Texture | null): THREE.MeshStandardMaterial {
-  const key = `${body.id}:${kind}:${slot}:${tile}`;
+function baseMaterial(body: BodyAsset, slot: number, tile: number, kind: MatKind, tex: THREE.Texture | null, stylize: boolean): THREE.MeshStandardMaterial {
+  const key = `${body.id}:${kind}:${slot}:${tile}${stylize ? ':s' : ''}`;
   let m = matCache.get(key);
   if (!m) {
     const cls = kind === 'o' ? body.data.cls[slot] ?? 1 : 3;
@@ -295,6 +295,7 @@ function baseMaterial(body: BodyAsset, slot: number, tile: number, kind: MatKind
       // soft edges: the thin strand fringe below the core threshold, blended over the core without writing depth
       m.side = THREE.DoubleSide; m.transparent = true; m.depthWrite = false; m.alphaTest = 0.03;
     }
+    applyShaderMods(m, null, stylize, cls);
     m.name = `realistic:${key}`;
     matCache.set(key, m);
   }
@@ -316,29 +317,80 @@ function maskAlphaWrites(mesh: THREE.Mesh): void {
   };
 }
 
+/* GLSL for the in-world harmonisation ("stylize"): warmer, livelier albedo with lifted darks, a soft 3-band diffuse ramp
+ * blended into the physical Lambert term, a warm ambient-scaled rim and a slightly stronger ambient response, so scans
+ * sit in the warm pastel town next to the Townies. WebGL only (onBeforeCompile); WebGPU renders the plain material. */
+const STYLE_ALBEDO = /* glsl */ `
+  {
+    vec3 hwS = pow(max(diffuseColor.rgb, vec3(0.0)), vec3(0.84));          // lift darks (linear space)
+    float hwSL = dot(hwS, vec3(0.2126, 0.7152, 0.0722));
+    hwS = mix(vec3(hwSL), hwS, 1.16) * vec3(1.06, 1.0, 0.92);               // a little saturation + warmth
+    diffuseColor.rgb = clamp(hwS, 0.0, 1.0);
+  }`;
+const STYLE_DIFFUSE = /* glsl */ `{
+    float hwBands = 0.42 * smoothstep(0.0, 0.07, dotNL) + 0.36 * smoothstep(0.28, 0.4, dotNL) + 0.22 * smoothstep(0.6, 0.72, dotNL);
+    float hwRamp = mix(dotNL, hwBands, 0.45);
+    vec3 hwIrr = dotNL > 1e-4 ? irradiance * (hwRamp / dotNL) : vec3(0.0);
+    reflectedLight.directDiffuse += hwIrr * diffuseBRDF * ( 1.0 - F );
+  }`;
+const STYLE_AMBIENT = /* glsl */ `
+  #if defined( RE_IndirectDiffuse )
+  {
+    float hwF = 1.0 - saturate(dot(normal, normalize(vViewPosition)));
+    vec3 hwAmb = (irradiance + iblIrradiance) * RECIPROCAL_PI;
+    reflectedLight.indirectDiffuse += hwAmb * vec3(1.0, 0.8, 0.58) * 0.5 * pow(hwF, 3.0) * (0.4 + 0.6 * diffuseColor.rgb);
+    reflectedLight.indirectDiffuse *= 1.18;
+  }
+  #endif`;
+const DIFFUSE_LINE = 'reflectedLight.directDiffuse += irradiance * diffuseBRDF * ( 1.0 - F );';
+const STYLE_OK = THREE.ShaderChunk.lights_physical_pars_fragment.includes(DIFFUSE_LINE);
+
 /** Garment recolour (Valdrada-style), partial and luminance-preserving: the outfit hue at the texel's own brightness,
  *  blended ~50% so the fabric's pattern, folds and original character stay visible. */
-function tintedMaterial(base: THREE.MeshStandardMaterial, tint: THREE.Color): THREE.MeshStandardMaterial {
+const TINT_GLSL = /* glsl */ `
+  {
+    const vec3 hwW = vec3(0.2126, 0.7152, 0.0722);
+    float hwL = dot(diffuseColor.rgb, hwW);
+    vec3 hwC = min(uHwTint * (hwL / max(dot(uHwTint, hwW), 0.02)), vec3(1.0));
+    diffuseColor.rgb = mix(diffuseColor.rgb, hwC, 0.5);
+  }`;
+
+function applyShaderMods(m: THREE.MeshStandardMaterial, tint: THREE.Color | null, stylize: boolean, cls: number): void {
+  if (stylize) {
+    // softer, broader highlights (eyes keep a little sparkle)
+    m.roughness = Math.max(m.roughness, cls === 2 ? 0.3 : cls === 3 ? 0.62 : 0.8);
+    m.envMapIntensity = 0.45;
+  }
+  if (!tint && !stylize) { m.onBeforeCompile = () => {}; m.customProgramCacheKey = () => 'hw-real'; return; }
+  const tintU = tint ? { value: tint.clone() } : null;
+  const doStyle = stylize && STYLE_OK;
+  m.onBeforeCompile = (sh) => {
+    let fs = sh.fragmentShader;
+    if (tintU) { sh.uniforms.uHwTint = tintU; fs = fs.replace('#include <common>', '#include <common>\nuniform vec3 uHwTint;'); }
+    fs = fs.replace('#include <map_fragment>', '#include <map_fragment>' + (tintU ? TINT_GLSL : '') + (doStyle ? STYLE_ALBEDO : ''));
+    if (doStyle) {
+      fs = fs.replace('#include <lights_physical_pars_fragment>', THREE.ShaderChunk.lights_physical_pars_fragment.replace(DIFFUSE_LINE, STYLE_DIFFUSE))
+        .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>' + STYLE_AMBIENT);
+    }
+    sh.fragmentShader = fs;
+  };
+  m.customProgramCacheKey = () => `hw-real:${tintU ? 't' : ''}${doStyle ? 's' : ''}`;
+}
+
+function tintedMaterial(base: THREE.MeshStandardMaterial, tint: THREE.Color, stylize: boolean, cls: number): THREE.MeshStandardMaterial {
   const m = base.clone();
   m.name = base.name + ':tint';
-  const tintU = { value: tint.clone() };
-  m.onBeforeCompile = (sh) => {
-    sh.uniforms.uHwTint = tintU;
-    sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform vec3 uHwTint;')
-      .replace('#include <map_fragment>', `#include <map_fragment>
-      {
-        const vec3 hwW = vec3(0.2126, 0.7152, 0.0722);
-        float hwL = dot(diffuseColor.rgb, hwW);
-        vec3 hwC = min(uHwTint * (hwL / max(dot(uHwTint, hwW), 0.02)), vec3(1.0));
-        diffuseColor.rgb = mix(diffuseColor.rgb, hwC, 0.5);
-      }`);
-  };
-  m.customProgramCacheKey = () => 'hw-realistic-tint';
+  applyShaderMods(m, tint, stylize, cls);
   return m;
 }
 
 /* --------------------------------------------------------------------- rig */
+
+/** World-layer default for `stylize` (see setRealisticWorldStylize). Dev A/B override: `?realisticStylize=0|1`. */
+let worldStylize = false;
+const devStylize = ((): boolean | null => {
+  try { const v = new URLSearchParams(globalThis.location?.search ?? '').get('realisticStylize'); return v === null ? null : v !== '0'; } catch { return null; }
+})();
 
 /** Head accessories that sit on the cranium (face-bound ones like glasses need the stylised face). */
 const HEAD_OK = new Set(['beanie', 'cap', 'crown', 'headphones']);
@@ -373,7 +425,10 @@ class RealisticRig implements HumanoidRig {
   private readonly attach: Partial<Record<AttachSlot, THREE.Object3D>> = {};
   private dirty = true;
 
-  constructor(private readonly body: BodyAsset, lod: AvatarLod, appearance: AvatarAppearance, textures: Map<string, THREE.Texture | null>) {
+  readonly stylized: boolean;
+
+  constructor(private readonly body: BodyAsset, lod: AvatarLod, appearance: AvatarAppearance, textures: Map<string, THREE.Texture | null>, stylize = false) {
+    this.stylized = stylize;
     this.baseModelId = body.id;
     this.lod = lod;
     const hRaw = appearance.body?.height;
@@ -411,16 +466,16 @@ class RealisticRig implements HumanoidRig {
     for (const part of body.lods[li]!) {
       const mats: THREE.Material[] = part.groups.map(({ slot, tile }) => {
         const tex = textures.get(texName(body, part.hair, body.data.layers[slot]! + tile)) ?? null;
-        const base = baseMaterial(body, slot, tile, part.hair ? 'h' : 'o', tex);
+        const base = baseMaterial(body, slot, tile, part.hair ? 'h' : 'o', tex, stylize);
         if (tint && !part.hair && body.data.part[slot] === 1 && body.data.cls[slot] === 1) {
-          const tm = tintedMaterial(base, tint);
+          const tm = tintedMaterial(base, tint, stylize, 1);
           this.ownMaterials.push(tm);
           return tm;
         }
         return base;
       });
       if (part.soft) {
-        for (const { slot, tile } of part.groups) mats.push(baseMaterial(body, slot, tile, 'hs', textures.get(texName(body, true, body.data.layers[slot]! + tile)) ?? null));
+        for (const { slot, tile } of part.groups) mats.push(baseMaterial(body, slot, tile, 'hs', textures.get(texName(body, true, body.data.layers[slot]! + tile)) ?? null, stylize));
       }
       const mesh = new THREE.SkinnedMesh(part.geo, mats);
       mesh.name = part.hair ? 'realistic-hair' : 'realistic-body';
@@ -552,6 +607,14 @@ function safeColor(s: string): THREE.Color | null {
   } catch { return null; }
 }
 
+/**
+ * In-world harmonisation default. The world layer calls setRealisticWorldStylize(true) once; rigs loaded afterwards
+ * without an explicit `opts.stylize` get the warm stylised shading. The creator should pass `{ stylize: false }` to
+ * keep its photoreal preview (an explicit option always wins over this default).
+ */
+export function setRealisticWorldStylize(on: boolean): void { worldStylize = on; }
+export function getRealisticWorldStylize(): boolean { return devStylize ?? worldStylize; }
+
 /** Ids of the realistic bases this loader can build. */
 export const REALISTIC_BASE_IDS: readonly string[] = Object.keys(GLB_URLS);
 
@@ -580,7 +643,7 @@ export function disposeRealisticCache(): void {
  * Build a realistic rig for `appearance.baseModelId` ('mh-*' / 'rb-*'). Resolves null (never rejects) on unknown ids or
  * any load error, so the caller can fall back to the procedural rig. lod 'high' → LOD0 (~30k verts), 'low' → LOD1 (~10k).
  */
-export async function loadRealisticRig(appearance: AvatarAppearance, opts: { lod?: AvatarLod } = {}): Promise<HumanoidRig | null> {
+export async function loadRealisticRig(appearance: AvatarAppearance, opts: { lod?: AvatarLod; stylize?: boolean } = {}): Promise<HumanoidRig | null> {
   const st = stats();
   try {
     const id = appearance?.baseModelId ?? '';
@@ -594,7 +657,8 @@ export async function loadRealisticRig(appearance: AvatarAppearance, opts: { lod
     }
     const textures = new Map<string, THREE.Texture | null>();
     await Promise.all([...files].map(async (f) => textures.set(f, await loadTexture(f))));
-    const rig = new RealisticRig(body, lod, appearance, textures);
+    const stylize = devStylize ?? opts.stylize ?? worldStylize;
+    const rig = new RealisticRig(body, lod, appearance, textures, stylize);
     st.realisticLoaded++;
     return rig;
   } catch (e) {

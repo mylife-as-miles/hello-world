@@ -6,6 +6,7 @@
 import type { PoiDef } from '../world/layout';
 import { hashString } from '../avatars/catalog';
 import { mix32 } from './rng';
+import { hasConflict } from './personality';
 import { cancelEncounter, clearAction, gesture, goThen, interrupt, startAction } from './actions';
 import { complimentThing, GIFT_ITEMS, lines, memoryLine, pickTopic, placeVars, requestExtraLine, withArticle } from './dialogue';
 import { meetingPoint, WALK_SPEED } from './movement';
@@ -53,6 +54,20 @@ function planLines(w: World, kind: EncounterKind, A: Agent, B: Agent, positive: 
       : { speaker: 'b', kind: 'social', text: lines.complimentReply(w, B, false, varsB), payload: { action: 'compliment', sentiment } });
     return { lines: out, topicLabel: thing, quote: out[0]!.text, thing };
   }
+  if (kind === 'bicker') {
+    const topic = w.rng.pick(['the noise', 'the best bench', 'the last cinnamon bun', 'the arcade high score', 'the music', 'whose turn it was', 'personal space'] as const, 'bicker-topic', A.id);
+    out.push({ speaker: 'a', kind: 'social', text: lines.bicker(w, A, varsA), payload: { action: 'greet', sentiment: 'negative', reaction: 'bicker' }, speakerActivity: `sulking at ${B.displayName}` });
+    out.push({ speaker: 'b', kind: 'social', text: lines.retort(w, B, varsB), payload: { action: 'greet', sentiment: 'negative', reaction: 'retort' }, speakerActivity: `sulking at ${A.displayName}` });
+    if (w.rng.chance(0.5, 'bicker-last', A.id)) out.push({ speaker: 'a', kind: 'social', text: lines.lastWord(w, A, varsA), payload: { action: 'greet', sentiment: 'negative', reaction: 'retort' }, speakerActivity: 'sulking' });
+    return { lines: out, topicLabel: topic, quote: out[0]!.text };
+  }
+  if (kind === 'makeup') {
+    out.push({ speaker: 'a', kind: 'social', text: lines.apology(w, A, varsA), payload: { action: 'compliment', sentiment: 'positive', reaction: 'apology' }, speakerActivity: `chatting with ${B.displayName}` });
+    out.push(positive
+      ? { speaker: 'b', kind: 'chat', text: lines.apologyReply(w, B, true, varsB), payload: { sentiment: 'positive', reaction: 'make-up' }, speakerActivity: `laughing with ${A.displayName}`, listenerActivity: `laughing with ${B.displayName}` }
+      : { speaker: 'b', kind: 'social', text: lines.apologyReply(w, B, false, varsB), payload: { action: 'greet', sentiment: 'negative', reaction: 'make-up' } });
+    return { lines: out, topicLabel: 'making up', quote: out[1]!.text };
+  }
   if (kind === 'befriend') {
     out.push({ speaker: 'a', kind: 'social', text: lines.befriendAsk(w, A, varsA), payload: { action: 'befriend', sentiment: 'positive' }, speakerActivity: `befriending ${B.displayName}` });
     out.push({ speaker: 'b', kind: 'social', text: lines.befriendReply(w, B, positive, varsB), payload: { action: 'befriend', sentiment }, ...(positive ? { speakerActivity: `celebrating with ${A.displayName}`, listenerActivity: `celebrating with ${B.displayName}` } : {}) });
@@ -86,7 +101,9 @@ export function startEncounter(w: World, A: Agent, B: Agent, kind: EncounterKind
   interrupt(w, B);
   const place = nearestPoi(B.x, B.z);
   const at = atPlace(place);
-  const positive = kind === 'gift' ? true : reactsPositively(w, B, A, kind === 'chat' ? 'chat' : kind);
+  const positive = kind === 'gift' ? true : kind === 'bicker' ? false
+    : kind === 'makeup' ? reactsPositively(w, B, A, 'compliment') || w.rng.chance(0.55, 'makeup-accept', B.id)
+      : reactsPositively(w, B, A, kind === 'chat' ? 'chat' : kind);
   if (kind === 'gift') { w.giftAt.set(pairKey(A.id, B.id), w.simTime); w.facts.lastGiftAt = w.simTime; }
   const planned = planLines(w, kind, A, B, positive, place, at);
   const id = w.nextEncounterId++;
@@ -104,7 +121,7 @@ export function startEncounter(w: World, A: Agent, B: Agent, kind: EncounterKind
   });
   startAction(w, A, {
     type: 'converse', phase: 'travel', travelActivity: `walking to ${B.displayName}`, activity: `chatting with ${B.displayName}`,
-    spot: meet, remaining: 1, effects: positive ? CHAT_EFFECTS : COLD_EFFECTS, speed: WALK_SPEED * A.temperament.speed, priority: prio, travelTimeout: 14, anchored: true, hold: true, encounterId: id, partnerId: B.id,
+    spot: meet, remaining: 1, effects: positive ? CHAT_EFFECTS : COLD_EFFECTS, speed: WALK_SPEED * A.temperament.speed, priority: prio, travelTimeout: kind === 'makeup' ? 30 : 14, anchored: true, hold: true, encounterId: id, partnerId: B.id,
   });
   return enc;
 }
@@ -123,8 +140,8 @@ function speak(w: World, enc: Encounter, line: PlannedLine, A: Agent, B: Agent):
 function finishEncounter(w: World, enc: Encounter, A: Agent, B: Agent): void {
   w.encounters.delete(enc.id);
   const r = (lo: number, hi: number) => w.rng.range(lo, hi, 'enc-delta', `${A.id}|${B.id}`);
-  const delta = !enc.positive ? -r(1.5, 4)
-    : enc.kind === 'gift' ? r(7, 11) : enc.kind === 'befriend' ? r(4, 7) : enc.kind === 'compliment' ? r(4, 7) : enc.kind === 'greet' ? r(2.5, 5) : r(1.5, 3.5);
+  const delta = enc.kind === 'bicker' ? -r(3, 6) : !enc.positive ? -r(1.5, 4)
+    : enc.kind === 'gift' ? r(7, 11) : enc.kind === 'makeup' ? r(4, 8) : enc.kind === 'befriend' ? r(4, 7) : enc.kind === 'compliment' ? r(4, 7) : enc.kind === 'greet' ? r(2.5, 5) : r(1.5, 3.5);
   const { before, after } = adjustFriendship(w, A, B, delta);
   const a = A.displayName, b = B.displayName;
   const recent = w.simTime - (w.memoryAt.get(pairKey(A.id, B.id)) ?? -1e9) < 60;
@@ -137,7 +154,12 @@ function finishEncounter(w: World, enc: Encounter, A: Agent, B: Agent): void {
   else if (enc.kind === 'befriend') { memory = memoryLine(w, 'friends', true, mv); w.bestFriends.add(pairKey(A.id, B.id)); }
   else if (!recent) memory = memoryLine(w, 'chat', true, mv, cleanText(enc.quote, 80));
   if (!enc.positive && enc.kind === 'befriend') memory = memoryLine(w, 'declined', false, mv);
+  if (enc.kind === 'bicker') memory = memoryLine(w, 'bicker', false, mv);
+  if (enc.kind === 'makeup') memory = memoryLine(w, 'makeup', enc.positive, mv);
   if (memory) addMemory(w, A, B, memory);
+  const key = pairKey(A.id, B.id);
+  if (enc.kind === 'bicker') w.feuds.set(key, { at: w.simTime, a: A.id, b: B.id, attempts: 0 });
+  else if (enc.kind === 'makeup' && !enc.positive) { const f = w.feuds.get(key); w.feuds.set(key, { at: w.simTime, a: A.id, b: B.id, attempts: (f?.attempts ?? 0) + 1 }); }
   feel(A, enc.positive ? 0.25 : -0.15);
   feel(B, enc.positive ? 0.2 : -0.1);
   for (const p of [A, B]) {
@@ -155,6 +177,12 @@ function finishEncounter(w: World, enc: Encounter, A: Agent, B: Agent): void {
     addMemory(w, A, B, memoryLine(w, 'friends', true, { a, b, at: enc.placeAt }));
     gesture(w, A, `celebrating with ${b}`, 3, { priority: 0.5 });
     gesture(w, B, `celebrating with ${a}`, 3, { priority: 0.5 });
+  } else if (enc.kind === 'bicker') {
+    gesture(w, A, `sulking ${enc.placeAt}`, 6, { priority: 0 });
+    gesture(w, B, 'sulking', 6, { priority: 0 });
+  } else if (enc.kind === 'makeup' && enc.positive) {
+    gesture(w, A, `laughing with ${b}`, 3, { priority: 0.5 });
+    gesture(w, B, `laughing with ${a}`, 3, { priority: 0.5 });
   } else if (!enc.positive) {
     gesture(w, B, w.rng.chance(0.5, 'sulk', B.id) ? `sulking ${enc.placeAt}` : 'sulking', 3.5, { priority: 0 });
   }
@@ -173,7 +201,7 @@ export function updateEncounters(w: World): void {
         enc.phase = 'talk';
         enc.nextAt = w.simTime;
       } else {
-        if (w.simTime - enc.startedAt > 16) cancelEncounter(w, enc.id);
+        if (w.simTime - enc.startedAt > (enc.kind === 'makeup' ? 32 : 16)) cancelEncounter(w, enc.id);
         continue;
       }
     }
@@ -202,6 +230,7 @@ function idHash(a: Agent): number {
 /** Town-wide social director: at most one new autonomous exchange every ~6–12 s. */
 export function directSocial(w: World): void {
   if (w.simTime < w.nextSocialAt) return;
+  if (makeUps(w) || friction(w)) { w.nextSocialAt = w.simTime + w.rng.range(6, 12, 'social-gap', 'drama'); return; }
   const list = [...w.agents.values()].filter(a => socialAvailable(w, a) && !isSleeping(a));
   // First meetings taper once most pairs in town have met.
   let pairsMet = 0;
@@ -252,6 +281,40 @@ export function directSocial(w: World): void {
   }
   startEncounter(w, A, B, kind, true);
   w.nextSocialAt = w.simTime + w.rng.range(6, 12, 'social-gap', A.id);
+}
+
+/** Feuds cool off, then the warmer resident walks over to apologise (arcs: clash → make-up). */
+function makeUps(w: World): boolean {
+  for (const [key, f] of [...w.feuds]) {
+    if (w.simTime - f.at < 75) continue;
+    const A = w.agents.get(f.a), B = w.agents.get(f.b);
+    if (!A || !B || f.attempts >= 2) { w.feuds.delete(key); continue; }
+    if (!socialAvailable(w, A) || !socialAvailable(w, B) || isSleeping(A) || isSleeping(B) || dist(A, B) > 30) continue;
+    const [sorry, other] = A.temperament.warmth + A.temperament.kindness * 0.2 >= B.temperament.warmth + B.temperament.kindness * 0.2 ? [A, B] : [B, A];
+    w.feuds.delete(key);
+    return !!startEncounter(w, sorry, other, 'makeup', true);
+  }
+  return false;
+}
+
+/** Incompatible personalities occasionally clash — at most about once per 2 game hours town-wide. */
+function friction(w: World): boolean {
+  if (w.simTime < w.nextFrictionAt) return false;
+  let best: { a: Agent; b: Agent; s: number } | null = null;
+  const list = [...w.agents.values()].filter(a => !a.visitor && socialAvailable(w, a) && !isSleeping(a));
+  for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
+    const a = list[i]!, b = list[j]!;
+    if (dist(a, b) > 9 || !hasConflict(a.personality, b.personality) || w.feuds.has(pairKey(a.id, b.id))) continue;
+    const f = friendshipOf(w, a.id, b.id) ?? 45;
+    if (f < 15 || f > 75) continue; // never pile on enemies, never break up close friends
+    const s = a.temperament.grumpiness + b.temperament.grumpiness + (1 - (a.mood + b.mood) / 2) * 0.5 + pairNoise(w, a, b) * 0.3;
+    if (!best || s > best.s) best = { a, b, s };
+  }
+  if (!best) { w.nextFrictionAt = w.simTime + 10; return false; }
+  // The grumpier / lower-mood one starts it.
+  const [A, B] = best.a.temperament.grumpiness - best.a.mood >= best.b.temperament.grumpiness - best.b.mood ? [best.a, best.b] : [best.b, best.a];
+  w.nextFrictionAt = w.simTime + w.rng.range(110, 150, 'friction-gap', A.id);
+  return !!startEncounter(w, A, B, 'bicker', true);
 }
 
 // ---------------------------------------------------------------------------

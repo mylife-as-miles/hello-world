@@ -110,9 +110,22 @@ interface ResidentHandle {
   rigRoot: THREE.Object3D | null;
   shadowOn: boolean;
   shadowApplied: boolean | null;
+  /** Label pushed below an overlapping speech bubble (screen px; 0 = at its normal spot). */
+  plateNudgePx: number;
 }
 
-interface RaidChip { sprite: THREE.Sprite; mat: THREE.SpriteMaterial; tex: THREE.CanvasTexture | null; text: string; aspect: number; active: boolean; allowed: boolean; px: number; pos: THREE.Vector3 }
+/** Shared rate limit for distress emotes (clouds, Zzz puffs, "…", sad faces): ~0.7/s, burst 3. */
+interface DistressBudget { tokens: number; last: number }
+function takeDistress(d: DistressBudget): boolean {
+  const t = nowS();
+  d.tokens = Math.min(3, d.tokens + Math.max(0, t - d.last) * 0.7);
+  d.last = t;
+  if (d.tokens < 1) return false;
+  d.tokens -= 1;
+  return true;
+}
+
+interface RaidChip { sprite: THREE.Sprite; mat: THREE.SpriteMaterial; tex: THREE.CanvasTexture | null; text: string; aspect: number; active: boolean; allowed: boolean; px: number; pos: THREE.Vector3; nudgePx: number }
 interface PlateCand { h: ResidentHandle | null; chip: RaidChip | null; x: number; y: number; w: number; hh: number; score: number }
 
 function safeIdPart(s: string): string {
@@ -269,6 +282,7 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
   const pending = useMemo(() => new Map<string, Array<(h: ResidentHandle) => void>>(), []);
   const hub = useMemo(() => new BubbleHub(), []);
   const lodBus = useMemo(() => new LodBus(), []);
+  const distress = useMemo<DistressBudget>(() => ({ tokens: 3, last: 0 }), []);
   const camera = useThree(s => s.camera);
   const gl = useThree(s => s.gl);
   const scene = useThree(s => s.scene);
@@ -413,7 +427,9 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
         case 'social': {
           const action = e.payload?.action;
           if (sentiment === 'negative') {
-            withHandle(actor, h => { face(h, target); h.play('shake'); emoteAt(h, 'cloud', 1); h.animator?.flashExpression('angry', 0.7, 3); });
+            // Snub / bickering (from the sim): quick grumpy cloud on the actor, small sad face on the target.
+            withHandle(actor, h => { face(h, target); h.play('shake'); if (takeDistress(distress)) emoteAt(h, 'cloud', 1, 0.15); h.animator?.flashExpression('angry', 0.6, 2.5); });
+            withHandle(target, h => { face(h, actor); h.animator?.flashExpression('sad', 0.8, 3); if (takeDistress(distress)) emoteAt(h, 'sad', 1, 0.12); });
             break;
           }
           withHandle(actor, h => {
@@ -448,14 +464,14 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
         default: break;
       }
     });
-  }, [store, registry, pending, hub, emotes, gifts, pendingGifts, recentGifts, launchGift]);
+  }, [store, registry, pending, hub, emotes, gifts, pendingGifts, recentGifts, launchGift, distress]);
 
   // Raid chips: one label per clustered raid group ("+7 raiders from CozyStreamer").
   const raidChips = useMemo<RaidChip[]>(() => Array.from({ length: RAID_CHIP_SLOTS }, () => {
     const mat = new THREE.SpriteMaterial({ transparent: true, depthWrite: false, depthTest: false, toneMapped: false });
     const sprite = new THREE.Sprite(mat);
     sprite.visible = false; sprite.renderOrder = 41; sprite.raycast = () => {};
-    return { sprite, mat, tex: null, text: '', aspect: 4, active: false, allowed: false, px: NAMEPLATE_MIN_PX, pos: new THREE.Vector3() };
+    return { sprite, mat, tex: null, text: '', aspect: 4, active: false, allowed: false, px: NAMEPLATE_MIN_PX, pos: new THREE.Vector3(), nudgePx: 0 };
   }), []);
   useEffect(() => () => { for (const ch of raidChips) { ch.tex?.dispose(); ch.mat.dispose(); } }, [raidChips]);
   const raidGroups = useMemo(() => new Map<string, ResidentHandle[]>(), []);
@@ -545,17 +561,29 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
     if (domPlates) domPlates.assigned.length = 0;
     const nb = clock.current.bubbleCount;
     for (const cnd of plateCands) {
-      const l = cnd.x - cnd.w / 2 - 2, r = cnd.x + cnd.w / 2 + 2, t = cnd.y - cnd.hh / 2 - 1, b = cnd.y + cnd.hh / 2 + 1;
+      const l = cnd.x - cnd.w / 2 - 2, r = cnd.x + cnd.w / 2 + 2;
+      let t = cnd.y - cnd.hh / 2 - 1, b = cnd.y + cnd.hh / 2 + 1;
       let ok = shownPlates < (quality === 'low' ? NAMEPLATE_MAX_VISIBLE_LOW : NAMEPLATE_MAX_VISIBLE);
+      // Under a speech bubble: nudge the label just below it instead of hiding it.
+      let nudge = 0;
       for (let k = 0; ok && k < nb; k++) {
         const o = k * 4;
-        if (r > shownRects[o]! && l < shownRects[o + 1]! && b > shownRects[o + 2]! && t < shownRects[o + 3]!) ok = false;
+        if (r > shownRects[o]! && l < shownRects[o + 1]! && b > shownRects[o + 2]! && t < shownRects[o + 3]!) nudge = Math.max(nudge, shownRects[o + 3]! + 3 - t);
+      }
+      if (nudge > 0) {
+        t += nudge; b += nudge;
+        if (nudge > 160) ok = false;
+        for (let k = 0; ok && k < nb; k++) {
+          const o = k * 4;
+          if (r > shownRects[o]! && l < shownRects[o + 1]! && b > shownRects[o + 2]! && t < shownRects[o + 3]!) ok = false;
+        }
       }
       for (let k = 0; ok && k < shownPlates && k < 16; k++) {
         const o = k * 4;
         if (r > plateRects[o]! && l < plateRects[o + 1]! && b > plateRects[o + 2]! && t < plateRects[o + 3]!) ok = false;
       }
-      if (cnd.h) cnd.h.plateAllowed = ok; else if (cnd.chip) cnd.chip.allowed = ok;
+      if (cnd.h) { cnd.h.plateAllowed = ok; cnd.h.plateNudgePx = ok ? nudge : 0; }
+      else if (cnd.chip) { cnd.chip.allowed = ok; cnd.chip.nudgePx = ok ? nudge : 0; }
       if (ok && domPlates && domPlates.assigned.length < domPlates.els.length) domPlates.assigned.push({ h: cnd.h, chip: cnd.chip });
       if (ok && shownPlates < 16) { const o = shownPlates * 4; plateRects[o] = l; plateRects[o + 1] = r; plateRects[o + 2] = t; plateRects[o + 3] = b; }
       if (ok) shownPlates++;
@@ -669,6 +697,7 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
       const sc = chip.px / pxPerM;
       chip.sprite.scale.set(sc * chip.aspect, sc, 1);
       chip.sprite.position.copy(chip.pos);
+      chip.sprite.position.y -= chip.nudgePx / pxPerM;
     }
 
     // Nameplate declutter + raid collapse (~10 Hz).
@@ -694,7 +723,8 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
           el.className = `hw-plate${h && h.id === viewerResidentId ? ' hw-me' : ''}${chip ? ' hw-chip' : ''}`;
         }
         el.style.display = '';
-        el.style.transform = `translate3d(${(((_v.x + 1) / 2) * W).toFixed(1)}px,${(((1 - _v.y) / 2) * H).toFixed(1)}px,0) translate(-50%,-50%)`;
+        const ny = h ? h.plateNudgePx : chip?.nudgePx ?? 0;
+        el.style.transform = `translate3d(${(((_v.x + 1) / 2) * W).toFixed(1)}px,${(((1 - _v.y) / 2) * H + ny).toFixed(1)}px,0) translate(-50%,-50%)`;
       }
     }
 
@@ -781,7 +811,7 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
 
   return <group name="residents-layer">
     {structure.map(s => <Resident key={s.id} id={s.id} displayName={s.displayName} appearance={s.resident.appearance}
-      store={store} registry={registry} pending={pending} hub={hub} lodBus={lodBus} emotes={emotes} overlayRef={overlayRef} domPlates={!!domPlates}
+      store={store} registry={registry} pending={pending} hub={hub} lodBus={lodBus} emotes={emotes} overlayRef={overlayRef} domPlates={!!domPlates} distress={distress}
       isViewer={s.id === viewerResidentId} onSelect={onResidentSelect} />)}
     <primitive object={emotes.group} />
     {blob && <primitive object={blob.mesh} />}
@@ -810,6 +840,7 @@ interface ResidentProps {
   overlayRef: { readonly current: boolean };
   /** quality 'low': labels are DOM pills drawn by the layer; the sprite stays hidden. */
   domPlates: boolean;
+  distress: DistressBudget;
   isViewer: boolean;
   onSelect?: (id: string) => void;
 }
@@ -831,7 +862,7 @@ const Resident = memo(function Resident(p: ResidentProps) {
       id, pos: new THREE.Vector3(r?.location.x ?? 0, 0, r?.location.z ?? 0), yaw: (hashString(id) % 628) / 100, height: 1.7,
       animator: null, visible: true, reaction: null, faceTarget: null,
       plateCand: false, plateAllowed: false, platePx: NAMEPLATE_MIN_PX, plateAspect: 3, plateY: 2, lastActorAt: -1e9, raidCollapsed: false,
-      rigRoot: null, shadowOn: true, shadowApplied: null,
+      rigRoot: null, shadowOn: true, shadowApplied: null, plateNudgePx: 0,
       play(g, delay = 0) {
         if (delay > 0) { setTimeout(() => h.animator?.playGesture(g), delay * 1000); return; }
         h.animator?.playGesture(g);
@@ -845,6 +876,7 @@ const Resident = memo(function Resident(p: ResidentProps) {
     target: new THREE.Vector3(), lastTarget: new THREE.Vector3(), hasTarget: false, estSpeed: 0, visSpeed: 0,
     lastActivity: '', family: 'idle' as AnimationFamily, seat: null as null | { x: number; z: number; facing: number },
     sitting: false, frameSkip: 0, accDt: 0, emoteTimer: 1 + Math.random() * 2, snapAt: 0,
+    distress: null as null | 'sulk' | 'nap' | 'bored',
   });
 
   useEffect(() => {
@@ -905,6 +937,10 @@ const Resident = memo(function Resident(p: ResidentProps) {
       if (r.activity !== s.lastActivity) {
         s.lastActivity = r.activity;
         s.family = animationForVerb(parseActivityVerb(r.activity));
+        const act = r.activity.toLowerCase();
+        s.distress = /^\s*sulking\b/.test(act) ? 'sulk'
+          : /\b(nap|naps|yawn|yawning|sleepy|drowsy|tired)\b/.test(act) ? 'nap'
+            : /(looking for fun|\bbored\b|nothing to do)/.test(act) ? 'bored' : null;
         s.seat = null;
         if (s.family === 'sit' || s.family === 'sleep') {
           const found = findSeatNear(tx, tz, 1.2);
@@ -985,8 +1021,10 @@ const Resident = memo(function Resident(p: ResidentProps) {
       const px = Math.min(NAMEPLATE_MAX_PX, Math.max(NAMEPLATE_MIN_PX, NAMEPLATE_WORLD_H * pxPerM));
       const sc = px / pxPerM;
       plateS.scale.set(sc * plate.aspect, sc, 1);
-      plateS.position.y = handle.height + 0.16 + sc * 0.55;
-      handle.platePx = px; handle.plateAspect = plate.aspect; handle.plateY = plateS.position.y;
+      const baseY = handle.height + 0.16 + sc * 0.55;
+      // Declutter projects the un-nudged spot (no feedback loop); the sprite shows the nudged one.
+      plateS.position.y = baseY - handle.plateNudgePx / pxPerM;
+      handle.platePx = px; handle.plateAspect = plate.aspect; handle.plateY = baseY;
     }
 
     const anim = handle.animator;
@@ -1014,7 +1052,15 @@ const Resident = memo(function Resident(p: ResidentProps) {
       const es = p.isViewer ? VIEWER_EMOTE_SCALE : 1;
       if (fam === 'sleep') { emotes.spawn('zzz', pos.x + 0.1, pos.y + handle.height * 0.75, pos.z, 1, 0.05, es); s.emoteTimer = 2.2; }
       else if (fam === 'dance') { emotes.spawn('note', pos.x, pos.y + handle.height + 0.1, pos.z, 1, 0.5, es); s.emoteTimer = 1.3 + Math.random(); }
-      else if (fam === 'sad') { emotes.spawn('cloud', pos.x, pos.y + handle.height + 0.3, pos.z, 1, 0.1, es); s.emoteTimer = 5; }
+      else if (s.distress) {
+        // Small, rate-limited distress cues keyed on the activity text.
+        if (takeDistress(p.distress)) {
+          if (s.distress === 'sulk') emotes.spawn('cloud', pos.x, pos.y + handle.height + 0.22, pos.z, 1, 0.08, es);
+          else if (s.distress === 'nap') emotes.spawn('zzz', pos.x + 0.08, pos.y + handle.height + 0.12, pos.z, 1, 0.05, 0.55 * es);
+          else emotes.spawn('dots', pos.x, pos.y + handle.height + 0.22, pos.z, 1, 0.05, es);
+        }
+        s.emoteTimer = 6 + Math.random() * 2.5;
+      }
       else if (fam === 'laugh' || fam === 'celebrate') { emotes.spawn('sparkle', pos.x, pos.y + handle.height + 0.1, pos.z, 1, 0.5, es); s.emoteTimer = 1.6; }
       else s.emoteTimer = 2;
     }

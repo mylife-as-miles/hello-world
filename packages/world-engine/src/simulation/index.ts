@@ -47,6 +47,8 @@ function createWorld(opts: Parameters<CreateSimulation>[0]): World {
     relationships: new Map(),
     memoryAt: new Map(),
     bestFriends: new Set(),
+    feuds: new Map(),
+    nextFrictionAt: 90,
     giftAt: new Map(),
     seats: new Map(),
     encounters: new Map(),

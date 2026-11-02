@@ -20,11 +20,13 @@ export interface TownProps {
   occupied?: TownOptions['occupied'];
   /** STABLE external terrain sampler (used when horizon is false). */
   terrainAt?: TownOptions['terrainAt'];
+  /** STABLE distant forest placements drawn as merged low-poly trees. */
+  farTrees?: TownOptions['farTrees'];
 }
 
-export function Town({ quality, onLocationSelect, horizon = true, reservedTrees, occupied, terrainAt }: TownProps) {
+export function Town({ quality, onLocationSelect, horizon = true, reservedTrees, occupied, terrainAt, farTrees }: TownProps) {
   const kit = useKit();
-  const town = useMemo(() => buildTown(quality, { horizon, reservedTrees, occupied, terrainAt }), [quality, horizon, reservedTrees, occupied, terrainAt]);
+  const town = useMemo(() => buildTown(quality, { horizon, reservedTrees, occupied, terrainAt, farTrees }), [quality, horizon, reservedTrees, occupied, terrainAt, farTrees]);
   useEffect(() => () => {
     for (const g of [town.solid, town.detail, town.far, town.flat, town.glass, town.bulbs, town.ground]) g.dispose();
   }, [town]);

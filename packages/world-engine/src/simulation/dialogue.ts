@@ -8,6 +8,7 @@ import type { Weather } from '@hello-world/contracts';
 import type { PoiDef } from '../world/layout';
 import { worldClock, type WorldClock } from '../world/time';
 import { cleanText, type Agent, type World } from './state';
+import { distressNeed } from './needs';
 
 type Bank = readonly string[];
 type Vars = Record<string, string | undefined>;
@@ -124,6 +125,32 @@ const AGREE: Bank = [
   'Totally!', 'Right?!', 'Couldn’t agree more.', 'Ha! Exactly.', 'So true.', 'I was just thinking that!',
   'Yes! A hundred percent.', 'Love that.', 'Same here!', 'You always say the best things.',
 ];
+const DISTRESS_OPENERS: Record<'energy' | 'social' | 'fun', Bank> = {
+  energy: ['*yawn* Oh, hey {name}.', 'Hi {name}... sorry, I’m half asleep.', 'Hey {name}. Running on fumes here.', 'Mm, {name}. Is it bedtime yet?', '{name}... I could nap standing up.'],
+  social: ['Oh! {name}! Someone to talk to, finally.', 'Hey {name}... got a minute? It’s been a quiet day.', '{name}, hi. I was starting to feel invisible.', 'Hi {name}. Nobody’s said hi to me all day.'],
+  fun: ['{name}, save me. I’m so bored.', 'Hey {name}. Know anything fun to do? Anything?', 'Ugh, {name}, this town is so quiet today.', '{name}! Please tell me something exciting.'],
+};
+const DISTRESS_RESPONSES: Record<'energy' | 'social' | 'fun', Bank> = {
+  energy: ['Mm-hm. Tired. Hi.', 'Too sleepy to chat, {name}.', '*yawn* Sorry. Hi, {name}.', 'Hi... five more minutes...'],
+  social: ['Oh, {name}! I really needed this.', 'Hi! Wow, someone actually stopped by.', '{name}! Stay a bit?', 'You came to talk to me? Aw, {name}.'],
+  fun: ['Hey {name}. Entertain me?', 'Hi {name}. Please tell me something exciting.', 'Oh good, {name}. I was dying of boredom.', 'Anything new, {name}? Anything at all?'],
+};
+const BICKER_OPENERS: Bank = [
+  'Could you be any louder, {name}?', '{name}, you’re in my spot.', 'Oh great. It’s {name}.', 'Must you always be so... much, {name}?',
+  'Some of us are trying to relax, {name}.', '{name}, that’s the third time you bumped into me today.', 'Do you ever slow down, {name}?', 'Not you again, {name}.',
+];
+const BICKER_RETORTS: Bank = [
+  'Lighten up, {name}!', 'Wow. Rude.', 'At least I’m having fun, {name}.', 'Somebody skipped their nap.',
+  'Says you, {name}.', 'I was here first!', 'Ugh, fine. Whatever.', 'You’re such a grump, {name}.',
+];
+const BICKER_LAST: Bank = ['Hmph.', 'Unbelievable.', 'Whatever.', 'Fine.', 'Typical.'];
+const APOLOGIES: Bank = [
+  'Hey {name}... sorry about earlier.', '{name}, I was grumpy before. Truce?', 'I brought a peace offering, {name}. Sorry.', 'Can we start over, {name}?',
+  '{name}, I owe you an apology. I was out of line.', 'Still friends, {name}? I’m sorry.',
+];
+const APOLOGY_YES: Bank = ['Apology accepted. Friends?', 'Aw, it’s okay. I was cranky too.', 'Truce! Cocoa’s on me.', 'Already forgotten, {name}.', 'Deal. No more squabbles.'];
+const APOLOGY_NO: Bank = ['...Not yet, {name}.', 'I’ll think about it.', 'Hmph. We’ll see.'];
+const TIRED_REPLIES: Bank = ['Mm. *yawn*', 'Too tired for this, {name}.', 'Sure, sure... zzz.', 'Talk tomorrow, {name}?'];
 const INTROS: Bank = [
   'Hi! I’m {me}. I don’t think we’ve met!', 'Hello there! {me}, nice to meet you.', 'Hey, are you new around here? I’m {me}!',
   'Hi! I’m {me}, I live over at {home}.', 'Oh, a new face! I’m {me}.', 'Hi there! I’m {me}. And you are...?',
@@ -454,6 +481,8 @@ export function placeVars(w: World, speaker: Agent, listener: Agent | null, at: 
 
 export const lines = {
   opener(w: World, s: Agent, vars: Vars): string {
+    const d = distressNeed(s);
+    if (d && w.rng.chance(0.8, 'distress-open', s.id)) return fill(chooseFrom(w, [[`open-distress:${d}`, DISTRESS_OPENERS[d]], ['open:any', OPENERS_ANY]], s.id), vars);
     const period = worldClock(w.simTime).period;
     return fill(flavored(w, s, `open:${period}`, OPENERS[period], OPENERS_BY_TRAIT, 0.45, ['open:any', OPENERS_ANY]), vars);
   },
@@ -463,6 +492,8 @@ export const lines = {
   },
   response(w: World, s: Agent, positive: boolean, vars: Vars): string {
     if (!positive) return fill(s.needs.energy < 20 ? choose(w, 'resp-tired', RESPONSES_TIRED, s.id) : choose(w, 'resp-neg', RESPONSES_NEG, s.id), vars);
+    const d = distressNeed(s);
+    if (d && w.rng.chance(0.8, 'distress-resp', s.id)) return fill(chooseFrom(w, [[`resp-distress:${d}`, DISTRESS_RESPONSES[d]], ['resp-any', RESPONSES_ANY]], s.id), vars);
     return fill(flavored(w, s, 'resp-pos', RESPONSES_POS, RESPONSES_POS_BY_TRAIT, 0.5, ['resp-any', RESPONSES_ANY]), vars);
   },
   compliment(w: World, s: Agent, vars: Vars): string { return fill(flavored(w, s, 'compliment', COMPLIMENTS, COMPLIMENTS_BY_TRAIT, 0.45), vars); },
@@ -489,6 +520,7 @@ export const lines = {
   snub(w: World, s: Agent, vars: Vars): string { return fill(choose(w, 'snub', SNUBS, s.id), vars); },
   chatReply(w: World, s: Agent, heard: string, positive: boolean, vars: Vars): string {
     if (!positive) return fill(choose(w, 'chat-neg', CHAT_REPLIES.negative!, s.id), vars);
+    if (s.needs.energy < 25) return fill(choose(w, 'chat-tired', TIRED_REPLIES, s.id), vars);
     if (s.temperament.grumpiness > 0.5 && w.rng.chance(0.6, 'chat-grump', s.id)) return fill(choose(w, 'chat-grumpy', CHAT_REPLIES.grumpy!, s.id), vars);
     let cat = 'generic';
     for (const [re, c] of CHAT_PATTERNS) if (re.test(heard)) { cat = c; break; }
@@ -502,10 +534,15 @@ export const lines = {
   confetti(w: World, s: Agent, vars: Vars): string { return fill(choose(w, 'confetti', CONFETTI_LINES, s.id), vars); },
   danceJoin(w: World, s: Agent, vars: Vars): string { return fill(choose(w, 'dance-join', DANCE_JOIN, s.id), vars); },
   danceGrumble(w: World, s: Agent, vars: Vars): string { return fill(choose(w, 'dance-grumble', DANCE_GRUMBLE, s.id), vars); },
+  bicker(w: World, s: Agent, vars: Vars): string { return fill(choose(w, 'bicker', BICKER_OPENERS, s.id), vars); },
+  retort(w: World, s: Agent, vars: Vars): string { return fill(choose(w, 'retort', BICKER_RETORTS, s.id), vars); },
+  lastWord(w: World, s: Agent, vars: Vars): string { return fill(choose(w, 'last-word', BICKER_LAST, s.id), vars); },
+  apology(w: World, s: Agent, vars: Vars): string { return fill(choose(w, 'apology', APOLOGIES, s.id), vars); },
+  apologyReply(w: World, s: Agent, yes: boolean, vars: Vars): string { return fill(yes ? choose(w, 'apology-yes', APOLOGY_YES, s.id) : choose(w, 'apology-no', APOLOGY_NO, s.id), vars); },
   celebrateReply(w: World, s: Agent, vars: Vars): string { return fill(choose(w, 'celebrate', CELEBRATE_REPLIES, s.id), vars); },
 };
 
-export type MemoryKind = 'met' | 'greet' | 'chat' | 'rebuff' | 'compliment' | 'gift' | 'friends' | 'declined' | 'welcome' | 'reply' | 'raid' | 'asleep';
+export type MemoryKind = 'met' | 'greet' | 'chat' | 'rebuff' | 'compliment' | 'gift' | 'friends' | 'declined' | 'welcome' | 'reply' | 'raid' | 'asleep' | 'bicker' | 'makeup';
 
 /** Clause templates keep both names + simple past so callbacks can personalise them ("you gave me…"). */
 const MEMORY_CLAUSES: Record<MemoryKind, Bank> = {
@@ -521,6 +558,8 @@ const MEMORY_CLAUSES: Record<MemoryKind, Bank> = {
   reply: ['{a} chatted with {b} {at}', '{a} and {b} traded a few words {at}', '{b} answered {a} {at}', '{a} got a reply from {b} {at}', '{a} and {b} shared a laugh {at}', '{a} said something that made {b} reply {at}'],
   raid: ['{a} welcomed {b} through the portal', '{a} cheered as {b} arrived through the portal', '{a} high-fived {b} at the portal', '{a} met {b} when the raid arrived'],
   asleep: ['{a} tiptoed past a sleeping {b} {at}', '{a} tried to wake {b} {at}', '{a} found {b} fast asleep {at}'],
+  bicker: ['{a} and {b} bickered about {topic} {at}', '{a} snapped at {b} about {topic} {at}', '{a} and {b} argued over {topic} {at}', '{a} told {b} off about {topic} {at}', '{a} and {b} had a spat about {topic} {at}', '{a} complained to {b} about {topic} {at}'],
+  makeup: ['{a} apologized to {b} {at}', '{a} and {b} made up {at}', '{a} and {b} called a truce {at}', '{a} said sorry to {b} {at}', '{a} offered {b} a peace offering {at}', '{a} and {b} patched things up {at}'],
 };
 const MEMORY_ENDINGS: Record<string, Bank> = {
   'met+': ['{b} seemed delighted', '{b} said hi back', '{b} smiled right away', 'they hit it off', '{b} asked about the café', 'instant friends, probably'],
@@ -537,6 +576,9 @@ const MEMORY_ENDINGS: Record<string, Bank> = {
   'welcome-': ['{a} grumbled a little', '{a} kept it short', '{a} muttered a welcome', '{a} did not smile much', '{a} looked suspicious', '{a} said wipe your feet'],
   'raid+': ['the whole raid cheered', 'confetti everywhere', 'what a party', 'so many new faces'],
   'asleep+': ['{b} snored on', '{b} mumbled something about waffles', '{b} did not stir'],
+  'bicker-': ['{b} rolled their eyes', 'both stormed off', 'nobody won', '{b} stuck out their tongue', '{b} huffed and walked away', 'the whole plaza heard it'],
+  'makeup+': ['{b} accepted with a grin', 'hugs all round', 'cocoa was involved', 'they laughed it off', 'friends again', '{b} said it was already forgotten'],
+  'makeup-': ['{b} needs a bit more time', '{b} said maybe later', '{b} crossed their arms', '{b} was still annoyed', '{b} did not say a word', '{b} turned away'],
 };
 
 /** "clause — tail" with varied phrasing (≥ 6 variants for common kinds), deterministic and non-repeating. */

@@ -79,7 +79,7 @@ export function removeRelationshipsOf(w: World, id: string): void {
   }
 }
 
-export type ReactionKind = 'greet' | 'chat' | 'compliment' | 'befriend' | 'gift' | 'wave' | 'reply';
+export type ReactionKind = 'greet' | 'chat' | 'compliment' | 'befriend' | 'gift' | 'wave' | 'reply' | 'bicker' | 'makeup';
 
 /** Does `listener` react warmly to `speaker`? Warmth, mood, friendship, tiredness + a little deterministic noise. */
 export function reactsPositively(w: World, listener: Agent, speaker: Agent, kind: ReactionKind): boolean {

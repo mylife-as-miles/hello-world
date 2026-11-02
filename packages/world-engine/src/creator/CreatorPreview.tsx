@@ -119,6 +119,8 @@ function Studio(props: CreatorPreviewProps) {
   const camAnim = useRef(true);
   const presetRef = useRef<CameraPreset>(preset);
   const elapsed = useRef(0);
+  const interacting = useRef(false);
+  const lastInteract = useRef(-10);
   const gestureRef = useRef<{ name: GestureName; until: number } | null>(null);
   // Expression envelopes: weight eases toward target; target drops to 0 after the hold.
   const exprs = useRef(new Map<ExpressionName, { w: number; target: number; until: number; blinkT?: number }>());
@@ -276,6 +278,19 @@ function Studio(props: CreatorPreviewProps) {
       anim.setExpression(name, e.w);
     }
     if (gestureRef.current && now > gestureRef.current.until) gestureRef.current = null;
+    // Gentle "look at camera" while the user isn't dragging: head/neck turn toward the
+    // viewer (smoothed by the animator); behind the character or mid-drag → auto look-around.
+    const tt = turntable.current;
+    if (tt && !interacting.current && now - lastInteract.current > 0.9) {
+      const th = tt.rotation.y, c0 = Math.cos(th), s0 = Math.sin(th);
+      const dx = camera.position.x, dz = camera.position.z;
+      const lx = dx * c0 - dz * s0, lz = dx * s0 + dz * c0; // camera in the character's frame
+      const yaw = Math.atan2(lx, lz);
+      const headY = rigHeight.current * (rigFamily.current === 'townie' ? 0.86 : 0.92);
+      const pitch = Math.atan2(headY - camera.position.y, Math.hypot(lx, lz));
+      if (Math.abs(yaw) < 1.3) anim.setHeadLook(yaw * 0.8, Math.max(-0.35, Math.min(0.35, pitch * 0.8)));
+      else anim.setHeadLook(null);
+    } else anim.setHeadLook(null);
     anim.update(dt);
   });
 
@@ -338,7 +353,8 @@ function Studio(props: CreatorPreviewProps) {
         minPolarAngle={0.35}
         maxPolarAngle={1.62}
         target={[0, 0.9, 0]}
-        onStart={() => { camAnim.current = false; }}
+        onStart={() => { camAnim.current = false; interacting.current = true; }}
+        onEnd={() => { interacting.current = false; lastInteract.current = elapsed.current; }}
       />
     </>
   );

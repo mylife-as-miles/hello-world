@@ -20,7 +20,7 @@ import type { BaseModelEntry } from '../avatars/catalog';
 import type { RendererPreference } from '../scene/renderer';
 import type { GestureName } from '../interactions/animation/AvatarAnimator';
 import { CreatorPreview, type CameraPreset, type PreviewBase, type PreviewCommand, type PreviewExpression } from './CreatorPreview';
-import { CHARACTER_PRESETS, MAX_ACCESSORIES, MAX_TRAITS, randomAppearance, sanitizeTraits, toggleCapped } from './presets';
+import { CHARACTER_PRESETS, MAX_ACCESSORIES, MAX_TRAITS, STUDIO_DEFAULT, randomAppearance, sanitizeTraits, toggleCapped } from './presets';
 import { Bust, BodyGlyph, Icon } from './art';
 import { CREATOR_CSS } from './styles';
 
@@ -203,7 +203,7 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
 
   // Captured once: editing an existing character prefills from these, Reset returns to them.
   const [initial] = useState(() => ({
-    appearance: normalizeAppearance(props.initialAppearance ?? DEFAULT_APPEARANCE),
+    appearance: normalizeAppearance(props.initialAppearance ?? STUDIO_DEFAULT),
     personality: sanitizeTraits(props.initialPersonality),
   }));
   const [appearance, setAppearance] = useState<AvatarAppearance>(initial.appearance);
@@ -400,7 +400,14 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
     const box = scrollRef.current;
     const el = box?.querySelector<HTMLElement>(`[data-section="${id}"]`);
     if (!box || !el) return;
-    box.scrollTo({ top: Math.max(0, el.offsetTop - 4), behavior: 'smooth' });
+    // Instant + exact: a long smooth scroll can be caught mid-flight (slow devices,
+    // screenshots) showing the previous section. The heading flashes instead.
+    const target = () => Math.max(0, Math.min(el.offsetTop - 4, box.scrollHeight - box.clientHeight));
+    box.scrollTo({ top: target(), behavior: 'auto' });
+    requestAnimationFrame(() => { if (Math.abs(box.scrollTop - target()) > 1) box.scrollTop = target(); });
+    el.classList.remove('is-flash');
+    void el.offsetWidth; // restart the CSS animation
+    el.classList.add('is-flash');
     setActiveSection(id);
   };
   useEffect(() => {

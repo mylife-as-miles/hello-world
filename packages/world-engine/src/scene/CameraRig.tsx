@@ -144,6 +144,75 @@ const CINE_LOOK: Array<[number, number, number]> = [
 const STAGE_POS = getPoi('stage')?.position ?? { x: 7.5, z: 7 };
 const PORTAL_POS = getPoi('portal')?.position ?? { x: 0, z: -24 };
 
+/** Fat test: any prop (lamp post, tree, planter…) within `margin` of the subject end of the segment. */
+function propsNear(ax: number, ay: number, az: number, bx: number, by: number, bz: number, margin: number): boolean {
+  const dx = bx - ax, dz = bz - az;
+  const l2 = dx * dx + dz * dz || 1;
+  for (let i = 0; i < EXTRA.length; i++) {
+    const o = EXTRA[i]!;
+    const t = Math.max(0, Math.min(1, ((o.x - ax) * dx + (o.z - az) * dz) / l2));
+    if (t < 0.2 || t > 0.97) continue;
+    const px = ax + dx * t, pz = az + dz * t;
+    if (Math.hypot(o.x - px, o.z - pz) < o.r + margin && ay + (by - ay) * t < o.h) return true;
+  }
+  return false;
+}
+
+const PORTAL_CANDIDATES = [0.32, -0.32, 0.55, -0.55, 0.14, -0.14, 0.8, -0.8, 1.05, -1.05];
+
+/** Tall props in the near half of a shot (camera → subject) would loom in the foreground. */
+function foregroundClutter(cx: number, cz: number, tx: number, tz: number): boolean {
+  const dx = tx - cx, dz = tz - cz;
+  const D = Math.hypot(dx, dz) || 1;
+  const fx = dx / D, fz = dz / D;
+  for (let i = 0; i < EXTRA.length; i++) {
+    const o = EXTRA[i]!;
+    if (o.h < 2.4) continue;
+    const ox = o.x - cx, oz = o.z - cz;
+    const f = ox * fx + oz * fz;
+    if (f <= 0 || f > D * 0.5) continue;
+    const lateral = Math.abs(ox * fz - oz * fx);
+    if (lateral < f * 0.62 + o.r) return true;
+  }
+  return false;
+}
+
+/**
+ * Portal shot (raid / join): picks the first clear angle from a small candidate set so no lamp post,
+ * tree or fence stands between camera and arrivals. Arrivals sit in the upper-middle third.
+ */
+function portalPose(raid: boolean, outPos: THREE.Vector3, outLook: THREE.Vector3) {
+  const tx = PORTAL_POS.x, tz = PORTAL_POS.z + 2.6, ty = 1.0;
+  const D = raid ? 17 : 11.5, H = raid ? 6.4 : 3.8;
+  let a = PORTAL_CANDIDATES[0]!;
+  for (let i = 0; i < PORTAL_CANDIDATES.length; i++) {
+    const c = PORTAL_CANDIDATES[i]!;
+    const cx = tx + Math.sin(c) * D, cz = tz + Math.cos(c) * D;
+    if (!blocked(cx, H, cz, tx, ty + 0.6, tz) && !propsNear(cx, H, cz, tx, ty, tz, 1.2) && !foregroundClutter(cx, cz, tx, tz)) { a = c; break; }
+  }
+  outPos.set(tx + Math.sin(a) * D, H, tz + Math.cos(a) * D);
+  // aim ~1 m below the arrivals so they sit slightly above centre (upper-middle third)
+  outLook.set(tx, ty - (raid ? 1.0 : 0.6), tz);
+}
+
+/** Keep the camera outside building volumes (push out along the shallowest axis). */
+function pushOutOfBuildings(p: THREE.Vector3) {
+  for (let i = 0; i < OCCLUDERS.length; i++) {
+    const o = OCCLUDERS[i]!;
+    if (o.kind !== 'box' || p.y > o.h + 0.8) continue;
+    const dx = p.x - o.x, dz = p.z - o.z;
+    const lx = dx * o.c - dz * o.s, lz = dx * o.s + dz * o.c;
+    const hw = o.hw + 0.9, hd = o.hd + 0.9;
+    if (Math.abs(lx) >= hw || Math.abs(lz) >= hd) continue;
+    let nx = lx, nz = lz;
+    if (hw - Math.abs(lx) < hd - Math.abs(lz)) nx = Math.sign(lx || 1) * hw; else nz = Math.sign(lz || 1) * hd;
+    // back to world (yaw rotation)
+    p.x = o.x + nx * o.c + nz * o.s;
+    p.z = o.z - nx * o.s + nz * o.c;
+  }
+}
+
+
 const DIRECTED_KINDS = new Set<WorldEvent['kind']>(['join', 'raid', 'gift', 'social', 'dance', 'chat', 'wave', 'confetti']);
 
 interface Director {
@@ -384,6 +453,7 @@ export function CameraRig({ mode, selectedResidentId, transparent = false, quali
     overlay: newOverlayFit(),
     estAt: -1e9, estNext: 25, estCount: 0, blockedFor: 0,
     cut: new THREE.Vector3(), cutWant: 0, cutR0: 0.35, cutR1: 0.95,
+    shotPos: new THREE.Vector3(), shotLook: new THREE.Vector3(), head: new THREE.Vector3(), outFor: 0,
   }), []);
   const cine = useMemo(() => ({
     pos: new THREE.CatmullRomCurve3(CINE_POS.map(p => new THREE.Vector3(...p)), true, 'centripetal'),
@@ -424,8 +494,11 @@ export function CameraRig({ mode, selectedResidentId, transparent = false, quali
     const dt = Math.min(rawDt, 1);
     const t = state.clock.elapsedTime;
     EXTRA = kit.occluders;
+    kit.uniforms.uCutNear.value = mode === 'overlay' ? 0 : 3;
     if (mode === 'orbit') {
       kit.uniforms.uCutOn.value = Math.max(0, kit.uniforms.uCutOn.value - dt * 3);
+      kit.uniforms.uCutA.value.copy(camera.position);
+      pushOutOfBuildings(camera.position);
       if (first.current) {
         poseFor('orbit', t, s.pos, s.look);
         camera.position.copy(s.pos); look.current.copy(s.look); camera.lookAt(look.current);
@@ -454,8 +527,10 @@ export function CameraRig({ mode, selectedResidentId, transparent = false, quali
       if (d.kind === 'portal') {
         const p = PORTAL_POS;
         const age = d.until - now;
-        if (d.raid) { s.pos.set(p.x + 11 + Math.sin(age * 0.1) * 1.5, 8.5, p.z + 19); s.look.set(p.x, 5.6, p.z); }
-        else { s.pos.set(p.x + 4.5, mode === 'street' ? 1.8 : 3.4, p.z + 10.5); s.look.set(p.x, 1.8, p.z + 1.5); }
+        if (snap || s.shotPos.lengthSq() === 0) portalPose(d.raid, s.shotPos, s.shotLook);
+        s.pos.copy(s.shotPos); s.pos.x += Math.sin(age * 0.12) * 0.6;
+        s.look.copy(s.shotLook);
+        void p;
         rate = 2.2;
       } else {
         const r = store.getResident(d.actorId);
@@ -539,7 +614,22 @@ export function CameraRig({ mode, selectedResidentId, transparent = false, quali
       const farNeeded = camera.position.distanceTo(overlay.sphere.center) + overlay.sphere.radius + 10;
       if (camera.far < farNeeded) { camera.far = farNeeded; camera.updateProjectionMatrix(); }
     }
+    if (mode !== 'overlay') pushOutOfBuildings(camera.position);
     camera.lookAt(look.current);
+    // follow: the subject's head must stay inside the frame (≥ 10 % margin), else re-pick + cut
+    if (mode === 'follow' && !directed && selectedResidentId && s.follow.init) {
+      camera.updateMatrixWorld();
+      s.head.set(s.follow.pos.x, 1.75, s.follow.pos.z).project(camera);
+      const out = s.head.z > 1 || Math.abs(s.head.x) > 0.8 || Math.abs(s.head.y) > 0.8;
+      s.outFor = out ? s.outFor + dt : 0;
+      if (s.outFor > 0.4) {
+        s.outFor = 0;
+        s.follow.rel = -s.follow.rel;
+        camera.position.copy(s.pos);
+        look.current.copy(s.look);
+        camera.lookAt(look.current);
+      }
+    }
     const u = kit.uniforms;
     u.uCutA.value.copy(camera.position);
     if (snap || u.uCutOn.value < 0.01) u.uCutB.value.copy(s.cut); else u.uCutB.value.lerp(s.cut, Math.min(1, dt * 6));

@@ -61,6 +61,18 @@ export const CHARACTER_PRESETS: CharacterPreset[] = [
   }),
 ];
 
+/**
+ * Starting look for a brand-new character (no initialAppearance): a styled,
+ * preset-quality outfit instead of the plain catalog default.
+ */
+export const STUDIO_DEFAULT: AvatarAppearance = normalizeAppearance({
+  baseModelId: 'townie-classic', skinTone: '#eab88f', hairStyle: 'bun', hairColor: '#6b4226',
+  outfit: { top: 'varsity', bottom: 'jeans', shoes: 'hightops', color: '#5b6ee1' },
+  accessories: ['earrings'],
+  face: { eyeColor: '#5a3d22', eyeSize: 0.6, noseSize: 0.42, mouthSize: 0.52 },
+  body: { height: 0.5, build: 0.45 },
+});
+
 /** Deterministic random character: the same click count always yields the same look. */
 export function randomAppearance(clickCount: number): AvatarAppearance {
   return appearanceFromSeed(`hello-world-studio-random-${clickCount}`);

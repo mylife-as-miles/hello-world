@@ -6,7 +6,8 @@ import type { WorldClock } from '../world/time';
 import { cancelEncounter, clearAction, gesture, goThen, interrupt, removeAgent, scoreChoices, socializeCandidate, startAction, startChoice, startSocialize } from './actions';
 import { lines, placeVars } from './dialogue';
 import { moveAlong, planPath, STROLL_SPEED } from './movement';
-import { applyEffects, lowestNeed, primaryNeed, type NeedKey } from './needs';
+import { applyEffects, distressNeed, fixes, lowestNeed, primaryNeed, type NeedKey } from './needs';
+import { worldClock } from '../world/time';
 import { atPlace, nearestPoi, pickSpot, placeName, poi, portalSpot, spotAround } from './places';
 import { POIS, type PoiDef } from '../world/layout';
 import { startWelcomeWalk } from './social';
@@ -36,6 +37,11 @@ export function updateAgent(w: World, a: Agent, dt: number, clock: WorldClock): 
     return;
   }
   applyEffects(a, act.effects, dt);
+  // Distress interrupts unrelated autonomous activities so it stays visible.
+  if (!a.visitor && act.priority === 0 && !act.hold && !act.distress && act.remaining > 0.5 && w.simTime - a.moodShownAt >= 8) {
+    const low = distressNeed(a);
+    if (low && !fixes(act.type, low)) act.remaining = 0.5;
+  }
   // Satiation: an activity ends early once the need it serves is full.
   const primary = primaryNeed(act.type);
   if (primary && act.priority < 1 && !act.hold && act.remaining > 1.5 && a.needs[primary] >= (act.type === 'sleep' ? 96 : 90)) act.remaining = 1.5;
@@ -60,11 +66,12 @@ export function updateAgent(w: World, a: Agent, dt: number, clock: WorldClock): 
 export function decide(w: World, a: Agent, clock: WorldClock): void {
   if (a.visitor && w.simTime >= a.leaveAt) { beginLeaving(w, a); return; }
   if (a.needsWelcome) { a.needsWelcome = false; startWelcomeWalk(w, a); return; }
-  if (!a.visitor && w.simTime - a.moodShownAt > 40) {
-    const low = lowestNeed(a);
+  if (!a.visitor) {
+    // Distress stays visible: while a need is under 25 its state is re-shown ~10 s after the last one ended.
+    const low = distressNeed(a);
+    if (low && w.simTime - a.moodShownAt >= 6) { showLowNeed(w, a, low); return; }
     const sleepyHour = (clock.period === 'evening' || clock.period === 'night') && a.temperament.nightOwl < 0.5;
-    if (low.value < 25 && w.rng.chance(0.75, 'mood-show', a.id)) { a.moodShownAt = w.simTime; showLowNeed(w, a, low.key); return; }
-    if (sleepyHour && a.needs.energy < 56 && w.rng.chance(0.65, 'mood-tired', a.id)) { a.moodShownAt = w.simTime; showLowNeed(w, a, 'energy'); return; }
+    if (!low && sleepyHour && a.needs.energy < 56 && w.simTime - a.moodShownAt > 40 && w.rng.chance(0.65, 'mood-tired', a.id)) { showLowNeed(w, a, 'energy'); return; }
   }
   const choices = scoreChoices(w, a, clock).sort((x, y) => y.score - x.score);
   const social = socializeCandidate(w, a);
@@ -78,27 +85,44 @@ export function decide(w: World, a: Agent, clock: WorldClock): void {
 
 /** Make a low need visible before acting on it: lonely → sulk by a bench, tired → think about a nap, bored → aimless wander. */
 function showLowNeed(w: World, a: Agent, need: NeedKey): void {
+  const mark = (seconds: number) => { a.moodShownAt = w.simTime + seconds; if (a.action) a.action.distress = need; };
   if (need === 'social') {
     a.socialReadyAt = Math.min(a.socialReadyAt, w.simTime);
     let bench: PoiDef | null = null;
     let bd = 18;
     for (const p of POIS) if (p.kind === 'bench') { const d = dist(a, p.position); if (d < bd) { bd = d; bench = p; } }
-    if (bench) {
+    if (bench && w.rng.chance(0.6, 'lonely-bench', a.id)) {
       const spot = spotAround(w, bench.position, 1, 1.5, a, 'lonely');
-      goThen(w, a, spot, `walking to ${placeName(bench)}`, `sulking near ${placeName(bench)}`, 9, { priority: 0, effects: { energy: 0.1, social: 0, fun: 0 } });
-    } else gesture(w, a, `sulking alone ${atPlace(nearestPoi(a.x, a.z))}`, 9, { priority: 0 });
+      goThen(w, a, spot, `walking to ${placeName(bench)}`, `sulking near ${placeName(bench)}`, 18, { priority: 0, effects: { energy: 0.1, social: 0, fun: 0 } });
+      mark(18 + dist(a, spot) / 1.3);
+    } else { gesture(w, a, `sulking alone ${atPlace(nearestPoi(a.x, a.z))}`, 18, { priority: 0 }); mark(18); }
     return;
   }
-  if (need === 'energy') { gesture(w, a, 'thinking about a nap', 6, { priority: 0, effects: { energy: 0.2, social: 0, fun: 0 } }); return; }
+  if (need === 'energy') {
+    // Yawn, then actually rest (bench/café seat nearby if free, else on the spot).
+    gesture(w, a, 'thinking about a nap', 9, { priority: 0, effects: { energy: 0.2, social: 0, fun: 0 }, onDone: (w2, ag) => restNow(w2, ag) });
+    mark(9);
+    return;
+  }
   let place = poi('plaza');
   let bd = Infinity;
   for (const p of POIS) if (p.kind === 'plaza' || p.kind === 'park' || p.kind === 'garden') { const d = dist(a, p.position); if (d < bd) { bd = d; place = p; } }
   interrupt(w, a);
   startAction(w, a, {
-    type: 'wander', phase: 'travel', travelActivity: 'wandering around looking for fun', activity: 'wandering around looking for fun', poiId: place.id,
-    spot: pickSpot(w, place, a), remaining: 12, effects: { energy: -0.03, social: 0, fun: 0.08 }, speed: STROLL_SPEED, priority: 0, travelTimeout: 30, anchored: false,
+    type: 'gesture', phase: 'travel', travelActivity: 'wandering around looking for fun', activity: 'wandering around looking for fun', poiId: place.id,
+    spot: pickSpot(w, place, a), remaining: 20, effects: { energy: -0.03, social: 0, fun: 0.08 }, speed: STROLL_SPEED, priority: 0, travelTimeout: 30, anchored: false,
     hop: { center: place.position, radius: place.radius, next: w.simTime + 4, poiId: place.id },
   });
+  mark(20);
+}
+
+function restNow(w: World, a: Agent): void {
+  const clock = worldClock(w.simTime);
+  const rest = scoreChoices(w, a, clock)
+    .filter(c => (c.def.type === 'rest' || c.def.type === 'sit' || c.def.type === 'sleep') && dist(a, c.poi.position) < 16)
+    .sort((x, y) => y.score - x.score)[0];
+  if (rest && startChoice(w, a, rest, clock)) return;
+  gesture(w, a, `resting ${atPlace(nearestPoi(a.x, a.z))}`, 12, { priority: 0, type: 'rest', effects: { energy: 0.7, social: 0, fun: 0 } });
 }
 
 /** Being around people is mildly social (people-watching), so crowds don't starve. No events. */

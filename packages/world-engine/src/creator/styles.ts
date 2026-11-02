@@ -125,6 +125,8 @@ export const CREATOR_CSS = /* css */ `
 .hwc-sec + .hwc-sec { border-top: 1px solid var(--hwc-line); margin-top: 10px; }
 .hwc-sec-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
 .hwc-sec-title { margin: 0; font-size: 15px; font-weight: 650; letter-spacing: -0.005em; }
+.hwc-sec.is-flash .hwc-sec-title { animation: hwc-flash 1s ease-out; }
+@keyframes hwc-flash { 0%, 35% { color: #cfc4ff; text-shadow: 0 0 14px rgba(162, 143, 255, 0.7); } 100% { color: inherit; text-shadow: none; } }
 .hwc-sec-sub { font-size: 11.5px; color: var(--hwc-faint); }
 .hwc-label { display: flex; align-items: baseline; justify-content: space-between; margin: 14px 0 8px; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--hwc-muted); font-weight: 650; }
 .hwc-label small { letter-spacing: 0; text-transform: none; font-weight: 500; color: var(--hwc-faint); font-size: 11.5px; }

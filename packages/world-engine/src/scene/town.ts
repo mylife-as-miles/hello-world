@@ -122,6 +122,8 @@ export interface TownOptions {
    * is scattered outside the flat disc.
    */
   terrainAt?: (x: number, z: number) => number;
+  /** Distant forest drawn as merged low-poly trees (low quality: replaces crossed-card impostors). */
+  farTrees?: ReadonlyArray<{ x: number; y: number; z: number; scale: number; species: string }>;
 }
 
 interface Ctx {
@@ -964,6 +966,11 @@ export function buildTown(quality: 'low' | 'high', options: TownOptions = {}): T
     const kind = r() < 0.6 ? 'pine' : (r() < 0.8 ? 'round' : 'autumn');
     addTree(c, c.far, x, z, kind, 1.0 + r() * 0.7, 0, groundHeight(x, z));
   });
+  // External forest placements rendered as merged low-poly trees (one draw call, no shadows)
+  for (const t of options.farTrees ?? []) {
+    const kind = t.species === 'conifer' ? 'pine' : t.species === 'birch' ? 'birch' : t.species === 'blossom' ? 'blossom' : t.species === 'autumn' ? 'autumn' : 'round';
+    addTree(c, c.far, t.x, t.z, kind, t.scale * 1.35, 0, t.y || 0.0001);
+  }
   // Distant hills ring (big soft blobs)
   for (let i = 0; i < (horizon ? 18 : 0); i++) {
     const a = (i / 18) * Math.PI * 2 + c.r() * 0.2;

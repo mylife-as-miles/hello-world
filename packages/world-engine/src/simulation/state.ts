@@ -41,6 +41,8 @@ export interface Action {
   hold?: boolean;
   partnerId?: string;
   encounterId?: number;
+  /** Set on the visible low-need states (lonely sulk, nap thoughts, bored wander). */
+  distress?: 'energy' | 'social' | 'fun';
   /** Agent this resident is walking over to socialise with. */
   seekingId?: string;
   hop?: { center: Vec2; radius: number; next: number; poiId: string };
@@ -87,7 +89,7 @@ export interface Agent {
   moodShownAt: number;
 }
 
-export type EncounterKind = 'greet' | 'chat' | 'compliment' | 'gift' | 'befriend';
+export type EncounterKind = 'greet' | 'chat' | 'compliment' | 'gift' | 'befriend' | 'bicker' | 'makeup';
 
 export interface PlannedLine {
   speaker: 'a' | 'b';
@@ -147,6 +149,10 @@ export interface World {
   relationships: Map<string, Relationship>;
   /** pairKey → sim time of the last memory written (throttles chatty memories). */
   memoryAt: Map<string, number>;
+  /** Pairs that bickered recently and may make up later. */
+  feuds: Map<string, { at: number; a: string; b: string; attempts: number }>;
+  /** Sim time when the next personality clash may happen (≈ every 2 game hours). */
+  nextFrictionAt: number;
   /** Pairs that already had their best-friends moment. */
   bestFriends: Set<string>;
   /** pairKey → sim time of the last autonomous gift. */

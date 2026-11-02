@@ -239,6 +239,57 @@ describe('simulation: life', () => {
     expect(starts.greet).toBeLessThan(starts.compliment + starts.gift + starts.befriend + 30);
   });
 
+  it('distress is visible: when a need is under 25 its matching state shows about half the time', () => {
+    const { rt, tick } = runtime();
+    const VIS = { energy: /^(thinking about a nap|resting|sleeping|sitting)/, social: /^sulking/, fun: /^(wandering around looking for fun|sulking)/ };
+    let low = 0, visible = 0;
+    const kinds = new Set<string>();
+    for (let i = 0; i < 1680; i++) {
+      tick(1);
+      if (i % 2) continue;
+      for (const r of rt.getSnapshot().residents) {
+        const k = (['energy', 'social', 'fun'] as const).reduce((m, x) => (r.needs[x] < r.needs[m] ? x : m), 'energy' as 'energy' | 'social' | 'fun');
+        if (r.needs[k] >= 25) continue;
+        low++;
+        if (VIS[k].test(r.activity)) { visible++; kinds.add(r.activity.split(' ')[0]!); }
+      }
+    }
+    expect(low).toBeGreaterThan(100);
+    expect(visible / low).toBeGreaterThan(0.45);
+    expect(kinds.size).toBeGreaterThanOrEqual(3);
+  });
+
+  it('friction: incompatible residents occasionally bicker (rate-limited) and later make up', () => {
+    const { rt, tick } = runtime();
+    const seen = new Set<string>();
+    const bickers: Array<{ a: string; b: string; t: number }> = [];
+    let apologies = 0;
+    for (let i = 0; i < 1680; i++) {
+      tick(1);
+      const s = rt.getSnapshot();
+      for (const e of s.eventHistory) {
+        if (e.source !== 'simulation' || seen.has(e.id)) continue;
+        seen.add(e.id);
+        if (e.payload?.reaction === 'bicker') {
+          expect(e.kind).toBe('social');
+          expect(e.payload?.sentiment).toBe('negative');
+          bickers.push({ a: e.actorId, b: e.targetId!, t: s.simulationTime });
+        }
+        if (e.payload?.reaction === 'apology') apologies++;
+      }
+    }
+    expect(bickers.length).toBeGreaterThanOrEqual(1);
+    expect(bickers.length).toBeLessThanOrEqual(9); // ≈ one per 2 game hours over 14 h
+    for (let i = 1; i < bickers.length; i++) expect(bickers[i]!.t - bickers[i - 1]!.t).toBeGreaterThan(100);
+    expect(apologies).toBeGreaterThanOrEqual(1);
+    const mems = rt.getSnapshot().relationships.flatMap(r => r.memories);
+    expect(mems.some(m => /(bickered|snapped at|argued over|told .+ off|had a spat|complained to)/.test(m))).toBe(true);
+    expect(mems.some(m => /(apologized|made up|called a truce|said sorry|peace offering|patched things up)/.test(m))).toBe(true);
+    const pairs = new Map<string, number>();
+    for (const b of bickers) { const k = [b.a, b.b].sort().join('|'); pairs.set(k, (pairs.get(k) ?? 0) + 1); }
+    expect(Math.max(...pairs.values())).toBeLessThanOrEqual(3); // never spirals into constant fights
+  });
+
   it('seats are exclusive and sitters stand exactly on seat coordinates', () => {
     const { rt, tick } = runtime();
     for (let i = 0; i < 300; i++) {

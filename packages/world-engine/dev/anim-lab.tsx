@@ -106,6 +106,7 @@ function World() {
   const store = useMemo(() => new SceneStore(runtime), [runtime]);
   const [sel, setSel] = useState<string | undefined>(params.get('select') ?? undefined);
   useEffect(() => { store.start(); return () => store.stop(); }, [store]);
+  useEffect(() => { (window as unknown as { __select: (id?: string) => void }).__select = setSel; }, []);
   useEffect(() => {
     (window as unknown as { __rt: typeof runtime }).__rt = runtime;
     let n = 0;

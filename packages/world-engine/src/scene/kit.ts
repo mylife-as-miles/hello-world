@@ -39,6 +39,8 @@ export interface SharedUniforms {
   uCutKeep: { value: number };
   /** 0…1 strength (eased by the camera rig). */
   uCutOn: { value: number };
+  /** Props closer than this to the camera (m) dissolve (0 = off; overlay keeps it off). */
+  uCutNear: { value: number };
 }
 
 const CUT_PARS = /* glsl */ `
@@ -47,11 +49,17 @@ uniform vec3 uCutB;
 uniform vec2 uCutR;
 uniform float uCutKeep;
 uniform float uCutOn;
+uniform float uCutNear;
 varying vec3 vCutW;
 float hwBayer2(vec2 a) { a = floor(a); return fract(dot(a, vec2(0.5, a.y * 0.75))); }
 float hwBayer4(vec2 a) { return hwBayer2(0.5 * a) * 0.25 + hwBayer2(a); }
 `;
 const CUT_FRAG = /* glsl */ `
+  if (uCutNear > 0.0) {
+    float hwN = distance(vCutW, uCutA);
+    float hwKN = 1.0 - smoothstep(uCutNear * 0.6, uCutNear, hwN);
+    if (hwKN > 0.0 && hwKN * 1.05 > hwBayer4(gl_FragCoord.xy + 1.5)) discard;
+  }
   if (uCutOn > 0.001) {
     vec3 hwAB = uCutB - uCutA;
     float hwL = max(length(hwAB), 0.001);
@@ -84,6 +92,7 @@ export function injectCutout(shader: { uniforms: Record<string, THREE.IUniform>;
   shader.uniforms.uCutR = uniforms.uCutR;
   shader.uniforms.uCutKeep = uniforms.uCutKeep;
   shader.uniforms.uCutOn = uniforms.uCutOn;
+  shader.uniforms.uCutNear = uniforms.uCutNear;
   shader.vertexShader = shader.vertexShader
     .replace('#include <common>', '#include <common>\nvarying vec3 vCutW;')
     .replace('#include <project_vertex>', '#include <project_vertex>\n' + CUT_VERT);
@@ -158,7 +167,7 @@ export function createKit(): SceneKit {
   const uniforms: SharedUniforms = {
     uSnow: { value: 0 }, uWet: { value: 0 }, uTime: { value: 0 },
     uCutA: { value: new THREE.Vector3() }, uCutB: { value: new THREE.Vector3() }, uCutR: { value: new THREE.Vector2(0.35, 0.95) },
-    uCutKeep: { value: 1.3 }, uCutOn: { value: 0 },
+    uCutKeep: { value: 1.3 }, uCutOn: { value: 0 }, uCutNear: { value: 0 },
   };
 
   const solid = track(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, metalness: 0 }));

@@ -54,25 +54,30 @@ function Icon({ kind }: { kind: ToastKind }) {
   return <svg viewBox="0 0 24 24" style={s} fill={c}><path d="M12 2l1.8 5.2L19 9l-5.2 1.8L12 16l-1.8-5.2L5 9l5.2-1.8z" /><circle cx="19" cy="18" r="1.6" /><circle cx="5" cy="17" r="1.2" /></svg>;
 }
 
+const reducedMotion = () => typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/** Never shows 0: starts at ~60 % of the amount and counts up over 0.6 s (instant with reduced motion). */
 function CountUp({ to }: { to: number }) {
   const ref = useRef<HTMLSpanElement>(null);
+  const start = Math.round(to * 0.6);
   useEffect(() => {
+    if (reducedMotion()) { if (ref.current) ref.current.textContent = String(to); return; }
     let raf = 0;
     const t0 = performance.now();
     const step = () => {
-      const k = Math.min(1, (performance.now() - t0) / 1400);
+      const k = Math.min(1, (performance.now() - t0) / 600);
       const eased = 1 - Math.pow(1 - k, 3);
-      if (ref.current) ref.current.textContent = String(Math.round(to * eased));
+      if (ref.current) ref.current.textContent = String(Math.round(start + (to - start) * eased));
       if (k < 1) raf = requestAnimationFrame(step);
     };
     raf = requestAnimationFrame(step);
     return () => cancelAnimationFrame(raf);
-  }, [to]);
-  return <span ref={ref} style={{ fontVariantNumeric: 'tabular-nums' }}>0</span>;
+  }, [to, start]);
+  return <span ref={ref} style={{ fontVariantNumeric: 'tabular-nums' }}>{reducedMotion() ? to : start}</span>;
 }
 
 const wrap: CSSProperties = {
-  position: 'absolute', left: 0, right: 0, bottom: '9%', zIndex: 6, pointerEvents: 'none',
+  position: 'absolute', left: 0, right: 0, zIndex: 6, pointerEvents: 'none',
   display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
   fontFamily: 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif',
 };
@@ -80,6 +85,7 @@ const wrap: CSSProperties = {
 const CSS = `
 @keyframes hwEvbIn { from { opacity: 0; transform: translateY(14px) scale(.96); } to { opacity: 1; transform: none; } }
 @keyframes hwEvbOut { to { opacity: 0; transform: translateY(-6px) scale(.98); } }
+@media (prefers-reduced-motion: reduce) { .hw-evb-toast { animation: none !important; } }
 `;
 const anim = (life: number) => `hwEvbIn .38s cubic-bezier(.2,.9,.3,1.2) both, hwEvbOut .45s ease-in ${((life - 450) / 1000).toFixed(2)}s forwards`;
 
@@ -104,8 +110,10 @@ export function EventBanner({ store }: { store: SceneStore }) {
     return () => { off(); for (const tm of timers) clearTimeout(tm); };
   }, [store]);
   if (!toasts.length) return null;
+  // During a raid shot the arrivals fill the lower frame: move the stack to the top.
+  const raidActive = toasts.some(t => t.kind === 'raid');
   return (
-    <div style={wrap} aria-live="polite" data-testid="world-event-banner">
+    <div style={{ ...wrap, ...(raidActive ? { top: '7%' } : { bottom: '9%' }) }} aria-live="polite" data-testid="world-event-banner" data-position={raidActive ? 'top' : 'bottom'}>
       <style>{CSS}</style>
       {toasts.map(t => {
         const accent = ACCENT[t.kind];

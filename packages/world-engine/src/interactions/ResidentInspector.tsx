@@ -20,16 +20,40 @@ export interface ResidentInspectorProps {
 
 const GIFT_ITEMS = ['flowers', 'cookie', 'coffee', 'balloon', 'cupcake'];
 
-export function moodFromNeeds(n: ResidentProfile['needs']): { label: string; color: string } {
+/**
+ * Mood badge from needs (+ recent social context). The most urgent low need wins:
+ * < 25 → Exhausted / Lonely / Bored, < 40 → Tired / Wants company / Restless.
+ * `grumpy` (recent negative social event or sulking) overrides everything.
+ */
+export function moodFromNeeds(n: ResidentProfile['needs'], opts: { grumpy?: boolean } = {}): { label: string; color: string } {
+  if (opts.grumpy) return { label: 'Grumpy', color: '#ff6b5a' };
   const e = n.energy, s = n.social, f = n.fun;
+  const lowest = Math.min(e, s, f);
+  if (lowest < 25) {
+    if (lowest === e) return { label: 'Exhausted', color: '#8f9bff' };
+    if (lowest === s) return { label: 'Lonely', color: '#79b8ff' };
+    return { label: 'Bored', color: '#e3b55a' };
+  }
+  if (lowest < 40) {
+    if (lowest === e) return { label: 'Tired', color: '#b3bdf5' };
+    if (lowest === s) return { label: 'Wants company', color: '#a9cff5' };
+    return { label: 'Restless', color: '#efd08a' };
+  }
   const avg = (e + s + f) / 3;
-  if (e < 22) return { label: 'Sleepy', color: '#8fa3ff' };
-  if (s < 22) return { label: 'Lonely', color: '#9bb1c8' };
-  if (f < 22) return { label: 'Bored', color: '#c8b49b' };
-  if (avg >= 78) return { label: 'Joyful', color: '#ffd84d' };
-  if (avg >= 58) return { label: 'Content', color: '#7bd389' };
-  if (avg >= 40) return { label: 'Okay', color: '#a7c4b5' };
-  return { label: 'Drained', color: '#ff9f7a' };
+  if (avg >= 75) return { label: 'Joyful', color: '#ffd84d' };
+  if (avg >= 55) return { label: 'Content', color: '#7bd389' };
+  return { label: 'Okay', color: '#a7c4b5' };
+}
+
+/** True when the resident was in a negative social event (snub/bickering) recently, or is sulking. */
+export function isGrumpy(r: ResidentProfile, history: readonly WorldEvent[], now = Date.now()): boolean {
+  if (/^\s*sulking\b/i.test(r.activity)) return true;
+  for (let i = history.length - 1; i >= 0; i--) {
+    const e = history[i]!;
+    if (now - e.timestamp > 90_000) break;
+    if (e.kind === 'social' && e.payload?.sentiment === 'negative' && (e.actorId === r.id || e.targetId === r.id)) return true;
+  }
+  return false;
 }
 
 export function friendshipLabel(v: number): string {
@@ -125,7 +149,7 @@ export function ResidentInspector(props: ResidentInspectorProps) {
     for (let i = rel.memories.length - 1; i >= 0 && memories.length < 3; i--) memories.push(rel.memories[i]!);
     if (memories.length >= 3) break;
   }
-  const mood = moodFromNeeds(r.needs);
+  const mood = moodFromNeeds(r.needs, { grumpy: isGrumpy(r, snap.eventHistory) });
   const isSelf = !!viewer && viewer === r.id;
   const viewerName = viewer ? store.getResident(viewer)?.displayName ?? 'You' : 'You';
 
@@ -155,7 +179,7 @@ export function ResidentInspector(props: ResidentInspectorProps) {
     <button className="hw-x" aria-label="Close" onClick={() => onClose?.()}>×</button>
     <h3>{r.displayName}{isSelf ? ' (you)' : ''}</h3>
     <div className="hw-sub">{r.activity || 'idle'} · {r.location.zone}</div>
-    <div className="hw-mood"><span className="hw-dot" style={{ background: mood.color }} />{mood.label}</div>
+    <div className="hw-mood" style={{ background: `${mood.color}26`, boxShadow: `inset 0 0 0 1px ${mood.color}66` }}><span className="hw-dot" style={{ background: mood.color }} />{mood.label}</div>
 
     <div className="hw-sec">
       <div className="hw-h">Needs</div>

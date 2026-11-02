@@ -85,6 +85,21 @@ export function primaryNeed(type: string): NeedKey | null {
   }
 }
 
+export const DISTRESS_THRESHOLD = 25;
+
+/** The need in distress (lowest need under 25), if any. */
+export function distressNeed(a: Agent): NeedKey | null {
+  const low = lowestNeed(a);
+  return low.value < DISTRESS_THRESHOLD ? low.key : null;
+}
+
+/** Action types that address a need (so they are not interrupted to show distress). */
+export function fixes(type: string, need: NeedKey): boolean {
+  if (need === 'energy') return type === 'rest' || type === 'sit' || type === 'sleep' || type === 'drink' || type === 'eat';
+  if (need === 'social') return type === 'converse' || type === 'socialize';
+  return type === 'play' || type === 'dance' || type === 'watch' || type === 'admire' || type === 'wander';
+}
+
 /** The lowest need (and its value). */
 export function lowestNeed(a: Agent): { key: NeedKey; value: number } {
   const n = a.needs;

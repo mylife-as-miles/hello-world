@@ -29,9 +29,9 @@ void main() {
   vec3 deep = vec3(0.18, 0.06, 0.45), mag = vec3(1.0, 0.32, 0.86), cyan = vec3(0.32, 0.95, 1.0);
   vec3 col = mix(deep, mag, smoothstep(0.3, 0.9, sw));
   col = mix(col, cyan, smoothstep(0.72, 1.0, sw) * (0.4 + 0.6 * r));
-  col += vec3(1.0, 0.86, 1.0) * smoothstep(0.6, 0.0, r) * (0.2 + uRaid * 1.4);
+  col += vec3(1.0, 0.86, 1.0) * smoothstep(0.6, 0.0, r) * (0.2 + uRaid * 0.6);
   float alpha = smoothstep(1.0, 0.86, r) * (0.72 + 0.28 * uRaid);
-  gl_FragColor = vec4(col * (1.05 + uRaid * 2.4), alpha);
+  gl_FragColor = vec4(col * (1.05 + uRaid * 1.1), alpha);
 }`;
 const HALO_FRAG = /* glsl */ `
 uniform float uTime;
@@ -149,6 +149,9 @@ export function Portal({ quality, overlay = false }: { quality: 'low' | 'high'; 
     res.runeMat.color.setScalar(0.8 + env.lights * 1.5 + raid * 3.5);
     if (light.current) light.current.intensity = 2 + env.lights * 5 + raid * 30 + flash * 80;
     if (beam.current) beam.current.visible = raid > 0.01;
+    // keep the opening flash, then settle to ~30 % so the beam never washes out the shot
+    const settle = age < 0.4 ? 1 : Math.max(0.3, 1 - ((age - 0.4) / 0.8) * 0.7);
+    res.beamMat.uniforms.uBeamGain!.value = (overlay ? 0.38 : 1) * settle;
     // Overlay: the portal only appears (grounded on its plinth) while a raid is happening.
     if (overlay && root.current) {
       root.current.visible = raid > 0.01;
@@ -170,7 +173,7 @@ export function Portal({ quality, overlay = false }: { quality: 'low' | 'high'; 
         <mesh geometry={res.haloGeo} material={res.haloMat} position={[0, 0, 0.05]} renderOrder={8} />
         <points geometry={res.moteGeo} material={res.moteMat} frustumCulled={false} renderOrder={9} />
       </group>
-      <mesh ref={beam} geometry={res.beamGeo} material={res.beamMat} position={overlay ? [0, 9, 0] : [0, 30, 0]} scale={overlay ? [0.42, 0.3, 0.42] : [1, 1, 1]} visible={false} renderOrder={9} />
+      <mesh ref={beam} geometry={res.beamGeo} material={res.beamMat} position={overlay ? [0, 9, 0] : [0, 30, 0]} scale={overlay ? [0.42, 0.3, 0.42] : [0.5, 1, 0.5]} visible={false} renderOrder={9} />
       <pointLight ref={light} position={[0, 2.6, 1.6]} color="#b28cff" intensity={2} distance={16} decay={1.5} />
     </group>
   );

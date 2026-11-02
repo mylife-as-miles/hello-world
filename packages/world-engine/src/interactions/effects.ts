@@ -8,8 +8,39 @@
  */
 import * as THREE from 'three';
 
-export type EmoteKind = 'heart' | 'note' | 'sparkle' | 'anger' | 'cloud' | 'zzz' | 'bang' | 'hello' | 'gift';
-const EMOTE_KINDS: EmoteKind[] = ['heart', 'note', 'sparkle', 'anger', 'cloud', 'zzz', 'bang', 'hello', 'gift'];
+export type EmoteKind = 'heart' | 'note' | 'sparkle' | 'anger' | 'cloud' | 'zzz' | 'bang' | 'hello' | 'gift' | 'dots' | 'sad';
+const EMOTE_KINDS: EmoteKind[] = ['heart', 'note', 'sparkle', 'anger', 'cloud', 'zzz', 'bang', 'hello', 'gift', 'dots', 'sad'];
+
+/** Base world size (m) and lifetime (s) per emote kind. Distress emotes are deliberately small. */
+function emoteSize(kind: EmoteKind): number {
+  switch (kind) {
+    case 'sparkle': return 0.22 + Math.random() * 0.14;
+    case 'cloud': return 0.26;
+    case 'bang': return 0.17;
+    case 'hello': case 'gift': return 0.19;
+    case 'dots': case 'sad': return 0.18;
+    default: return 0.27 + Math.random() * 0.08;
+  }
+}
+function emoteLife(kind: EmoteKind): number {
+  switch (kind) {
+    case 'zzz': return 2.6;
+    case 'hello': return 1.15;
+    case 'gift': return 1.4;
+    case 'cloud': case 'anger': return 1.9;
+    case 'dots': case 'sad': return 1.7;
+    default: return 1.6 + Math.random() * 0.5;
+  }
+}
+function emoteRise(kind: EmoteKind): number {
+  switch (kind) {
+    case 'zzz': return 0.32;
+    case 'cloud': return 0.12;
+    case 'hello': case 'gift': return 0.35;
+    case 'dots': case 'sad': return 0.2;
+    default: return 0.55 + Math.random() * 0.3;
+  }
+}
 
 function canvas(w: number, h: number): [HTMLCanvasElement, CanvasRenderingContext2D] {
   const c = document.createElement('canvas');
@@ -119,6 +150,29 @@ function drawEmote(kind: EmoteKind): HTMLCanvasElement {
       g.beginPath(); g.ellipse(78, 30, 15, 10, 0.5, 0, Math.PI * 2); g.fill();
       break;
     }
+    case 'dots': {
+      // "…" thought bubble (bored).
+      g.fillStyle = '#ffffff'; g.strokeStyle = 'rgba(40,48,58,0.55)'; g.lineWidth = 5;
+      g.beginPath(); g.roundRect(12, 30, 104, 58, 29); g.fill(); g.stroke();
+      g.beginPath(); g.arc(34, 100, 9, 0, Math.PI * 2); g.fill(); g.stroke();
+      g.beginPath(); g.arc(20, 116, 5, 0, Math.PI * 2); g.fill(); g.stroke();
+      g.fillStyle = '#6b7684';
+      for (const x of [40, 64, 88]) { g.beginPath(); g.arc(x, 59, 8, 0, Math.PI * 2); g.fill(); }
+      break;
+    }
+    case 'sad': {
+      // Small sad face (target of a snub).
+      g.fillStyle = '#8fb8ff'; g.strokeStyle = '#ffffff'; g.lineWidth = 6;
+      g.beginPath(); g.arc(64, 64, 46, 0, Math.PI * 2); g.fill(); g.stroke();
+      g.fillStyle = '#23324d';
+      g.beginPath(); g.ellipse(48, 56, 6, 8, 0, 0, Math.PI * 2); g.fill();
+      g.beginPath(); g.ellipse(80, 56, 6, 8, 0, 0, Math.PI * 2); g.fill();
+      g.strokeStyle = '#23324d'; g.lineWidth = 6; g.lineCap = 'round';
+      g.beginPath(); g.arc(64, 96, 16, Math.PI * 1.15, Math.PI * 1.85); g.stroke();
+      g.fillStyle = '#d9ecff';
+      g.beginPath(); g.ellipse(84, 74, 4, 7, 0, 0, Math.PI * 2); g.fill();
+      break;
+    }
     case 'bang': {
       g.fillStyle = '#ffd84d'; g.strokeStyle = '#ffffff'; g.lineWidth = 6;
       g.beginPath(); g.roundRect(30, 14, 68, 100, 22); g.fill(); g.stroke();
@@ -171,11 +225,11 @@ export class EmoteSystem {
       const a = Math.random() * Math.PI * 2, r = spread * Math.sqrt(Math.random());
       s.position.set(x + Math.cos(a) * r * 0.6, y + Math.random() * 0.15, z + Math.sin(a) * r * 0.6);
       p.active = true; p.life = -n * 0.12;
-      p.max = kind === 'zzz' ? 2.6 : kind === 'hello' ? 1.15 : kind === 'gift' ? 1.4 : kind === 'cloud' || kind === 'anger' ? 1.9 : 1.6 + Math.random() * 0.5;
+      p.max = emoteLife(kind);
       p.vx = Math.cos(a) * r * 0.5; p.vz = Math.sin(a) * r * 0.5;
-      p.vy = kind === 'zzz' ? 0.32 : kind === 'cloud' ? 0.12 : kind === 'hello' || kind === 'gift' ? 0.35 : 0.55 + Math.random() * 0.3;
+      p.vy = emoteRise(kind);
       if (kind === 'zzz') p.vx += 0.12;
-      p.size = (kind === 'sparkle' ? 0.22 + Math.random() * 0.14 : kind === 'cloud' ? 0.5 : kind === 'bang' ? 0.17 : kind === 'hello' || kind === 'gift' ? 0.19 : 0.27 + Math.random() * 0.08) * scale;
+      p.size = emoteSize(kind) * scale;
       p.wob = Math.random() * 6;
       s.visible = false; m.opacity = 0;
     }
@@ -247,10 +301,10 @@ export class InstancedEmoteSystem {
       const a = Math.random() * Math.PI * 2, r = spread * Math.sqrt(Math.random());
       p.x = x + Math.cos(a) * r * 0.6; p.y = y + Math.random() * 0.15; p.z = z + Math.sin(a) * r * 0.6;
       p.active = true; p.life = -n * 0.12;
-      p.max = kind === 'zzz' ? 2.6 : kind === 'hello' ? 1.15 : kind === 'gift' ? 1.4 : kind === 'cloud' || kind === 'anger' ? 1.9 : 1.6 + Math.random() * 0.5;
+      p.max = emoteLife(kind);
       p.vx = Math.cos(a) * r * 0.5 + (kind === 'zzz' ? 0.12 : 0); p.vz = Math.sin(a) * r * 0.5;
-      p.vy = kind === 'zzz' ? 0.32 : kind === 'cloud' ? 0.12 : kind === 'hello' || kind === 'gift' ? 0.35 : 0.55 + Math.random() * 0.3;
-      p.size = (kind === 'sparkle' ? 0.22 + Math.random() * 0.14 : kind === 'cloud' ? 0.5 : kind === 'bang' ? 0.17 : kind === 'hello' || kind === 'gift' ? 0.19 : 0.27 + Math.random() * 0.08) * scale;
+      p.vy = emoteRise(kind);
+      p.size = emoteSize(kind) * scale;
       p.wob = Math.random() * 6;
     }
   }

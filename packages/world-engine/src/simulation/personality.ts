@@ -104,6 +104,13 @@ const CONFLICTS: Array<[string, string]> = [
   ['grumpy', 'chaotic'], ['lazy', 'energetic'], ['shy', 'chaotic'], ['grumpy', 'playful'], ['competitive', 'lazy'],
 ];
 
+/** True when the two personalities contain a known clash (grumpy×chaotic, lazy×energetic, …). */
+export function hasConflict(pa: readonly string[], pb: readonly string[]): boolean {
+  const A = new Set(pa.map(p => p.toLowerCase()));
+  const B = new Set(pb.map(p => p.toLowerCase()));
+  return CONFLICTS.some(([x, y]) => (A.has(x) && B.has(y)) || (A.has(y) && B.has(x)));
+}
+
 /** 0..1 — how well two residents click (used by befriend + friendship gains). */
 export function compatibility(ta: Temperament, tb: Temperament, pa: readonly string[], pb: readonly string[]): number {
   const A = new Set(pa.map(p => p.toLowerCase()));

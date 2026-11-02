@@ -10,7 +10,7 @@ Frame rates from SwiftShader are **not** representative of real GPUs and are not
 | --- | --- | --- |
 | Typecheck (package) | `npx tsc --noEmit -p .` | 0 errors at each integration commit (agents' in-flight edits excluded) |
 | Typecheck as Codex's web app compiles it (`src` only, `types: ["vite/client"]`, no Node types) | temporary tsconfig extending `tsconfig.base.json` | 0 errors |
-| Unit / integration tests (Node) | `npx vitest run` | **32/32 passed, 6 files**: simulation 16, wrapper-guards 6, runtime 3, persistence 3, node-safety 2, scene-store 2 |
+| Unit / integration tests (Node) | `npx vitest run` | **40/40 passed, 7 files** at handoff commit `dc28c56` (simulation incl. needs-range, low-need states, 13 seeds, raids; runtime guards incl. `ingressCooldowns:false` and auto-tick catch-up; runtime; persistence; node-safety; scene-store) |
 | Bundle | `npx vite build` (harness) | built in 39 s; VRM + photoreal GLB/WebP assets emitted via `new URL(..., import.meta.url)`; VRM and realistic loaders code-split |
 | Node-safety of `./runtime` | `test/node-safety.test.ts` | import graph contains only `@hello-world/contracts` + pure engine modules; runs headless |
 | Codex runtime preflight (Codex-owned `tests/runtime-acceptance.ts` against engine `854b5af`) | see `docs/RUNTIME_ACCEPTANCE.md` on main | **10/10 passed** incl. server restart restoring identity, appearance, personality, social memory, weather |
@@ -23,18 +23,20 @@ Run 1 (20:29–20:35 UTC) against `vite preview` of commit `850e73e`:
 | --- | --- | --- | --- |
 | 1 | Neighborhood renders | PASS | `01-world.png`, 1 canvas, 0 page errors |
 | 2 | Licensed rigged avatar loads | PASS | `__HW_AVATAR_STATS` `{vrmLoaded: 2, vrmFailed: 0, proceduralBuilt: 14}` (CC0 100Avatars VRMs); photoreal CARLA/MetaHuman bodies: `realisticLoaded: 8, failed: 0` in the realistic lab and `1/0` in the creator |
-| 3 | Creator changes visible appearance | see run 2 | |
-| 4 | Saved appearance survives reload | see run 2 (also covered by `test/persistence.test.ts`, IndexedDB + memory) | |
+| 3 | Creator changes visible appearance | PASS (run 3, `dc28c56`) | `acceptance-3/03a-creator.png` → `03b-creator-changed.png`: outfit swatch click turns the top green; rig rebuilds once |
+| 4 | Saved appearance survives reload | PASS (run 3, `dc28c56`) | after Save → reload, `viewer:me` restored from IndexedDB with `outfit.color: #7bd389`; also `test/persistence.test.ts` (IndexedDB + memory) |
 | 5 | Multiple residents present | PASS | 7 seeded residents |
 | 6 | Residents act autonomously | PASS | 5/7 changed position/activity in 12 s (café, arcade pinball, pond bench reading, stage, fountain) |
 | 7 | Two residents interact → relationship changes | PASS | Nova→PixelCat friendship 72 → 79.3 |
 | 8 | Memory record written | PASS | `Day 1 10:02 · Nova greeted PixelCat at Pixel Arcade — PixelCat smiled from ear to ear.` |
 | 9 | `join` brings a resident in | PASS | `AcceptanceViewer @ (0.8, -18.2) arriving through the portal` |
 | 10 | raid / confetti visible reaction | PASS | 5 raid visitors spawned; `10a-before-raid.png` vs `10b-after-raid.png` |
-| 11 | Normal + transparent overlay render | see run 2 (critic cycle 1 measured 93.8 % fully transparent pixels in overlay mode) | |
+| 11 | Normal + transparent overlay render | PASS (run 3, `dc28c56`) | WebGL context `alpha: true`, body background `rgba(0,0,0,0)`; `11-overlay.png` shows residents, seats, café tables, stage and a live speech bubble in a lower band over a transparent frame |
 | 12 | Package typecheck / test / build | PASS | section 1 |
 
-Run 1's creator/overlay section timed out on navigation (30 s) because the software renderer was saturating the CPU; run 2 uses fresh pages with 120 s navigation timeouts.
+Run 1's creator/overlay section timed out on navigation (30 s) under software rendering; run 2 hit a harness bug (`s` undeclared when skipping the world section); run 3 (20:49–20:52 UTC, frozen build of handoff commit `dc28c56`) completed with 120 s navigation timeouts.
+
+**Result: 12/12 acceptance checks pass** (1, 2, 5–10 in run 1 at `850e73e`; 3, 4, 11 in run 3 at `dc28c56`; 12 verified at `dc28c56` in an isolated worktree: tsc 0 errors, vitest 40/40, vite build OK).
 
 ## 3. Independent critic cycles
 

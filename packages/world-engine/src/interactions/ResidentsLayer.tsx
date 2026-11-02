@@ -861,7 +861,12 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
         el.style.setProperty('--stem', `${Math.max(0, -L.dy / L.sc - 5).toFixed(1)}px`);
       }
       const op = show ? 1 : 0;
-      if (op !== L.wop) { L.wop = op; el.style.opacity = op ? '1' : '0'; }
+      if (op !== L.wop) {
+        // Layout-driven hides (collapse/overlap) are instant so a fading bubble never sits under a newly placed one;
+        // natural expiry keeps the CSS fade.
+        el.style.transition = op === 0 && !fading ? 'none' : '';
+        L.wop = op; el.style.opacity = op ? '1' : '0';
+      }
     }
   };
 

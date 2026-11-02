@@ -70,8 +70,8 @@ export function computeDims(presetId: string, buildIn: number): Dims {
   const L = P.limb;
 
   const torsoKeys = [
-    [-0.27, 0.095 * P.hip * tg, 0.075 * tg, 0.08 * tg, 2.2, 0],
-    [-0.16, 0.146 * P.hip * tg, 0.096 * tg, 0.112 * tg, 2.3, 0],
+    [-0.27, 0.07 * P.hip * tg, 0.065 * tg, 0.075 * tg, 2.2, 0],
+    [-0.15, 0.142 * P.hip * tg, 0.096 * tg, 0.112 * tg, 2.3, 0],
     [0.0, 0.152 * P.hip * tg, 0.098 * tg + belly * 0.012, 0.104 * tg, 2.4, 0],
     [0.24, 0.13 * waist * tg, 0.09 * tg + belly * 0.045, 0.086 * tg, 2.4, 0.004 + belly * 0.012],
     [0.46, 0.142 * P.chest * tg, 0.098 * tg + belly * 0.03, 0.09 * tg, 2.5, 0.006 + belly * 0.008],

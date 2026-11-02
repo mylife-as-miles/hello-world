@@ -133,7 +133,7 @@ export function buildHeadAccessories(b: GeoBuilder, list: string[], hair: string
         break;
       }
       case 'crown': {
-        const crownTop = headPoint(0, Math.PI / 2, ho(0, Math.PI / 2));
+        const crownTop = headPoint(0, Math.PI / 2, Math.max(ho(Math.PI / 2, 1.15), ho(-Math.PI / 2, 1.15), ho(Math.PI, 1.15)));
         const y = Math.max(HC[1] + 0.105 + (top + 0.012) * 0.5, crownTop[1] - 0.02);
         const rr = crownTop[1] - 0.02 > HC[1] + 0.12 ? 0.07 : 0.085;
         const ring = new THREE.CylinderGeometry(rr, rr * 0.96, 0.03, hi ? 28 : 12, 1, true); ring.deleteAttribute('uv');

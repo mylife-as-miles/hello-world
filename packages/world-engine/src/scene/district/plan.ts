@@ -27,7 +27,7 @@ export interface DistrictLamp { x: number; z: number; /** Arm direction (unit, x
 
 /** Axis-aligned streets (centre line + full width incl. sidewalks). */
 export const DISTRICT_STREETS: DistrictStreet[] = [
-  { id: 'north-ave', ax: 0, az: -33, bx: 0, bz: -124, width: 11 },
+  { id: 'north-ave', ax: 0, az: -31, bx: 0, bz: -124, width: 11 },
   { id: 'north-cross', ax: -104, az: -74, bx: 112, bz: -74, width: 9 },
   { id: 'east-ave', ax: 33, az: -4, bx: 124, bz: -4, width: 10 },
   { id: 'east-cross', ax: 76, az: -112, bx: 76, bz: 64, width: 9 },

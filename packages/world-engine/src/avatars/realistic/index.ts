@@ -205,7 +205,8 @@ function fitHead(parts: PartGeo[], bones: string[], worldP: THREE.Vector3[]): Bo
     }
   }
   if (n < 50 || !(maxY > 0.1)) return null;
-  const sx = (maxX - minX) / 2 / RX, sz = (maxZ - minZ) / 2 / RZ, sy = maxY / (HC[1] + RY);
+  // hair compresses under a hat: fit slightly inside the hair volume
+  const sx = (0.9 * (maxX - minX)) / 2 / RX, sz = (0.9 * (maxZ - minZ)) / 2 / RZ, sy = (maxY - 0.012) / (HC[1] + RY);
   return { sx, sy, sz, cx: (minX + maxX) / 2, cz: (minZ + maxZ) / 2 - HC[2] * sz };
 }
 

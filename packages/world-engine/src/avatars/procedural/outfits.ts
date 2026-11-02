@@ -240,7 +240,7 @@ export function buildTop(b: GeoBuilder, d: Dims, lod: LodCfg, top: string, botto
 
 // ---------------------------------------------------------------- bottoms
 function pelvis(b: GeoBuilder, d: Dims, lod: LodCfg, mat: string, off: number, sTop = 0.2): void {
-  b.add(mat, torsoShell(d, lod, { s0: -0.2, s1: sTop, off, capBottom: true, ringCount: 12 }), { weights: torsoWeights(d) });
+  b.add(mat, torsoShell(d, lod, { s0: -0.18, s1: sTop, off, capBottom: true, ringCount: 12 }), { weights: torsoWeights(d) });
 }
 
 function pantLegs(b: GeoBuilder, d: Dims, lod: LodCfg, mat: string, end: number, off: (t: number) => number, cuff?: { mat: string; w: number; off: number }): void {

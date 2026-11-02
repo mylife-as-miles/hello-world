@@ -35,7 +35,8 @@ const District = lazy(async () => {
 /** Flat town disc using the town ground colour formula (stand-in for Town). */
 function TownDisc() {
   const geo = useMemo(() => {
-    const g = new THREE.CircleGeometry(36, 96, 0, Math.PI * 2);
+    // Like the town ground (2 m cells), flattened + clipped to 76 m — the landscape covers its corners.
+    const g = new THREE.PlaneGeometry(76, 76, 38, 38);
     g.rotateX(-Math.PI / 2);
     const pos = g.attributes.position!;
     const col = new Float32Array(pos.count * 3);

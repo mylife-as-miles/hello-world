@@ -79,7 +79,9 @@ export function WorldScene(props: WorldSceneProps & WorldSceneExtraProps) {
     if (f) f(''); else setLocalSel(undefined);
   }, [selected]);
 
-  const rigMode: RigMode = transparent ? 'overlay' : cameraMode;
+  // Transparent overlay honours the requested camera; the default 'neighborhood' becomes the
+  // adaptive overlay framing (fits current residents into a lower-third band).
+  const rigMode: RigMode = transparent && cameraMode === 'neighborhood' ? 'overlay' : cameraMode;
   const initial = useMemo(() => {
     const pos = new THREE.Vector3(), look = new THREE.Vector3();
     poseFor(rigMode, 0, pos, look);

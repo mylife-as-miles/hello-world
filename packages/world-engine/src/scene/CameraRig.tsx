@@ -206,6 +206,58 @@ function densestCluster(store: SceneStore, out: THREE.Vector3): boolean {
   return true;
 }
 
+/* ------------------------------------------------------- overlay framing */
+
+interface OverlayFit { minX: number; maxX: number; minZ: number; maxZ: number; init: boolean; at: number; xs: number[]; zs: number[] }
+const newOverlayFit = (): OverlayFit => ({ minX: -7, maxX: 7, minZ: -7, maxZ: 7, init: false, at: -1, xs: [], zs: [] });
+
+/** Trimmed (10th–90th percentile) resident bounds, padded; falls back to the plaza. */
+function residentBounds(store: SceneStore, f: OverlayFit, out: { minX: number; maxX: number; minZ: number; maxZ: number }) {
+  const rs = store.current.residents;
+  if (!rs.length) { out.minX = -7; out.maxX = 7; out.minZ = -7; out.maxZ = 7; return; }
+  f.xs.length = 0; f.zs.length = 0;
+  for (const r of rs) { f.xs.push(r.location.x); f.zs.push(r.location.z); }
+  f.xs.sort((a, b) => a - b); f.zs.sort((a, b) => a - b);
+  const lo = Math.floor((rs.length - 1) * 0.1), hi = Math.ceil((rs.length - 1) * 0.9);
+  out.minX = f.xs[lo]! - 1.6; out.maxX = f.xs[hi]! + 1.6;
+  out.minZ = f.zs[lo]! - 1.6; out.maxZ = f.zs[hi]! + 1.6;
+  // keep a sensible minimum frame (about the plaza)
+  const cx = (out.minX + out.maxX) / 2, cz = (out.minZ + out.maxZ) / 2;
+  if (out.maxX - out.minX < 12) { out.minX = cx - 6; out.maxX = cx + 6; }
+  if (out.maxZ - out.minZ < 8) { out.minZ = cz - 4; out.maxZ = cz + 4; }
+}
+
+const _bounds = { minX: 0, maxX: 0, minZ: 0, maxZ: 0 };
+const OVERLAY_PITCH = THREE.MathUtils.degToRad(9);
+
+/**
+ * Overlay framing: fit the residents' (trimmed) bounds into a lower-third composition.
+ * Re-measured about once per second and smoothed.
+ */
+function overlayPose(store: SceneStore, f: OverlayFit, cam: THREE.PerspectiveCamera, t: number, dt: number, outPos: THREE.Vector3, outLook: THREE.Vector3) {
+  if (!f.init || t - f.at > 1) {
+    f.at = t;
+    residentBounds(store, f, _bounds);
+    if (!f.init) { f.minX = _bounds.minX; f.maxX = _bounds.maxX; f.minZ = _bounds.minZ; f.maxZ = _bounds.maxZ; f.init = true; }
+  }
+  const k = 1 - Math.exp(-dt * 0.8);
+  f.minX += (_bounds.minX - f.minX) * k; f.maxX += (_bounds.maxX - f.maxX) * k;
+  f.minZ += (_bounds.minZ - f.minZ) * k; f.maxZ += (_bounds.maxZ - f.maxZ) * k;
+  const cx = (f.minX + f.maxX) / 2, cz = (f.minZ + f.maxZ) / 2;
+  const tanV = Math.tan(THREE.MathUtils.degToRad((cam.fov || 42) / 2));
+  const tanH = tanV * (cam.aspect || 16 / 9);
+  const cDep = OVERLAY_PITCH + Math.atan(0.45 * tanV);          // content centre sits ~72% down the frame
+  const nearLim = OVERLAY_PITCH + Math.atan(0.9 * tanV);        // near edge stays inside the bottom edge
+  const halfW = (f.maxX - f.minX) / 2 + 0.8;
+  const dzNear = f.maxZ - cz + 0.6;
+  const dW = halfW / (0.92 * tanH);
+  const dN = (0.9 + Math.tan(nearLim) * dzNear) / Math.max(0.05, Math.tan(nearLim) - Math.tan(cDep));
+  const D = Math.min(70, Math.max(12, dW, dN));
+  const H = 0.9 + D * Math.tan(cDep);
+  outPos.set(cx, H, cz + D);
+  outLook.set(cx, H - D * Math.tan(OVERLAY_PITCH), cz);
+}
+
 /* ----------------------------------------------------------------- rig */
 
 export function CameraRig({ mode, selectedResidentId }: { mode: RigMode; selectedResidentId?: string }) {
@@ -218,6 +270,7 @@ export function CameraRig({ mode, selectedResidentId }: { mode: RigMode; selecte
     pos: new THREE.Vector3(), look: new THREE.Vector3(),
     follow: newFramer(), actor: newFramer(),
     cluster: new THREE.Vector3(), clusterS: new THREE.Vector3(), clusterInit: false, clusterAt: -1, orbit: 0.4,
+    overlay: newOverlayFit(),
   }), []);
   const cine = useMemo(() => ({
     pos: new THREE.CatmullRomCurve3(CINE_POS.map(p => new THREE.Vector3(...p)), true, 'centripetal'),
@@ -300,6 +353,9 @@ export function CameraRig({ mode, selectedResidentId }: { mode: RigMode; selecte
         cine.pos.getPointAt(cine.u, s.pos);
         cine.look.getPointAt(cine.u, s.look);
       }
+    } else if (mode === 'overlay') {
+      overlayPose(store, s.overlay, camera, t, dt, s.pos, s.look);
+      rate = 1.2;
     } else {
       poseFor(mode, t, s.pos, s.look);
     }

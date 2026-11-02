@@ -97,7 +97,7 @@ function layout(): { items: Item[]; cam: [number, number, number]; target: [numb
     const items: Item[] = CAST.slice(0, 5).flatMap((a, i) => [{ a, x: (i - 2) * 1.2 - 0.3, lod: 'high' as AvatarLod }, { a, x: (i - 2) * 1.2 + 0.3, lod: 'low' as AvatarLod }]);
     return { items, cam: [0, 1.2, 8], target: [0, 0.85, 0], fov: 32 };
   }
-  const items: Item[] = CAST.map((a, i) => ({ a, x: (i - 4.5) * 0.92, z: (i % 2) * -0.25, gesture: i === 3 ? 'wave' : undefined, expr: (['happy', 'relaxed', 'neutral', 'happy', 'surprised', 'neutral', 'happy', 'relaxed', 'angry', 'happy'] as ExpressionName[])[i] }));
+  const items: Item[] = CAST.map((a, i) => ({ a, x: (i - 4.5) * 0.8, z: (i % 2) * -0.25, gesture: i === 3 ? 'wave' : undefined, expr: (['happy', 'relaxed', 'neutral', 'happy', 'surprised', 'neutral', 'happy', 'relaxed', 'angry', 'happy'] as ExpressionName[])[i] }));
   return { items, cam: [0, 1.2, 7.4], target: [0, 0.86, 0], fov: 33 };
 }
 

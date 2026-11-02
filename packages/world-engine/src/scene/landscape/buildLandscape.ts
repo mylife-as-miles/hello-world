@@ -36,8 +36,8 @@ const LUSH = col('#79b45b');
 const MEADOW_WARM = col('#a9c46e');
 const ALPINE = col('#a8b07a');
 const DIRT = col('#b89f72');
-const ROCK = col('#a89f92');
-const ROCK_DARK = col('#8c8378');
+const ROCK = col('#b3a58f');
+const ROCK_DARK = col('#918373');
 const SNOW = col('#f3f6f8');
 const SAND = col('#dcca9c');
 const LAKE_BED = col('#7d9a7e');
@@ -137,9 +137,9 @@ export function buildTerrainGeometry(quality: 'low' | 'high'): THREE.BufferGeome
     c.lerp(LUSH, valley * 0.45 * w);
     c.lerp(ALPINE, alpine * 0.6 * w);
     // slope: dirt on banks, rock on faces (strata-like banding by height)
-    const dirt = smoothstep(0.07, 0.17, slope) * (1 - smoothstep(0.2, 0.32, slope));
-    c.lerp(DIRT, dirt * 0.5 * w);
-    const rockAmt = clamp(smoothstep(0.16, 0.3, slope) + smoothstep(46, 72, h) * 0.55 * massif, 0, 1);
+    const dirt = smoothstep(0.1, 0.2, slope) * (1 - smoothstep(0.26, 0.36, slope));
+    c.lerp(DIRT, dirt * 0.45 * w);
+    const rockAmt = clamp(smoothstep(0.22, 0.38, slope) + smoothstep(50, 76, h) * 0.5 * massif, 0, 1);
     if (rockAmt > 0) {
       const band = Math.sin(h * 0.85 + noise2(x * 0.05, z * 0.05, 9) * 3) * 0.5 + 0.5;
       tmp.copy(ROCK).lerp(ROCK_DARK, band * 0.55);
@@ -151,7 +151,7 @@ export function buildTerrainGeometry(quality: 'low' | 'high'): THREE.BufferGeome
     // lake shore sand + submerged bed
     if (lakeD < 2) {
       const dh = h - LAKE.level;
-      const sand = (1 - smoothstep(0.35, 1.3, dh)) * (1 - smoothstep(1.5, 2, lakeD));
+      const sand = (1 - smoothstep(0.15, 0.6, dh)) * (1 - smoothstep(1.5, 2, lakeD));
       c.lerp(SAND, sand * 0.85);
       if (dh < -0.3) c.lerp(LAKE_BED, smoothstep(-0.3, -1.4, dh) * 0.6);
     }
@@ -220,7 +220,7 @@ function buildLakeGeometry(): THREE.BufferGeometry {
   const p = g.attributes.position as THREE.BufferAttribute;
   const c = Math.cos(LAKE.rot), s = Math.sin(LAKE.rot);
   for (let i = 0; i < p.count; i++) {
-    const u = p.getX(i) * LAKE.rx * 1.16, v = p.getZ(i) * LAKE.rz * 1.16;
+    const u = p.getX(i) * LAKE.rx * 1.32, v = p.getZ(i) * LAKE.rz * 1.32;
     // inverse of lakeDistance's rotation
     p.setXYZ(i, LAKE.x + u * c + v * s, 0, LAKE.z - u * s + v * c);
   }

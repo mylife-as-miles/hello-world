@@ -54,12 +54,17 @@ export interface TerrainSample {
   lakeD: number;
 }
 
-/** Normalised elliptical distance to the lake centre (1 on the shoreline). */
+/**
+ * Normalised elliptical distance to the lake centre (1 on the shoreline), with
+ * a noise-perturbed rim so the shore reads as natural rather than as an ellipse.
+ */
 export function lakeDistance(x: number, z: number): number {
   const dx = x - LAKE.x, dz = z - LAKE.z;
   const c = Math.cos(LAKE.rot), s = Math.sin(LAKE.rot);
   const u = (dx * c - dz * s) / LAKE.rx, v = (dx * s + dz * c) / LAKE.rz;
-  return Math.sqrt(u * u + v * v);
+  const d = Math.sqrt(u * u + v * v);
+  if (d > 3) return d;
+  return d + fbm(x * 0.045, z * 0.045, SEED + 613, 3, 2.1, 0.5) * 0.24;
 }
 
 const OUT: TerrainSample = { height: 0, massif: 0, valley: 0, lakeD: 99 };

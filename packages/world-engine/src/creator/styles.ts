@@ -110,7 +110,7 @@ export const CREATOR_CSS = /* css */ `
 .hwc-nav button.is-on { color: #fff; background: rgba(255, 255, 255, 0.1); border-color: rgba(255,255,255,.08); }
 .hwc-nav button.is-dim { opacity: 0.45; }
 
-.hwc-scroll { position: relative; flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scroll-behavior: smooth; padding-bottom: 12px; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.18) transparent; }
+.hwc-scroll { position: relative; flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 12px; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.18) transparent; }
 .hwc-sec { padding: 18px 20px 6px; }
 .hwc-sec + .hwc-sec { border-top: 1px solid var(--hwc-line); margin-top: 10px; }
 .hwc-sec-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }

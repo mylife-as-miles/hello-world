@@ -5,7 +5,7 @@ The tree meshes (`tree-*.glb`) and the leaf atlas (`leaf-atlas.png`) in this fol
 **super-terrain** — https://github.com/vibe-stack/super-terrain (commit `b82e823`),
 MIT License, Copyright (c) 2026 alightinastorm (x.com/alightinastorm).
 
-What was used (executed in Node via `../tools/bake-trees.ts`; no super-terrain source is
+What was used (executed in Node via `../tools/bake-trees.cts`; no super-terrain source is
 shipped in the runtime bundle — only the generated data plus our own WebGL renderer):
 
 - `src/tree/generator/compileTree.ts` (+ `semanticGraph`, `woodMesher`, `foliageCompiler`,
@@ -20,7 +20,7 @@ Our post-processing: height normalised to 5–7 m, leaf cards merged into one me
 enlarged ×1.4, normals biased outward for soft crowns, atlas luminance remapped onto a
 pastel colour ramp per species (blossom = pink), custom minimal GLB/PNG writers.
 
-Rebuild: `cd packages/world-engine && npx tsx src/scene/foliage/tools/bake-trees.ts`
+Rebuild: `cd packages/world-engine && npx tsx src/scene/foliage/tools/bake-trees.cts`
 (needs a local clone; `SUPER_TERRAIN=/path/to/super-terrain`).
 
 ---

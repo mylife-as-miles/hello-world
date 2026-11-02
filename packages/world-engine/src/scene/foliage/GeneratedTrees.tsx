@@ -9,13 +9,13 @@
  * Rendering (WebGL, MeshStandardMaterial):
  *  - near trees: one InstancedMesh per variant × {bark, leaves}; alpha-tested leaf cards;
  *    tiny onBeforeCompile wind sway; trunks cast shadows only when quality = 'high'.
- *  - far trees (beyond `farDistance`, default 60 m high / 40 m low): crossed-card impostors
- *    whose texture is rendered once at runtime from the same meshes (1 draw call per variant).
+ *  - far trees (beyond `farDistance`, default 90 m high / 65 m low): impostors (2 crossed
+ *    side cards + 1 canopy card) rendered once at runtime from the same meshes (1 draw/variant).
  *  - soft blob contact shadow under every tree (1 draw call) so crowns sit on the ground.
  * React never re-renders per frame; LOD partitions are recomputed in useFrame only when the
  * camera moved. Everything created here is disposed on unmount.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
@@ -26,7 +26,7 @@ export interface TreePlacement { x: number; z: number; y?: number; scale: number
 export interface GeneratedTreesProps {
   quality: TreeQuality;
   placements: ReadonlyArray<TreePlacement>;
-  /** Distance (m) beyond which trees switch to impostor cards. Default 60 (high) / 40 (low). */
+  /** Camera distance (m) beyond which trees switch to impostor cards. Default 90 (high) / 65 (low). */
   farDistance?: number;
   /** Soft blob contact shadows under the crowns. Default true. */
   blobShadows?: boolean;
@@ -91,10 +91,11 @@ function loadTreeAssets(): Promise<TreeAssets> {
 /**
  * Shader tweaks via onBeforeCompile:
  *  - wind: sway grows with height² so trunks stay planted; phase varies per instance position.
+ *  - skyLift: multiplies the indirect (sky/ambient) diffuse — light-dependent, unlike emissive.
  *  - keepNormals: double-sided cards keep their authored (outward / upward) normal on the back
  *    face instead of flipping it, so crowns and impostors shade softly from every side.
  */
-function patchTreeMaterial(material: THREE.Material, key: string, opts: { time?: { value: number }; wind?: number; keepNormals?: boolean }) {
+function patchTreeMaterial(material: THREE.Material, key: string, opts: { time?: { value: number }; wind?: number; keepNormals?: boolean; skyLift?: number }) {
   material.onBeforeCompile = (shader) => {
     if (opts.time && opts.wind) {
       shader.uniforms.uTreeWind = opts.time;
@@ -113,6 +114,14 @@ function patchTreeMaterial(material: THREE.Material, key: string, opts: { time?:
         transformed.z += (0.7 * cos(tPh * 0.83) + 0.3 * sin(tPh * 3.1 + position.x * 1.9)) * tBend;`,
       );
     }
+    if (opts.skyLift) {
+      // brighter sky/ambient response = soft "translucent" crowns that still darken at night
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <lights_fragment_end>',
+        `#include <lights_fragment_end>
+        reflectedLight.indirectDiffuse *= ${opts.skyLift.toFixed(3)};`,
+      );
+    }
     if (opts.keepNormals) {
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <normal_fragment_begin>',
@@ -127,17 +136,21 @@ function patchTreeMaterial(material: THREE.Material, key: string, opts: { time?:
 }
 
 // ---------------------------------------------------------------- impostors
-const TILE_W = 256, TILE_H = 256;
+const TILE = 256; // per view; atlas = (TILE × variants) × (TILE × 2): row 0 side view, row 1 top view
 
 interface Impostors { target: THREE.WebGLRenderTarget; cards: THREE.BufferGeometry[]; dispose(): void }
 
-/** Renders each variant's unlit albedo, seen from the side, into one atlas (one tile per variant). */
+/**
+ * Renders each variant's unlit albedo into one atlas — a side view (for two crossed vertical
+ * cards) and a top view (for one horizontal canopy card, so elevated cameras still see a full
+ * crown) — and builds the matching 3-quad card geometry per variant.
+ */
 function bakeImpostors(gl: THREE.WebGLRenderer, assets: TreeAssets): Impostors {
   const n = assets.variants.length;
-  const target = new THREE.WebGLRenderTarget(TILE_W * n, TILE_H, { generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter });
+  const target = new THREE.WebGLRenderTarget(TILE * n, TILE * 2, { generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter });
   target.texture.colorSpace = THREE.SRGBColorSpace;
   const scene = new THREE.Scene();
-  const camera = new THREE.OrthographicCamera(-1, 1, 1, 0, 0.1, 100);
+  const camera = new THREE.OrthographicCamera(-1, 1, 1, 0, 0.1, 200);
   const temp: THREE.Material[] = [];
   const cards: THREE.BufferGeometry[] = [];
   const prevTarget = gl.getRenderTarget();
@@ -146,8 +159,15 @@ function bakeImpostors(gl: THREE.WebGLRenderer, assets: TreeAssets): Impostors {
   const prevAutoClear = gl.autoClear;
   gl.autoClear = false;
   gl.setRenderTarget(target);
-  gl.setClearColor('#4f8a3c', 0);
+  gl.setClearColor('#5b8f45', 0);
   gl.clear(true, true, true);
+  const renderTile = (col: number, row: number) => {
+    target.viewport.set(col * TILE, row * TILE, TILE, TILE);
+    target.scissor.set(col * TILE, row * TILE, TILE, TILE);
+    target.scissorTest = true;
+    gl.setRenderTarget(target);
+    gl.render(scene, camera);
+  };
   assets.variants.forEach((v, i) => {
     const halfW = Math.max(-v.box.min.x, v.box.max.x, -v.box.min.z, v.box.max.z) * 1.04;
     const top = v.box.max.y * 1.03, bottom = -0.02 * v.box.max.y;
@@ -156,29 +176,31 @@ function bakeImpostors(gl: THREE.WebGLRenderer, assets: TreeAssets): Impostors {
     temp.push(bark, leaf);
     scene.clear();
     scene.add(new THREE.Mesh(v.wood, bark), new THREE.Mesh(v.leaves, leaf));
+    // side view (row 0): camera on +z looking at -z
     camera.left = -halfW; camera.right = halfW; camera.top = top; camera.bottom = bottom;
-    camera.position.set(0, 0, 50); camera.lookAt(0, 0, 0);
+    camera.up.set(0, 1, 0); camera.position.set(0, 0, 100); camera.lookAt(0, 0, 0);
     camera.updateProjectionMatrix();
-    target.viewport.set(i * TILE_W, 0, TILE_W, TILE_H);
-    target.scissor.set(i * TILE_W, 0, TILE_W, TILE_H);
-    target.scissorTest = true;
-    gl.setRenderTarget(target);
-    gl.render(scene, camera);
-    // two crossed quads sized like the ortho frustum; normals lean up for soft, even light
-    const u0 = i / n, u1 = (i + 1) / n;
+    renderTile(i, 0);
+    // top view (row 1): camera above looking down, screen-up = -z
+    camera.left = -halfW; camera.right = halfW; camera.top = halfW; camera.bottom = -halfW;
+    camera.up.set(0, 0, -1); camera.position.set(0, 100, 0); camera.lookAt(0, 0, 0);
+    camera.updateProjectionMatrix();
+    renderTile(i, 1);
+
+    const u0 = i / n, du = 1 / n;
     const pos: number[] = [], nor: number[] = [], uv: number[] = [], idx: number[] = [];
-    for (let q = 0; q < 2; q++) {
-      const ax = q === 0 ? 1 : 0, az = q === 0 ? 0 : 1;
-      const nx = az, nz = -ax;
-      const base = q * 4;
-      for (const [s, t] of [[-1, 0], [1, 0], [1, 1], [-1, 1]] as const) {
-        pos.push(ax * s * halfW, t ? top : bottom, az * s * halfW);
-        const l = Math.hypot(nx * 0.45, 0.85, nz * 0.45);
-        nor.push((nx * 0.45) / l, 0.85 / l, (nz * 0.45) / l);
-        uv.push(s < 0 ? u0 : u1, t);
-      }
+    const quad = (verts: Array<[number, number, number, number, number]>, normal: [number, number, number]) => {
+      const base = pos.length / 3;
+      for (const [x, y, z, uu, vv] of verts) { pos.push(x, y, z); nor.push(...normal); uv.push(uu, vv); }
       idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
-    }
+    };
+    // two crossed vertical cards; normals lean up for soft, even light (back faces keep them)
+    const lean = (x: number, z: number): [number, number, number] => { const l = Math.hypot(x * 0.45, 0.85, z * 0.45); return [(x * 0.45) / l, 0.85 / l, (z * 0.45) / l]; };
+    quad([[-halfW, bottom, 0, u0, 0], [halfW, bottom, 0, u0 + du, 0], [halfW, top, 0, u0 + du, 0.5], [-halfW, top, 0, u0, 0.5]], lean(0, 1));
+    quad([[0, bottom, halfW, u0, 0], [0, bottom, -halfW, u0 + du, 0], [0, top, -halfW, u0 + du, 0.5], [0, top, halfW, u0, 0.5]], lean(1, 0));
+    // horizontal canopy card at crown height; invisible edge-on, fills the crown from above
+    const cy = v.leaves.boundingBox ? v.leaves.boundingBox.min.y * 0.35 + v.leaves.boundingBox.max.y * 0.65 : top * 0.7;
+    quad([[-halfW, cy, halfW, u0, 0.5], [halfW, cy, halfW, u0 + du, 0.5], [halfW, cy, -halfW, u0 + du, 1], [-halfW, cy, -halfW, u0, 1]], [0, 1, 0]);
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
@@ -187,8 +209,8 @@ function bakeImpostors(gl: THREE.WebGLRenderer, assets: TreeAssets): Impostors {
     cards.push(g);
   });
   target.scissorTest = false;
-  target.viewport.set(0, 0, TILE_W * n, TILE_H);
-  target.scissor.set(0, 0, TILE_W * n, TILE_H);
+  target.viewport.set(0, 0, TILE * n, TILE * 2);
+  target.scissor.set(0, 0, TILE * n, TILE * 2);
   gl.setRenderTarget(prevTarget);
   gl.setClearColor(prevColor, prevAlpha);
   gl.autoClear = prevAutoClear;
@@ -248,9 +270,8 @@ function buildForest(assets: TreeAssets, impostors: Impostors, placements: Reado
 
   const farMaterial = new THREE.MeshStandardMaterial({
     map: impostors.target.texture, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.9, metalness: 0,
-    emissiveMap: impostors.target.texture, emissive: new THREE.Color('#ffffff'), emissiveIntensity: 0.14,
   });
-  patchTreeMaterial(farMaterial, 'tree-impostor', { keepNormals: true });
+  patchTreeMaterial(farMaterial, 'tree-impostor', { keepNormals: true, skyLift: 1.5 });
   disposables.push(farMaterial);
 
   const batches: VariantBatch[] = [];
@@ -261,11 +282,9 @@ function buildForest(assets: TreeAssets, impostors: Impostors, placements: Reado
     const leaf = new THREE.MeshStandardMaterial({
       map: assets.atlas, vertexColors: true, color: LEAF_TINT[v], alphaTest: 0.42, side: THREE.DoubleSide,
       roughness: 0.8, metalness: 0,
-      // a little self-lit albedo reads as soft translucency and keeps crowns pastel in shade
-      emissiveMap: assets.atlas, emissive: new THREE.Color('#ffffff'), emissiveIntensity: 0.18,
     });
     patchTreeMaterial(bark, 'tree-bark', { time: wind, wind: 0.0012 });
-    patchTreeMaterial(leaf, 'tree-leaf', { time: wind, wind: 0.0034, keepNormals: true });
+    patchTreeMaterial(leaf, 'tree-leaf', { time: wind, wind: 0.0034, keepNormals: true, skyLift: 1.55 });
     disposables.push(bark, leaf);
 
     const count = list.length;
@@ -279,9 +298,10 @@ function buildForest(assets: TreeAssets, impostors: Impostors, placements: Reado
     crowns.name = `tree-${TREE_VARIANTS[v]}-leaves`;
     cards.name = `tree-${TREE_VARIANTS[v]}-impostor`;
     list.forEach((p, i) => {
-      pos.set(p.x, p.y ?? 0, p.z);
+      const k = p.scale > 0 ? p.scale : 1;
+      pos.set(p.x, (p.y ?? 0) - 0.06 * k, p.z); // sink a little so root flares never float on slopes
       quat.setFromAxisAngle(up, p.rot || 0);
-      scl.setScalar(p.scale > 0 ? p.scale : 1);
+      scl.setScalar(k);
       matrix.compose(pos, quat, scl);
       matrix.toArray(matrices, i * 16);
       positions[i * 3] = p.x; positions[i * 3 + 1] = (p.y ?? 0) + 3 * scl.y; positions[i * 3 + 2] = p.z;
@@ -361,8 +381,23 @@ function buildForest(assets: TreeAssets, impostors: Impostors, placements: Reado
   };
 }
 
+/** Content signature so a new-but-equal placements array (inline literal) does not rebuild. */
+function placementsKey(placements: ReadonlyArray<TreePlacement>): string {
+  let h = 2166136261;
+  for (const p of placements) {
+    for (const v of [p.x, p.z, p.y ?? 0, p.scale, p.rot, p.variant]) {
+      h ^= Math.round(v * 1000);
+      h = Math.imul(h, 16777619);
+    }
+  }
+  return `${placements.length}:${h >>> 0}`;
+}
+
 export function GeneratedTrees({ quality, placements, farDistance, blobShadows = true }: GeneratedTreesProps) {
   const gl = useThree((s) => s.gl);
+  const key = placementsKey(placements);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed by content on purpose
+  const stablePlacements = useMemo(() => placements, [key]);
   const [assets, setAssets] = useState<TreeAssets | null>(assetsValue);
   useEffect(() => {
     let alive = true;
@@ -387,12 +422,12 @@ export function GeneratedTrees({ quality, placements, farDistance, blobShadows =
   const [built, setBuilt] = useState<BuiltForest | null>(null);
   useEffect(() => {
     if (!assets || !impostors) return;
-    const forest = buildForest(assets, impostors, placements, quality, blobShadows);
+    const forest = buildForest(assets, impostors, stablePlacements, quality, blobShadows);
     setBuilt(forest);
     return () => { forest.dispose(); setBuilt(null); };
-  }, [assets, impostors, placements, quality, blobShadows]);
+  }, [assets, impostors, stablePlacements, quality, blobShadows]);
 
-  const far = farDistance ?? (quality === 'high' ? 60 : 40);
+  const far = farDistance ?? (quality === 'high' ? 90 : 65);
   const last = useRef({ x: NaN, y: NaN, z: NaN, built: null as BuiltForest | null, far: NaN });
   useFrame(({ camera }, dt) => {
     if (!built) return;

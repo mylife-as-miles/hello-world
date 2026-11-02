@@ -47,7 +47,7 @@ export interface ForestOptions {
 }
 
 const GAP_RATE = 0.12; // temperate-mixed
-const THINNEST = 0.42;
+const THINNEST = 0.14; // super-terrain uses 0.42 (closed woodland); lower → groves and glades
 
 /** 0..1 forest-stand density field (also tints the forest floor in the terrain colours). */
 export function forestCover(x: number, z: number, seed = 0xf0257): number {
@@ -74,7 +74,7 @@ export function buildForestPlacements(opts: ForestOptions = {}): ForestPlacement
     if (c <= 0.002) return 0;
     c *= 1 - smoothstep(0.5, 0.85, terrainSlopeAt(x, z)); // gentle slopes only
     // Thick belt framing the town, thinner stands out on the range.
-    return c * (1 - 0.55 * smoothstep(75, 150, r));
+    return c * (1 - 0.5 * smoothstep(75, 150, r));
   };
 
   const area = Math.PI * (maxR * maxR - minR * minR);

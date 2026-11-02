@@ -1,19 +1,21 @@
 // @ts-nocheck — offline Node tool (npx tsx), not part of the runtime bundle.
 // Offline bake: super-terrain (MIT, (c) alightinastorm) procedural tree generator
 // -> compact GLB geometry + one shared leaf atlas PNG for HELLO WORLD (WebGL).
-import { writeFileSync } from 'node:fs'
-import { deflateSync } from 'node:zlib'
-// Dynamic imports keep the external clone out of this package's typecheck/bundle.
+// CommonJS on purpose: tsx compiles the clone's TypeScript through require(), so its bare
+// `three` import resolves via the NODE_PATH that `npx tsx` (pnpm shim) provides.
+// Run: cd packages/world-engine && npx tsx src/scene/foliage/tools/bake-trees.cts
+const { writeFileSync } = require('node:fs')
+const { deflateSync } = require('node:zlib')
+const { join } = require('node:path')
 const ST = process.env.SUPER_TERRAIN ?? '/home/user/vibe-stack/super-terrain'
-const { compileProceduralTree } = await import(`${ST}/src/tree/generator/compileTree.ts`)
-const { bakeLeafSpray } = await import(`${ST}/src/tree/materials/leafSprayAtlas.ts`)
+const { compileProceduralTree } = require(`${ST}/src/tree/generator/compileTree.ts`)
+const { bakeLeafSpray } = require(`${ST}/src/tree/materials/leafSprayAtlas.ts`)
 // meshoptimizer (MIT, Arseny Kapoulkine) — already in the workspace store; offline use only.
 const MESHOPT = process.env.MESHOPT ?? '/home/user/hello-world/node_modules/.pnpm/meshoptimizer@1.1.1/node_modules/meshoptimizer/index.js'
-const { MeshoptSimplifier } = await import(MESHOPT)
-await MeshoptSimplifier.ready
+const { MeshoptSimplifier } = require(MESHOPT)
 const WOOD_RATIO = Number(process.env.WOOD_RATIO ?? 0.45) // keep ~45% of the generator's LOD-2 wood triangles
 
-const OUT = process.env.OUT ?? new URL('../assets', import.meta.url).pathname
+const OUT = process.env.OUT ?? join(__dirname, '../assets')
 const LOD = Number(process.env.LOD ?? 2) as 0 | 1 | 2 // shipped assets: LOD 2
 const TILE = 128 // atlas tile per spray variant
 const VARIANTS_PER_SPECIES = 4
@@ -85,6 +87,8 @@ function downsample(src: Uint8Array, size: number, dst: number) {
   return out
 }
 
+async function main() {
+await MeshoptSimplifier.ready
 const report: string[] = []
 SPECS.forEach((spec, row) => {
   const t0 = performance.now()
@@ -163,3 +167,5 @@ SPECS.forEach((spec, row) => {
 writeFileSync(`${OUT}/leaf-atlas.png`, png(atlas, atlasW, atlasH))
 console.log(report.join('\n'))
 console.log(`atlas ${atlasW}x${atlasH}`)
+}
+main().catch((error) => { console.error(error); process.exit(1) })

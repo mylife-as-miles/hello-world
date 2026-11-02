@@ -224,6 +224,9 @@ function densestCluster(store: SceneStore, out: THREE.Vector3): boolean {
     if (Math.hypot(r.location.x - c.x, r.location.z - c.z) < 6) { sx += r.location.x; sz += r.location.z; n++; }
   }
   out.set(sx / n, 0, sz / n);
+  // A centroid inside the fountain / stage ring cannot be framed at eye level: use the group's
+  // most-connected resident instead (a real subject, never the middle of a prop).
+  if (Math.hypot(out.x, out.z) < 2.9 || Math.hypot(out.x - STAGE_POS.x, out.z - STAGE_POS.z) < 2.2) out.set(c.x, 0, c.z);
   return true;
 }
 
@@ -516,7 +519,7 @@ export function CameraRig({ mode, selectedResidentId, transparent = false, quali
     if (directed && d.kind === 'portal') { s.cut.set(PORTAL_POS.x, 1.7, PORTAL_POS.z + 2.8); cutWant = 1; s.cutR0 = 0.5; s.cutR1 = d.raid ? 2.2 : 1.6; }
     else if (directed && d.until > 0) { s.cut.set(s.actor.pos.x, 1.25, s.actor.pos.z); cutWant = 1; s.cutR0 = 0.35; s.cutR1 = 0.95; }
     else if (!directed && mode === 'follow' && selectedResidentId && s.follow.init) { s.cut.set(s.follow.pos.x, 1.25, s.follow.pos.z); cutWant = 1; s.cutR0 = 0.35; s.cutR1 = 0.95; }
-    else if (!directed && (mode === 'street' || (mode === 'cinematic' && t - s.estAt >= 8)) && s.clusterInit) { s.cut.set(s.clusterS.x, 1.15, s.clusterS.z); cutWant = 1; s.cutR0 = 0.45; s.cutR1 = 1.5; }
+    else if (!directed && (mode === 'street' || (mode === 'cinematic' && t - s.estAt >= 8)) && s.clusterInit) { s.cut.set(s.clusterS.x, 1.15, s.clusterS.z); cutWant = 1; s.cutR0 = 0.3; s.cutR1 = mode === 'street' ? 0.85 : 1.1; }
     if (first.current || snap) {
       camera.position.copy(s.pos);
       look.current.copy(s.look);

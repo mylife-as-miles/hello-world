@@ -1,0 +1,70 @@
+{
+  "startedAt": "2026-11-02T21:02:35.854Z",
+  "base": "http://localhost:3011",
+  "checks": [
+    {
+      "name": "First browser session has viewer-only permissions",
+      "passed": true
+    },
+    {
+      "name": "Landing and authoritative 3D world load",
+      "passed": true,
+      "residents": 13,
+      "mode": "demo"
+    },
+    {
+      "name": "Independent context receives current authoritative resident",
+      "passed": true,
+      "connectedSessions": 2
+    },
+    {
+      "name": "Authenticated Director weather reaches independent sessions",
+      "passed": true,
+      "from": "sunny",
+      "to": "snow"
+    },
+    {
+      "name": "Director demo celebration uses shared normalized events",
+      "passed": true
+    },
+    {
+      "name": "Phone layout fits a 390px viewport",
+      "passed": true
+    },
+    {
+      "name": "OBS route has hidden chrome, rendered content and real composited alpha",
+      "passed": true,
+      "alpha": {
+        "width": 1920,
+        "height": 1080,
+        "clear": 1806257,
+        "opaque": 190409,
+        "translucent": 76934,
+        "total": 2073600,
+        "corners": [
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "No uncaught browser runtime errors across tested routes",
+      "passed": true
+    }
+  ],
+  "pageErrors": [],
+  "consoleErrors": [
+    "Failed to load resource: the server responded with a status of 404 (Not Found)"
+  ],
+  "screenshots": [
+    "landing-desktop.png",
+    "director-studio.png",
+    "world-mobile.png",
+    "obs-overlay.png"
+  ],
+  "scope": "Focused Director/mobile/overlay follow-up; core flow not rerun",
+  "finishedAt": "2026-11-02T21:04:28.191Z",
+  "passed": true
+}

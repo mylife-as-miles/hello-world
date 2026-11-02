@@ -1,3 +1,4 @@
+import { useHttpWorld } from "./http-world";
 import { useSyncExternalStore } from "react";
 import Dexie, { type Table } from "dexie";
 import type {
@@ -384,7 +385,7 @@ class WorldConnection {
   clearError = () => this.patch({ error: null });
 }
 const world = new WorldConnection();
-export function useWorld() {
+function useWebSocketWorld() {
   const state = useSyncExternalStore(
     world.subscribe,
     world.getState,
@@ -403,4 +404,11 @@ export function useWorld() {
     reset: world.reset,
     clearError: world.clearError,
   };
+}
+
+// Build-time transport selection; the hook implementation never changes after mount.
+const useConfiguredWorld =
+  import.meta.env.VITE_TRANSPORT === "http" ? useHttpWorld : useWebSocketWorld;
+export function useWorld() {
+  return useConfiguredWorld();
 }

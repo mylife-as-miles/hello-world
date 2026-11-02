@@ -93,3 +93,9 @@ This slice does not claim distributed scaling, cloud-hosted durability, or simul
 [Browser and integration QA](docs/QA.md) records real checks and evidence. `pnpm test:browser` uses system Chromium when available; otherwise run `pnpm exec playwright install chromium` first. Set `QA_BROWSER_PATH` for a different executable, and `QA_DIRECTOR_KEY` when testing a key-protected server. [Independent critique](docs/CRITIQUE.md) records weighted scores and remaining problems. Live Twitch and OBS application tests require their respective external applications/permissions; browser-source rendering is tested in Chromium.
 
 The engine v1 handoff is integrated. Workspace TypeScript, 80 automated tests, and the production build pass; browser and renderer evidence are recorded in the linked QA documents. Live Twitch and native OBS verification remain dependent on external access.
+
+## WebGPU and hosted Sites
+
+Use `/world?renderer=webgpu` or `/overlay?renderer=webgpu` to request WebGPU. The OBS setup dialog also selects the world renderer. WebGL remains the compatible default and fallback. The world, character studio, and overlay were verified using genuine software WebGPU; hardware performance and native OBS WebGPU are untested. WebGPU uses compatible materials/effects and omits WebGL-only postprocessing. See [WebGPU reproduction](docs/WEBGPU.md).
+
+`pnpm build:sites` builds the HTTP-polling frontend and Cloudflare Worker artifact. The hosted adapter uses Sites identity and D1 with optimistic concurrency, preserving the same runtime/events. The Node WebSocket transport remains the default for `pnpm dev`. Hosted Demo Mode does not imply authorized Twitch delivery; simulation advances during active requests.

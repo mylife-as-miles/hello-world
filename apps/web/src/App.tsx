@@ -1292,14 +1292,14 @@ export default function App() {
                     <h2>
                       {me ? (
                         <>
-                          Looking good,
+                          Looking good,{" "}
                           <br />
                           {me.displayName}
                           <span>.</span>
                         </>
                       ) : (
                         <>
-                          You belong
+                          You belong{" "}
                           <br />
                           in the story<span>.</span>
                         </>

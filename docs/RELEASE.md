@@ -67,7 +67,7 @@ This is not a test failure and cannot be fixed in workflow code. GitHub-hosted C
 
 ## Integration verification record
 
-Pending complete engine integration. The release engineer will append actual clean-checkout and production-route observations here; no full-application pass is claimed yet. See [QA](QA.md), [independent critique](CRITIQUE.md), and [delivery evidence](DELIVERY.md).
+The engine handoff was merged in `400db70`; the wired application was published at `2aefca1`. Actual isolated preflight and clean-checkout observations are recorded below. Browser and visual evidence remain separate from source/build verification. See [QA](QA.md), [independent critique](CRITIQUE.md), and [delivery evidence](DELIVERY.md).
 
 ## Isolated integration preflight — 20:17 UTC
 
@@ -86,3 +86,38 @@ Observed commands and results, under the managed environment’s Node 24.19.0 an
 - Wrong WebSocket Origin: HTTP 403. Missing session: HTTP 401.
 
 The isolated port-3012 process was stopped after verification. Existing development/QA servers were not changed. This check does not establish visual quality, live Twitch event delivery, OBS-host operation, or a clean install of the final merged revision.
+
+
+## Clean integrated-main check — 20:54 UTC
+
+Tested revision: `2aefca1a196b3bf0156c4d4f24abc0b350332dad`, in a fresh detached worktree with no preexisting `node_modules` or `.env`. Verification did not mutate the primary workspace. The checkout remained clean after the checks.
+
+Actual tools, printed by the check process: **Node v22.23.4**, **pnpm 10.28.2**. The verification command explicitly selected them with `npx -p node@22 -p pnpm@10.28.2 -c ...`.
+
+| Gate | Observed result |
+| --- | --- |
+| `pnpm install --frozen-lockfile` | Passed; 215 packages installed; esbuild postinstall completed |
+| `pnpm typecheck` | Passed for contracts, engine, server, and web |
+| `pnpm test` | Passed: 40 engine tests and 40 server tests, 80 total |
+| `pnpm build` | Passed for all workspaces |
+
+The web build emitted a 1,793.80 kB main script (525.90 kB gzip), 97.19 kB CSS (19.01 kB gzip), and a separate optional WebGPU chunk. The only reported build warning was the main chunk exceeding the configured size threshold. This warning does not establish runtime performance; browser testing is recorded separately.
+
+[Hosted run 41522930508](https://github.com/mylife-as-miles/hello-world/actions/runs/41522930508), for this same commit, also never started a step. Its exact failure annotation remains: “The job was not started because your account is locked due to a billing issue.” The local pass above must not be represented as a hosted CI pass.
+
+The first-frame renderer compatibility follow-up was finalized afterward and checked at the source revision below.
+
+
+## Latest tested source — 21:02 UTC
+
+**`ae72dec058f7a78591f20078308b94725a281fcc`** is the latest source revision independently verified by the release engineer. It includes the post-merge camera fitting, creator renderer support, and first-frame renderer compatibility fixes.
+
+The same isolated clean worktree advanced to this commit. The lockfile is byte-for-byte unchanged from the successful fresh frozen install. Under printed **Node v22.23.4 / pnpm 10.28.2**, the release engineer reran:
+
+- `pnpm typecheck`: passed across all workspaces.
+- `pnpm test`: passed, **80 tests** total (40 engine + 40 server).
+- `pnpm build`: passed across all workspaces.
+
+The final web main script is 1,796.31 kB (526.90 kB gzip), CSS 97.19 kB (19.01 kB gzip), and optional WebGPU code remains a separate chunk. The only build warning is the configured main-chunk size threshold. The verification checkout remained clean, and the primary workspace’s dependencies/source were not changed by this check.
+
+This establishes source, dependency, type, test, and production-build compatibility on the declared toolchain. It does not turn the separate browser/core-flow checks into a complete browser-suite pass, or establish live Twitch/OBS-host behavior. See the latest [QA record](QA.md) and [critic review](CRITIQUE.md) for those practical limits.

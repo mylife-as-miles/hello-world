@@ -1,0 +1,11 @@
+{
+  "passed": true,
+  "diagnostic": {
+    "engine": "three.js r187",
+    "renderer": "webgl",
+    "rendererRequested": "webgpu",
+    "rendererFallback": "No WebGPU adapter is available; using WebGL."
+  },
+  "pageErrors": [],
+  "checkedAt": "2026-11-02T20:54:49.727Z"
+}

@@ -1,0 +1,16 @@
+import { spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
+import { cpSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+const root=resolve(import.meta.dirname,'..');
+const output=resolve(root,process.env.SITES_OUTPUT || 'dist-sites');
+const result=spawnSync('pnpm',['--filter','@hello-world/web','exec','vite','build','--outDir',resolve(output,'client')],{cwd:root,stdio:'inherit',env:{...process.env,VITE_TRANSPORT:'http'}});
+if(result.status)process.exit(result.status);
+mkdirSync(resolve(output,'server'),{recursive:true});mkdirSync(resolve(output,'.openai'),{recursive:true});
+const req=createRequire(resolve(root,'apps/server/package.json'));const esbuild=createRequire(req.resolve('tsx'))('esbuild');
+await esbuild.build({entryPoints:[resolve(root,'apps/server/src/sites-worker.ts')],bundle:true,format:'esm',platform:'browser',target:'es2022',minify:true,outfile:resolve(output,'server/index.js'),define:{'process.env.NODE_ENV':'"production"'}});
+cpSync(resolve(root,'.openai/hosting.json'),resolve(output,'.openai/hosting.json'));
+mkdirSync(resolve(output,'drizzle'),{recursive:true});
+cpSync(resolve(root,'apps/server/sites-migrations/0001_world.sql'),resolve(output,'drizzle/0001_world.sql'));
+writeFileSync(resolve(output,'server/wrangler.json'),JSON.stringify({name:'hello-world-sites',main:'index.js',compatibility_date:'2026-11-01',compatibility_flags:['nodejs_compat'],assets:{binding:'ASSETS',directory:'../client',not_found_handling:'single-page-application',html_handling:'none',run_worker_first:true},d1_databases:[{binding:'WORLD_DB',database_name:'hello-world',migrations_dir:'../drizzle'}]},null,2));
+console.log('Sites Worker + HTTP frontend built:',output);

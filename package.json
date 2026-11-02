@@ -10,7 +10,9 @@
     "test": "pnpm -r --if-present test",
     "start": "pnpm --filter @hello-world/server start",
     "test:browser": "node tests/browser-smoke.mjs",
-    "test:runtime": "pnpm --filter @hello-world/server exec tsx ../../tests/runtime-acceptance.ts"
+    "test:runtime": "pnpm --filter @hello-world/server exec tsx ../../tests/runtime-acceptance.ts",
+    "build:sites": "node scripts/build-sites.mjs",
+    "test:webgpu": "node tests/webgpu-smoke.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

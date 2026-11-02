@@ -1619,6 +1619,7 @@ export default function App() {
           ) : (
             <div className="creator-content">
               <AvatarCreator
+                renderer={rendererMode}
                 initialAppearance={me?.appearance}
                 displayName={name || me?.displayName}
                 initialPersonality={me?.personality}

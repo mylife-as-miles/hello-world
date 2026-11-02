@@ -28,7 +28,6 @@ import { CameraRig, poseFor, type RigMode } from './CameraRig';
 import { PostFX } from './PostFX';
 import { Hud } from './Hud';
 import { createWorldRenderer, type RendererPreference, type WorldRendererStatus } from './renderer';
-const WebGPUCompatibility = lazy(() => import('./WebGPUCompatibility').then(module => ({ default: module.WebGPUCompatibility })));
 class WebGPUGuard extends Component<{ children: ReactNode; onFailure: () => void }, { failed: boolean }> {
   state = { failed: false };
   static getDerivedStateFromError() { return { failed: true }; }
@@ -104,7 +103,7 @@ export function WorldScene(props: WorldSceneProps & WorldSceneExtraProps) {
     if (f) f(''); else setLocalSel(undefined);
   }, [selected]);
 
-  const rigMode: RigMode = transparent ? 'overlay' : cameraMode;
+  const rigMode: RigMode = transparent && cameraMode === 'neighborhood' ? 'overlay' : cameraMode;
   const initial = useMemo(() => {
     const pos = new THREE.Vector3(), look = new THREE.Vector3();
     poseFor(rigMode, 0, pos, look);
@@ -181,7 +180,6 @@ const WorldContent = memo(function WorldContent({
   const overlayProps = useMemo(() => (transparent ? ({ overlay: true } as unknown as Partial<ResidentsLayerProps>) : undefined), [transparent]);
   return (
     <>
-      {webgpu && <WebGPUCompatibility />}
       <Atmosphere transparent={transparent} quality={quality} sky={sky} cloudTint={cloudTint} />
       {!transparent && <SkyDome uniforms={sky} />}
       {!transparent && <Clouds tint={cloudTint} />}

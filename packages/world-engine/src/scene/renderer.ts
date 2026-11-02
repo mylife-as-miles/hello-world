@@ -83,6 +83,9 @@ export async function createWorldRenderer(
     await renderer.init();
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
+    // R3F ecosystem helpers use this WebGL-era capability accessor only to
+    // discover canvas alpha. Report the real configured surface capabilities.
+    (renderer as unknown as { getContextAttributes(): WebGLContextAttributes }).getContextAttributes = () => ({ alpha: options.transparent, antialias: true, depth: true, stencil: false, premultipliedAlpha: true, preserveDrawingBuffer: false, powerPreference: 'high-performance', failIfMajorPerformanceCaveat: false, desynchronized: false });
     // isWebGPURenderer alone is insufficient: Three can silently use WebGL2.
     if (
       !(renderer.backend as unknown as { isWebGPUBackend?: boolean })
@@ -95,6 +98,14 @@ export async function createWorldRenderer(
       );
       throw new Error("WebGPU backend was not initialized.");
     }
+    const { createWebGPUSceneAdapter } = await import("./WebGPUCompatibility");
+    const sceneAdapter = createWebGPUSceneAdapter();
+    const render = renderer.render.bind(renderer);
+    renderer.render = (scene, camera) => {
+      // Adapt before the very first shader compilation, including newly loaded rigs.
+      sceneAdapter.update(scene, camera);
+      return render(scene, camera);
+    };
     const status: WorldRendererStatus = {
       requested: options.preference,
       backend: "webgpu",
@@ -104,6 +115,7 @@ export async function createWorldRenderer(
     const ownedDevice = device;
     const dispose = renderer.dispose.bind(renderer);
     renderer.dispose = async () => {
+      sceneAdapter.dispose();
       await dispose();
       ownedDevice.destroy();
     };

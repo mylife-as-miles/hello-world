@@ -3,8 +3,6 @@
  * GLSL-only effects receive node materials; animated particle buffers are rendered
  * as capped instanced quads (WebGPU point primitives are fixed at one pixel).
  */
-import { useEffect, useMemo } from "react";
-import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
 import {
@@ -343,16 +341,13 @@ function particles(object: Drawable, source: Shader): Particle | null {
   return { object, mesh, geometry, material, alpha, update };
 }
 
-export function WebGPUCompatibility() {
-  const state = useMemo(
-    () => ({
-      materials: new Map<THREE.Material, Adapted>(),
-      originals: new Map<Drawable, THREE.Material | THREE.Material[]>(),
-      particles: new Map<Drawable, Particle>(),
-    }),
-    [],
-  );
-  useFrame(({ scene, camera }) => {
+export function createWebGPUSceneAdapter() {
+  const state = {
+    materials: new Map<THREE.Material, Adapted>(),
+    originals: new Map<Drawable, THREE.Material | THREE.Material[]>(),
+    particles: new Map<Drawable, Particle>(),
+  };
+  const update = (scene: THREE.Object3D, camera: THREE.Camera) => {
     scene.traverse((candidate) => {
       const object = candidate as Drawable;
       if (object.userData.webgpuEffect || !object.material || !object.geometry)
@@ -445,9 +440,8 @@ export function WebGPUCompatibility() {
         effect.object.material) as Shader;
       effect.update(value(source, "uTime"), camera);
     }
-  }, -0.1);
-  useEffect(
-    () => () => {
+  };
+  const dispose = () => {
       for (const [object, original] of state.originals)
         object.material = original;
       for (const effect of state.particles.values()) {
@@ -460,8 +454,6 @@ export function WebGPUCompatibility() {
         ).visible = true;
       }
       for (const result of state.materials.values()) result.material.dispose();
-    },
-    [state],
-  );
-  return null;
+  };
+  return { update, dispose };
 }

@@ -12,7 +12,10 @@ import {
   ACCESSORIES, BASE_MODELS, BOTTOMS, DEFAULT_APPEARANCE, EYE_COLORS, HAIR_COLORS, HAIR_STYLES, OUTFIT_COLORS,
   PERSONALITY_TRAITS, SHOES, SKIN_TONES, TOPS, normalizeAppearance,
 } from '../avatars/catalog';
+import * as AvatarApi from '../avatars';
 import { isVrmBase, type HumanoidRig } from '../avatars';
+import { REALISTIC_BASE_MODELS, REALISTIC_SUPPORT, isRealisticBase, type AppearanceSupport } from '../avatars/realistic';
+import type { BaseModelEntry } from '../avatars/catalog';
 import type { GestureName } from '../interactions/animation/AvatarAnimator';
 import { CreatorPreview, type CameraPreset, type PreviewBase, type PreviewCommand, type PreviewExpression } from './CreatorPreview';
 import { CHARACTER_PRESETS, MAX_ACCESSORIES, MAX_TRAITS, randomAppearance, sanitizeTraits, toggleCapped } from './presets';
@@ -58,6 +61,57 @@ const CAMERA_BUTTONS: Array<{ id: CameraPreset; label: string; short: string }> 
 
 const cls = (...xs: Array<string | false | null | undefined>) => xs.filter(Boolean).join(' ');
 const keyOf = (a: AvatarAppearance) => JSON.stringify(a);
+
+const FULL_SUPPORT: AppearanceSupport = { skinTone: true, hair: true, outfitColor: true, outfitPieces: true, face: true, body: true, accessories: true };
+const VRM_SUPPORT: AppearanceSupport = { skinTone: false, hair: false, outfitColor: false, outfitPieces: false, face: false, body: true, accessories: true };
+
+/**
+ * Which appearance fields visibly apply to a base. Prefers the avatar API's
+ * `getAppearanceSupport` when present (looked up dynamically so this works
+ * before/after it lands), else realistic/VRM/procedural defaults.
+ */
+export function appearanceSupportFor(baseModelId: string): AppearanceSupport {
+  const fn = (AvatarApi as unknown as Record<string, unknown>)['getAppearanceSupport'];
+  if (typeof fn === 'function') {
+    try {
+      const r = (fn as (id: string) => Partial<AppearanceSupport> | null | undefined)(baseModelId);
+      if (r && typeof r === 'object') return { ...FULL_SUPPORT, ...r };
+    } catch { /* fall back below */ }
+  }
+  if (isRealisticBase(baseModelId)) return REALISTIC_SUPPORT;
+  if (isVrmBase(baseModelId)) return VRM_SUPPORT;
+  return FULL_SUPPORT;
+}
+
+/** Realistic bodies read straight from the realistic catalog (works before the BASE_MODELS merge), de-duplicated. */
+function realisticBases(): BaseModelEntry[] {
+  const seen = new Set<string>();
+  const out: BaseModelEntry[] = [];
+  for (const m of [...REALISTIC_BASE_MODELS, ...BASE_MODELS.filter(b => isRealisticBase(b.id))]) {
+    if (!seen.has(m.id)) { seen.add(m.id); out.push(m); }
+  }
+  return out;
+}
+const realisticTag = (id: string) => (id.startsWith('rb-') ? 'Photoreal · Rocketbox (MIT)' : 'Photoreal · MetaHuman licence');
+
+function BaseCard({ m, on, onPick, tag }: { m: BaseModelEntry; on: boolean; onPick: () => void; tag?: string }) {
+  return (
+    <button type="button" className={cls('hwc-base', on && 'is-on', tag && 'hwc-base-real')} aria-pressed={on}
+      aria-label={`Base body ${m.label}${tag ? ` (${tag})` : m.kind === 'vrm' ? ' (VRM model)' : ''}`} data-testid={`base-${m.id}`} onClick={onPick}>
+      <BodyGlyph id={m.id} color={on ? '#cfc4ff' : 'rgba(236,232,250,.55)'} />
+      <span>
+        <b>{m.label}{m.kind === 'vrm' && !tag && <span className="hwc-kind">VRM</span>}</b>
+        <small>{m.description}</small>
+        {tag && <small className="hwc-realtag">{tag}</small>}
+        {m.credit && <small className="hwc-credit">{m.credit}</small>}
+      </span>
+    </button>
+  );
+}
+
+function Note({ children }: { children: ReactNode }) {
+  return <div className="hwc-note" role="note">{children}</div>;
+}
 
 // ---------------------------------------------------------------- controls
 function Section({ id, domId, title, sub, action, children, onEngage }: {
@@ -167,7 +221,12 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
   const appearanceKey = useMemo(() => keyOf(appearance), [appearance]);
   const dirty = appearanceKey !== keyOf(initial.appearance) || personality.join(',') !== initial.personality.join(',');
   const vrm = isVrmBase(appearance.baseModelId);
-  const baseEntry = BASE_MODELS.find(m => m.id === appearance.baseModelId);
+  const realistic = isRealisticBase(appearance.baseModelId);
+  const realBases = realisticBases();
+  const baseEntry = BASE_MODELS.find(m => m.id === appearance.baseModelId) ?? realBases.find(m => m.id === appearance.baseModelId);
+  const support = appearanceSupportFor(appearance.baseModelId);
+  const baseName = baseEntry?.label ?? 'This body';
+  const fixedWhy = realistic ? 'a photoreal body with its own authored look' : vrm ? 'a VRM avatar with its own authored look' : 'a fixed-look body';
 
   // ---- edits
   const edit = useCallback((fn: (a: AvatarAppearance) => AvatarAppearance) => {
@@ -238,7 +297,7 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
   // user who deliberately goes back to full body is never overridden.
   const autoFramed = useRef(false);
   const frameFace = () => {
-    if (autoFramed.current) return;
+    if (autoFramed.current || !support.face) return;
     autoFramed.current = true;
     if (camera === 'full') pickCamera('face');
   };
@@ -291,7 +350,7 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
             <div className="hwc-brand">
               <span className="hwc-eyebrow">Hello World</span>
               <span className="hwc-title">Character Studio</span>
-              <span className="hwc-badge"><i />{baseEntry ? `${baseEntry.label} body` : 'Custom body'}{vrm ? ' · VRM' : ''}</span>
+              <span className="hwc-badge"><i />{baseEntry ? `${baseEntry.label}${realistic ? '' : ' body'}` : 'Custom body'}{realistic ? ' · Photoreal' : vrm ? ' · VRM' : ''}</span>
               <span className="hwc-hint" aria-hidden="true">Drag to rotate · scroll or pinch to zoom</span>
             </div>
             <div className="hwc-tools">
@@ -377,94 +436,129 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
             </Section>
 
             <Section id="body" domId={secId('body')} title="Body" sub="Base body, proportions and skin">
-              <div className="hwc-bases" role="group" aria-label="Base body type">
-                {BASE_MODELS.map(m => (
-                  <button key={m.id} type="button" className={cls('hwc-base', appearance.baseModelId === m.id && 'is-on')} aria-pressed={appearance.baseModelId === m.id}
-                    aria-label={`Base body ${m.label}${m.kind === 'vrm' ? ' (VRM model)' : ''}`} data-testid={`base-${m.id}`}
-                    onClick={() => edit(a => ({ ...a, baseModelId: m.id }))}>
-                    <BodyGlyph id={m.id} color={appearance.baseModelId === m.id ? '#cfc4ff' : 'rgba(236,232,250,.55)'} />
-                    <span>
-                      <b>{m.label}{m.kind === 'vrm' && <span className="hwc-kind">VRM</span>}</b>
-                      <small>{m.description}</small>
-                      {m.credit && <small className="hwc-credit">{m.credit}</small>}
-                    </span>
-                  </button>
+              <div className="hwc-label" style={{ marginTop: 0 }}>Townie bodies <small>fully customisable</small></div>
+              <div className="hwc-bases" role="group" aria-label="Townie base bodies">
+                {BASE_MODELS.filter(m => m.kind !== 'vrm' && !isRealisticBase(m.id)).map(m => (
+                  <BaseCard key={m.id} m={m} on={appearance.baseModelId === m.id} onPick={() => edit(a => ({ ...a, baseModelId: m.id }))} />
                 ))}
               </div>
+              {BASE_MODELS.some(m => m.kind === 'vrm' && !isRealisticBase(m.id)) && (
+                <>
+                  <div className="hwc-label">Guest avatars <small>VRM · fixed look</small></div>
+                  <div className="hwc-bases" role="group" aria-label="VRM guest avatars">
+                    {BASE_MODELS.filter(m => m.kind === 'vrm' && !isRealisticBase(m.id)).map(m => (
+                      <BaseCard key={m.id} m={m} on={appearance.baseModelId === m.id} onPick={() => edit(a => ({ ...a, baseModelId: m.id }))} />
+                    ))}
+                  </div>
+                </>
+              )}
+              {realBases.length > 0 && (
+                <div className="hwc-real" role="group" aria-label="Realistic humans" data-testid="realistic-group">
+                  <div className="hwc-real-head">
+                    <span className="hwc-real-title">Realistic humans</span>
+                    <span className="hwc-real-sub">Photoreal bodies · outfit colour, proportions &amp; accessories</span>
+                  </div>
+                  <div className="hwc-bases">
+                    {realBases.map(m => (
+                      <BaseCard key={m.id} m={m} tag={realisticTag(m.id)} on={appearance.baseModelId === m.id} onPick={() => edit(a => ({ ...a, baseModelId: m.id }))} />
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className="hwc-label">Proportions</div>
-              <Slider label="Height" value={appearance.body.height} ends={['Shorter', 'Taller']} testId="slider-height" onChange={v => setBody({ height: v })} />
-              <Slider label="Build" value={appearance.body.build} ends={['Slim', 'Sturdy']} testId="slider-build" onChange={v => setBody({ build: v })} />
+              {support.body ? (
+                <>
+                  <Slider label="Height" value={appearance.body.height} ends={['Shorter', 'Taller']} testId="slider-height" onChange={v => setBody({ height: v })} />
+                  <Slider label="Build" value={appearance.body.build} ends={['Slim', 'Sturdy']} testId="slider-build" onChange={v => setBody({ build: v })} />
+                </>
+              ) : <Note>{baseName} is {fixedWhy}; height and build are fixed.</Note>}
               <div className="hwc-label">Skin tone</div>
-              <Swatches label="Skin tone" colors={SKIN_TONES} value={appearance.skinTone} testIdPrefix="skin" onChange={c => edit(a => ({ ...a, skinTone: c }))} />
+              {support.skinTone
+                ? <Swatches label="Skin tone" colors={SKIN_TONES} value={appearance.skinTone} testIdPrefix="skin" onChange={c => edit(a => ({ ...a, skinTone: c }))} />
+                : <Note>{baseName} is {fixedWhy}; its skin is part of the model. Skin tones apply to Townie bodies.</Note>}
             </Section>
 
             <Section id="face" domId={secId('face')} title="Face" sub="Eyes and features" onEngage={frameFace}>
-              <div className="hwc-label" style={{ marginTop: 0 }}>Eye colour</div>
-              <Swatches label="Eye colour" colors={EYE_COLORS} value={appearance.face.eyeColor} testIdPrefix="eye" onChange={c => setFace({ eyeColor: c })} />
-              {vrm ? (
-                <div className="hwc-note" role="note">Face shape sliders apply to Townie bodies. This VRM model keeps its authored face — try the expression buttons on the preview.</div>
-              ) : (
+              {support.face ? (
                 <>
+                  <div className="hwc-label" style={{ marginTop: 0 }}>Eye colour</div>
+                  <Swatches label="Eye colour" colors={EYE_COLORS} value={appearance.face.eyeColor} testIdPrefix="eye" onChange={c => setFace({ eyeColor: c })} />
                   <div className="hwc-label">Features</div>
                   <Slider label="Eye size" value={appearance.face.eyeSize} ends={['Small', 'Big']} testId="slider-eyes" onChange={v => setFace({ eyeSize: v })} />
                   <Slider label="Nose size" value={appearance.face.noseSize} ends={['Button', 'Bold']} testId="slider-nose" onChange={v => setFace({ noseSize: v })} />
                   <Slider label="Mouth size" value={appearance.face.mouthSize} ends={['Small', 'Wide']} testId="slider-mouth" onChange={v => setFace({ mouthSize: v })} />
                 </>
-              )}
+              ) : <Note>{baseName} is {fixedWhy}, so eye colour and face shape stay as authored. Try the expression buttons on the preview.</Note>}
             </Section>
 
             <Section id="hair" domId={secId('hair')} title="Hair" sub={`${HAIR_STYLES.length} styles · any colour`}>
+              {support.hair ? (
+                <>
               <div className="hwc-grid" role="group" aria-label="Hairstyle">
-                {HAIR_STYLES.map(h => (
-                  <button key={h.id} type="button" className={cls('hwc-tile', appearance.hairStyle === h.id && 'is-on')} aria-pressed={appearance.hairStyle === h.id}
-                    aria-label={`Hairstyle ${h.label}`} data-testid={`hair-${h.id}`} onClick={() => edit(a => ({ ...a, hairStyle: h.id }))}>
-                    <Bust hair={h.id} hairColor={appearance.hairColor} skin={appearance.skinTone} outfit="rgba(255,255,255,.14)" eye={appearance.face.eyeColor} size={50} />
-                    {h.label}
-                  </button>
-                ))}
-              </div>
-              <div className="hwc-label">Hair colour</div>
-              <Swatches label="Hair colour" colors={HAIR_COLORS} value={appearance.hairColor} testIdPrefix="hair-color" onChange={c => edit(a => ({ ...a, hairColor: c }))} />
+                  {HAIR_STYLES.map(h => (
+                    <button key={h.id} type="button" className={cls('hwc-tile', appearance.hairStyle === h.id && 'is-on')} aria-pressed={appearance.hairStyle === h.id}
+                      aria-label={`Hairstyle ${h.label}`} data-testid={`hair-${h.id}`} onClick={() => edit(a => ({ ...a, hairStyle: h.id }))}>
+                      <Bust hair={h.id} hairColor={appearance.hairColor} skin={appearance.skinTone} outfit="rgba(255,255,255,.14)" eye={appearance.face.eyeColor} size={50} />
+                      {h.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="hwc-label">Hair colour</div>
+                <Swatches label="Hair colour" colors={HAIR_COLORS} value={appearance.hairColor} testIdPrefix="hair-color" onChange={c => edit(a => ({ ...a, hairColor: c }))} />
+                </>
+              ) : <Note>{baseName} is {fixedWhy}; its hair is part of the model. Hairstyles and hair colours apply to Townie bodies.</Note>}
             </Section>
 
             <Section id="outfit" domId={secId('outfit')} title="Outfit" sub="Mix pieces, then pick a colour">
+              {support.outfitPieces ? (
+                <>
               <div className="hwc-label" style={{ marginTop: 0 }}>Top</div>
-              <div className="hwc-chips" role="group" aria-label="Top">
-                {TOPS.map(t => (
-                  <button key={t.id} type="button" className={cls('hwc-chip', appearance.outfit.top === t.id && 'is-on')} aria-pressed={appearance.outfit.top === t.id}
-                    data-testid={`top-${t.id}`} onClick={() => setOutfit({ top: t.id })}><i style={{ '--dot': appearance.outfit.color } as CSSProperties} />{t.label}</button>
-                ))}
-              </div>
-              <div className="hwc-label">Bottom</div>
-              <div className="hwc-chips" role="group" aria-label="Bottom">
-                {BOTTOMS.map(b => (
-                  <button key={b.id} type="button" className={cls('hwc-chip', appearance.outfit.bottom === b.id && 'is-on')} aria-pressed={appearance.outfit.bottom === b.id}
-                    data-testid={`bottom-${b.id}`} onClick={() => setOutfit({ bottom: b.id })}><i style={{ '--dot': bottomColor(b.id) } as CSSProperties} />{b.label}</button>
-                ))}
-              </div>
-              <div className="hwc-label">Shoes</div>
-              <div className="hwc-chips" role="group" aria-label="Shoes">
-                {SHOES.map(s => (
-                  <button key={s.id} type="button" className={cls('hwc-chip', appearance.outfit.shoes === s.id && 'is-on')} aria-pressed={appearance.outfit.shoes === s.id}
-                    data-testid={`shoes-${s.id}`} onClick={() => setOutfit({ shoes: s.id })}><i style={{ '--dot': shoeColor(s.id) } as CSSProperties} />{s.label}</button>
-                ))}
-              </div>
+                <div className="hwc-chips" role="group" aria-label="Top">
+                  {TOPS.map(t => (
+                    <button key={t.id} type="button" className={cls('hwc-chip', appearance.outfit.top === t.id && 'is-on')} aria-pressed={appearance.outfit.top === t.id}
+                      data-testid={`top-${t.id}`} onClick={() => setOutfit({ top: t.id })}><i style={{ '--dot': appearance.outfit.color } as CSSProperties} />{t.label}</button>
+                  ))}
+                </div>
+                <div className="hwc-label">Bottom</div>
+                <div className="hwc-chips" role="group" aria-label="Bottom">
+                  {BOTTOMS.map(b => (
+                    <button key={b.id} type="button" className={cls('hwc-chip', appearance.outfit.bottom === b.id && 'is-on')} aria-pressed={appearance.outfit.bottom === b.id}
+                      data-testid={`bottom-${b.id}`} onClick={() => setOutfit({ bottom: b.id })}><i style={{ '--dot': bottomColor(b.id) } as CSSProperties} />{b.label}</button>
+                  ))}
+                </div>
+                <div className="hwc-label">Shoes</div>
+                <div className="hwc-chips" role="group" aria-label="Shoes">
+                  {SHOES.map(s => (
+                    <button key={s.id} type="button" className={cls('hwc-chip', appearance.outfit.shoes === s.id && 'is-on')} aria-pressed={appearance.outfit.shoes === s.id}
+                      data-testid={`shoes-${s.id}`} onClick={() => setOutfit({ shoes: s.id })}><i style={{ '--dot': shoeColor(s.id) } as CSSProperties} />{s.label}</button>
+                  ))}
+                </div>
+                </>
+              ) : <Note>{baseName} wears its own outfit pieces — tops, bottoms and shoes apply to Townie bodies.</Note>}
+              {support.outfitColor ? (
+                <>
               <div className="hwc-label">Outfit colour <small>tints your top</small></div>
-              <Swatches label="Outfit colour" colors={OUTFIT_COLORS} value={appearance.outfit.color} testIdPrefix="outfit-color" onChange={c => setOutfit({ color: c })} />
+                <Swatches label="Outfit colour" colors={OUTFIT_COLORS} value={appearance.outfit.color} testIdPrefix="outfit-color" onChange={c => setOutfit({ color: c })} />
+                </>
+              ) : <Note>{baseName}'s outfit colours are fixed.</Note>}
             </Section>
 
             <Section id="extras" domId={secId('extras')} title="Accessories" sub={`${appearance.accessories.length}/${MAX_ACCESSORIES} equipped`}>
+              {support.accessories ? (
+                <>
               <div className="hwc-chips" role="group" aria-label="Accessories">
-                {ACCESSORIES.map(x => {
-                  const on = appearance.accessories.includes(x.id);
-                  return (
-                    <button key={x.id} type="button" className={cls('hwc-chip', on && 'is-on')} aria-pressed={on} data-testid={`acc-${x.id}`} onClick={() => toggleAccessory(x.id)}>
-                      <span className="hwc-check" aria-hidden="true">{on && <Icon name="check" size={11} />}</span>{x.label}
-                    </button>
-                  );
-                })}
-              </div>
-              {appearance.accessories.length >= MAX_ACCESSORIES && <div className="hwc-note">Max {MAX_ACCESSORIES} — picking another swaps out the oldest.</div>}
+                  {ACCESSORIES.map(x => {
+                    const on = appearance.accessories.includes(x.id);
+                    return (
+                      <button key={x.id} type="button" className={cls('hwc-chip', on && 'is-on')} aria-pressed={on} data-testid={`acc-${x.id}`} onClick={() => toggleAccessory(x.id)}>
+                        <span className="hwc-check" aria-hidden="true">{on && <Icon name="check" size={11} />}</span>{x.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                {appearance.accessories.length >= MAX_ACCESSORIES && <div className="hwc-note">Max {MAX_ACCESSORIES} — picking another swaps out the oldest.</div>}
+                </>
+              ) : <Note>{baseName} can't wear accessories.</Note>}
             </Section>
 
             <Section id="personality" domId={secId('personality')} title="Personality" sub={`Pick up to ${MAX_TRAITS} · shapes how they live in town (${personality.length}/${MAX_TRAITS})`}>

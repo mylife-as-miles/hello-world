@@ -344,8 +344,14 @@ function acquireImpostors(gl: THREE.WebGLRenderer, assets: TreeAssets): Impostor
   let entry = impostorCache.get(gl);
   if (!entry) {
     let impostors: Impostors | null = null;
-    try { impostors = bakeImpostors(gl, assets); } catch (error) {
-      console.info('[GeneratedTrees] impostor bake unavailable on this renderer; far trees use sparse crowns', error);
+    if (isWebGPU(gl)) {
+      // the tile bake relies on render-target viewport/scissor semantics only verified on WebGL;
+      // on the opt-in WebGPU path far trees stay on sparse crowns (correct, just more triangles)
+      console.info('[GeneratedTrees] WebGPU renderer: impostors disabled, far trees use sparse crowns');
+    } else {
+      try { impostors = bakeImpostors(gl, assets); } catch (error) {
+        console.info('[GeneratedTrees] impostor bake unavailable on this renderer; far trees use sparse crowns', error);
+      }
     }
     entry = { impostors, refs: 0 };
     impostorCache.set(gl, entry);

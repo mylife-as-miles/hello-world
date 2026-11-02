@@ -8,8 +8,8 @@
  */
 import * as THREE from 'three';
 
-export type EmoteKind = 'heart' | 'note' | 'sparkle' | 'anger' | 'cloud' | 'zzz' | 'bang' | 'hello';
-const EMOTE_KINDS: EmoteKind[] = ['heart', 'note', 'sparkle', 'anger', 'cloud', 'zzz', 'bang', 'hello'];
+export type EmoteKind = 'heart' | 'note' | 'sparkle' | 'anger' | 'cloud' | 'zzz' | 'bang' | 'hello' | 'gift';
+const EMOTE_KINDS: EmoteKind[] = ['heart', 'note', 'sparkle', 'anger', 'cloud', 'zzz', 'bang', 'hello', 'gift'];
 
 function canvas(w: number, h: number): [HTMLCanvasElement, CanvasRenderingContext2D] {
   const c = document.createElement('canvas');
@@ -108,6 +108,17 @@ function drawEmote(kind: EmoteKind): HTMLCanvasElement {
       g.beginPath(); g.arc(98, 40, 28, -1.0, 0.15); g.stroke();
       break;
     }
+    case 'gift': {
+      // Small wrapped present (giver is on the way to hand it over).
+      g.fillStyle = '#ff5d8f'; g.strokeStyle = '#ffffff'; g.lineWidth = 6;
+      g.beginPath(); g.roundRect(26, 52, 76, 60, 10); g.fill(); g.stroke();
+      g.beginPath(); g.roundRect(20, 38, 88, 22, 8); g.fill(); g.stroke();
+      g.fillStyle = '#ffd84d';
+      g.fillRect(57, 38, 14, 74);
+      g.beginPath(); g.ellipse(50, 30, 15, 10, -0.5, 0, Math.PI * 2); g.fill();
+      g.beginPath(); g.ellipse(78, 30, 15, 10, 0.5, 0, Math.PI * 2); g.fill();
+      break;
+    }
     case 'bang': {
       g.fillStyle = '#ffd84d'; g.strokeStyle = '#ffffff'; g.lineWidth = 6;
       g.beginPath(); g.roundRect(30, 14, 68, 100, 22); g.fill(); g.stroke();
@@ -160,11 +171,11 @@ export class EmoteSystem {
       const a = Math.random() * Math.PI * 2, r = spread * Math.sqrt(Math.random());
       s.position.set(x + Math.cos(a) * r * 0.6, y + Math.random() * 0.15, z + Math.sin(a) * r * 0.6);
       p.active = true; p.life = -n * 0.12;
-      p.max = kind === 'zzz' ? 2.6 : kind === 'hello' ? 1.15 : kind === 'cloud' || kind === 'anger' ? 1.9 : 1.6 + Math.random() * 0.5;
+      p.max = kind === 'zzz' ? 2.6 : kind === 'hello' ? 1.15 : kind === 'gift' ? 1.4 : kind === 'cloud' || kind === 'anger' ? 1.9 : 1.6 + Math.random() * 0.5;
       p.vx = Math.cos(a) * r * 0.5; p.vz = Math.sin(a) * r * 0.5;
-      p.vy = kind === 'zzz' ? 0.32 : kind === 'cloud' ? 0.12 : kind === 'hello' ? 0.35 : 0.55 + Math.random() * 0.3;
+      p.vy = kind === 'zzz' ? 0.32 : kind === 'cloud' ? 0.12 : kind === 'hello' || kind === 'gift' ? 0.35 : 0.55 + Math.random() * 0.3;
       if (kind === 'zzz') p.vx += 0.12;
-      p.size = (kind === 'sparkle' ? 0.22 + Math.random() * 0.14 : kind === 'cloud' ? 0.5 : kind === 'bang' ? 0.17 : kind === 'hello' ? 0.19 : 0.27 + Math.random() * 0.08) * scale;
+      p.size = (kind === 'sparkle' ? 0.22 + Math.random() * 0.14 : kind === 'cloud' ? 0.5 : kind === 'bang' ? 0.17 : kind === 'hello' || kind === 'gift' ? 0.19 : 0.27 + Math.random() * 0.08) * scale;
       p.wob = Math.random() * 6;
       s.visible = false; m.opacity = 0;
     }

@@ -57,9 +57,13 @@ const NAMEPLATE_MAX_VISIBLE = 8;
 const RAID_CLUSTER_RADIUS = 7;
 const RAID_CLUSTER_MIN = 3;
 const RAID_CHIP_SLOTS = 3;
-/** Gift arcs wait until giver and receiver are this close (m), at most GIFT_MAX_WAIT seconds. */
-const GIFT_RANGE = 3;
-const GIFT_MAX_WAIT = 8;
+/**
+ * Gift hand-over: the sim emits `gift` when the giver STARTS heading over and a
+ * `chat` with payload.reaction 'thanks' (actor = recipient, target = giver) on
+ * arrival — the arc flies on 'thanks'. Fallback for older servers: fly after
+ * GIFT_FALLBACK_S if no 'thanks' arrived.
+ */
+const GIFT_FALLBACK_S = 10;
 /** Only residents this close to a confetti burst / raid portal cheer. */
 const CHEER_RADIUS = 12;
 const VIEWER_EMOTE_SCALE = 1.35;
@@ -252,6 +256,8 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
   const scene = useThree(s => s.scene);
   const clock = useRef({ now: 0, lodTimer: 0, bubbleTimer: 0, plateTimer: 0, bubbleCount: 0 });
   const pendingGifts = useMemo(() => [] as Array<{ actor: string; target: string; until: number }>, []);
+  /** Recently flown gift arcs (giver→receiver) so a late 'thanks' after a fallback doesn't fly twice. */
+  const recentGifts = useMemo(() => [] as Array<{ giver: string; receiver: string; at: number }>, []);
   /** Gift box arc from giver to receiver (+ reactions on landing). */
   const launchGift = useMemo(() => (h: ResidentHandle, th: ResidentHandle) => {
     const es = th.id === viewerRef.current ? VIEWER_EMOTE_SCALE : 1;
@@ -328,15 +334,29 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
           withHandle(actor, h => { h.reaction = { family: 'dance', until: now() + 8 }; emoteAt(h, 'note', 2); });
           break;
         case 'gift':
-          // The arc only flies once the giver has reached the receiver (≤ GIFT_RANGE m), max GIFT_MAX_WAIT s:
-          // matches the sim's "running to X" approach. Launched from the frame loop.
+          // Giver is heading over: small present emote now; the arc flies on the 'thanks' hand-over.
           withHandle(actor, h => {
-            face(h, target, GIFT_MAX_WAIT);
             if (target) {
-              pendingGifts.push({ actor, target, until: now() + GIFT_MAX_WAIT });
+              emoteAt(h, 'gift', 1, 0.2);
+              pendingGifts.push({ actor, target, until: now() + GIFT_FALLBACK_S });
               if (pendingGifts.length > 8) pendingGifts.shift();
             } else { h.play('give'); emoteAt(h, 'sparkle', 3); }
           });
+          break;
+        case 'chat':
+          if (e.payload?.reaction === 'thanks' && target) {
+            // Hand-over on arrival: giver (= target) → recipient (= actor).
+            const idx = pendingGifts.findIndex(gp => gp.actor === target && gp.target === actor);
+            const t0 = now();
+            const flewRecently = recentGifts.some(r => r.giver === target && r.receiver === actor && t0 - r.at < 15);
+            if (idx >= 0) pendingGifts.splice(idx, 1);
+            const gh = registry.get(target), rh = registry.get(actor);
+            if ((idx >= 0 || !flewRecently) && gh && rh) {
+              launchGift(gh, rh);
+              recentGifts.push({ giver: target, receiver: actor, at: t0 });
+              if (recentGifts.length > 8) recentGifts.shift();
+            }
+          }
           break;
         case 'social': {
           const action = e.payload?.action;
@@ -376,7 +396,7 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
         default: break;
       }
     });
-  }, [store, registry, pending, hub, emotes, gifts, pendingGifts]);
+  }, [store, registry, pending, hub, emotes, gifts, pendingGifts, recentGifts, launchGift]);
 
   // Raid chips: one label per clustered raid group ("+7 raiders from CozyStreamer").
   const raidChips = useMemo<RaidChip[]>(() => Array.from({ length: RAID_CHIP_SLOTS }, () => {
@@ -544,15 +564,16 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
     }
 
     // Speech bubbles: expire; keep a readable minimum on-screen size.
-    // Deferred gift arcs: fly when the giver is close enough (or the wait expires).
+    // Fallback for servers without the 'thanks' hand-over: fly the arc after GIFT_FALLBACK_S.
     for (let i = pendingGifts.length - 1; i >= 0; i--) {
       const gft = pendingGifts[i]!;
-      const gh = registry.get(gft.actor), th = registry.get(gft.target);
-      const expired = c.now > gft.until;
-      if (!gh?.animator || !th) { if (expired) pendingGifts.splice(i, 1); continue; }
-      if (Math.hypot(gh.pos.x - th.pos.x, gh.pos.z - th.pos.z) > GIFT_RANGE && !expired) continue;
+      if (c.now <= gft.until) continue;
       pendingGifts.splice(i, 1);
+      const gh = registry.get(gft.actor), th = registry.get(gft.target);
+      if (!gh || !th) continue;
       launchGift(gh, th);
+      recentGifts.push({ giver: gft.actor, receiver: gft.target, at: c.now });
+      if (recentGifts.length > 8) recentGifts.shift();
     }
 
     // Raid chips follow their group; keep their on-screen size readable.

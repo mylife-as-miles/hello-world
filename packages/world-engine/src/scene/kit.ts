@@ -95,7 +95,7 @@ export function createKit(): SceneKit {
   glass.onBeforeCompile = shader => {
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <color_fragment>', '')
-      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance *= vColor;');
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance *= vColor.rgb;');
   };
   glass.customProgramCacheKey = () => 'hw-glass';
 

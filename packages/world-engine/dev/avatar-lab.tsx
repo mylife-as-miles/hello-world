@@ -4,7 +4,7 @@
  */
 import { StrictMode, useEffect, useMemo } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Canvas, useFrame } from '@react-three/fiber';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Environment, Lightformer } from '@react-three/drei';
 import type { AvatarAppearance } from '@hello-world/contracts';
 import { useAvatarRig, type ExpressionName, type AvatarLod } from '../src/avatars';
@@ -56,6 +56,16 @@ function Avatar({ item, seed }: { item: Item; seed: number }) {
   return <primitive object={rig.root} position={[item.x, 0, item.z ?? 0]} rotation={[0, item.ry ?? 0, 0]} />;
 }
 
+/** Live renderer.info readout (previous frame) for draw-call budgets. */
+function Stats({ count }: { count: number }) {
+  const gl = useThree(s => s.gl);
+  useFrame(() => {
+    const el = document.getElementById('calls');
+    if (el) el.textContent = `renderer.info: ${gl.info.render.calls} draw calls · ${gl.info.render.triangles} tris · ${count} avatars · shadows ${shadows ? 'on' : 'off'}`;
+  });
+  return null;
+}
+
 function layout(): { items: Item[]; cam: [number, number, number]; target: [number, number, number]; fov: number } {
   if (view === 'presets') {
     const items = PRESETS.flatMap((p, i) => [0, 0.5, 1].map((b, j) => ({ a: A({ baseModelId: p, body: { build: b, height: 0.5 } }), x: (i - 2) * 1.5 + (j - 1) * 0.45, z: -j * 0.1 })));
@@ -93,6 +103,11 @@ function layout(): { items: Item[]; cam: [number, number, number]; target: [numb
     const items: Item[] = ids.map((id, i) => ({ a: A({ ...CAST[i]!, baseModelId: id, accessories: i === 0 ? ['crown'] : [] }), x: (i - 1.5) * 1.2, gesture: i === 1 ? 'wave' : undefined }));
     return { items, cam: [0, 1.2, 6], target: [0, 0.85, 0], fov: 32 };
   }
+  if (view === 'crowd') {
+    // 20 distant residents at low LOD (seeded looks) for the draw-call budget.
+    const items: Item[] = Array.from({ length: 20 }, (_, i) => ({ a: CAST[i % CAST.length]!, x: ((i % 10) - 4.5) * 0.85, z: -Math.floor(i / 10) * 1.6, lod: 'low' as AvatarLod, ry: (i % 3 - 1) * 0.4 }));
+    return { items, cam: [0, 2.4, 10.5], target: [0, 0.7, -0.8], fov: 34 };
+  }
   if (view === 'lod') {
     const items: Item[] = CAST.slice(0, 5).flatMap((a, i) => [{ a, x: (i - 2) * 1.2 - 0.3, lod: 'high' as AvatarLod }, { a, x: (i - 2) * 1.2 + 0.3, lod: 'low' as AvatarLod }]);
     return { items, cam: [0, 1.2, 8], target: [0, 0.85, 0], fov: 32 };
@@ -122,9 +137,11 @@ function Lab() {
           <meshStandardMaterial color="#cdd8c6" roughness={0.95} />
         </mesh>
         {L.items.map((it, i) => <Avatar key={i} item={it} seed={i * 1.7} />)}
+        <Stats count={L.items.length} />
       </Canvas>
+      <div id="calls" className="hud" style={{ top: 44 }} />
       <div className="hud">
-        {['cast', 'presets', 'face', 'mouth', 'acc', 'hair', 'tops', 'poses', 'vrm', 'lod'].map(v => <a key={v} href={`?view=${v}`}>{v}</a>)}
+        {['cast', 'presets', 'face', 'mouth', 'acc', 'hair', 'tops', 'poses', 'vrm', 'lod', 'crowd'].map(v => <a key={v} href={`?view=${v}`}>{v}</a>)}
       </div>
     </>
   );

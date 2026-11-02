@@ -12,7 +12,7 @@ import { HUMAN_BONES, type AttachSlot, type AvatarLod, type ExpressionName, type
 import { BOTTOMS, SHOES, hashString } from '../catalog';
 import { buildBodyAccessories, buildHeadAccessories, HATS, HEAD_ACCESSORIES } from './accessories';
 import { LOD_HIGH, LOD_LOW, buildSkin } from './body';
-import { computeDims, quantBuild, type Dims } from './dims';
+import { BI, computeDims, quantBuild, type Dims } from './dims';
 import { TownieFace, withColor } from './face';
 import { GeoBuilder, sphereG, trs } from './geom';
 import { buildHair } from './hair';
@@ -136,6 +136,9 @@ function bakeColors(geos: Map<string, THREE.BufferGeometry>, a: AvatarAppearance
   return merged;
 }
 
+/** Shared vertex-coloured material key for every low-detail resident. */
+const LOW_MATERIAL = '#ffffff|cloth';
+
 // ---------------------------------------------------------------- rig
 export interface TownieOptions { lod?: AvatarLod; seed?: string }
 
@@ -164,26 +167,58 @@ export function createTownieRig(a: AvatarAppearance, opts: TownieOptions = {}): 
   const o = a.outfit;
   const bodyAcc = a.accessories.filter(x => !HEAD_ACCESSORIES.has(x)).sort();
   const bodyKey = `body|${d.key}|${o.top}|${o.bottom}|${o.shoes}|${bodyAcc.join(',')}|${lod}`;
-  const buildBody = () => {
-    const b = new GeoBuilder(true);
+  const buildBodyInto = (b: GeoBuilder) => {
     buildSkin(b, d, L, coverageFor(o, d));
     buildTop(b, d, L, o.top, o.bottom);
     buildBottom(b, d, L, o.bottom, o.top);
     buildShoes(b, d, L, o.shoes);
     buildBodyAccessories(b, d, L, bodyAcc, TOP_OFFSET[o.top] ?? 0.012);
-    return b.build();
   };
   const low = lod === 'low';
-  // Low LOD: every colour baked into vertex colours -> ONE skinned draw call sharing one material.
-  const sig = `${a.skinTone}|${a.hairColor}|${o.color}|${a.face.eyeColor}|${Math.round(a.face.eyeSize * 10)}`;
-  const bodyCacheKey = low ? `baked|${bodyKey}|${sig}` : bodyKey;
-  const bodyGeos = acquireGeo(bodyCacheKey, () => {
-    const src = buildBody();
-    if (!low) return src;
-    const baked = bakeColors(src, a);
-    for (const g of src.values()) g.dispose();
-    return new Map([['#ffffff|cloth', baked]]);
-  });
+  const headAcc = a.accessories.filter(x => HEAD_ACCESSORIES.has(x)).sort();
+  const hat = headAcc.some(x => HATS.has(x));
+  /** Head content in unit-head space (headContent frame). Low LOD adds the head skin + eye dots. */
+  const buildHeadInto = (b: GeoBuilder) => {
+    if (low) {
+      b.add('skin', headSkin('low'));
+      const eyeR = 0.0272 * (0.8 + a.face.eyeSize * 0.48);
+      for (const side of [1, -1]) {
+        const ph = side * 0.41, el = -0.075;
+        const n = headNormal(ph, el);
+        const c = headPoint(ph, el, -eyeR * 0.3);
+        const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3(n[0] * 0.5, 0, 1).normalize());
+        b.add('#1c1414|dark', sphereG(8, 6), { matrix: new THREE.Matrix4().compose(new THREE.Vector3(...c), q, new THREE.Vector3(eyeR * 0.62, eyeR * 0.85, eyeR * 0.45)) });
+      }
+    }
+    buildHair(b, a.hairStyle, lod, hat);
+    buildHeadAccessories(b, headAcc, a.hairStyle, lod, '');
+  };
+  const geoKeys: string[] = [];
+  let bodyGeos: Map<string, THREE.BufferGeometry>;
+  if (low) {
+    // Low LOD = ONE draw call: body + head skin + eye dots + hair + accessories merged into a single
+    // SkinnedMesh (head parts rigidly skinned to 'head'), every colour baked into vertex colours,
+    // one material shared by all low-detail residents.
+    const sig = `${a.skinTone}|${a.hairColor}|${o.color}|${a.face.eyeColor}|${Math.round(a.face.eyeSize * 10)}`;
+    const key = `low1|${bodyKey}|${a.hairStyle}|${headAcc.join(',')}|${sig}`;
+    geoKeys.push(key);
+    bodyGeos = acquireGeo(key, () => {
+      const sb = new GeoBuilder(true);
+      buildBodyInto(sb);
+      const hb = new GeoBuilder(false);
+      buildHeadInto(hb);
+      const hp = d.bones.head;
+      const headM = new THREE.Matrix4().compose(new THREE.Vector3(hp[0], hp[1], hp[2]), new THREE.Quaternion(), new THREE.Vector3(d.headScale, d.headScale, d.headScale));
+      for (const [k, g] of hb.build()) { sb.add(k, g, { matrix: headM, bone: BI.head }); g.dispose(); }
+      const src = sb.build();
+      const baked = bakeColors(src, a);
+      for (const g of src.values()) g.dispose();
+      return new Map([[LOW_MATERIAL, baked]]);
+    });
+  } else {
+    geoKeys.push(bodyKey);
+    bodyGeos = acquireGeo(bodyKey, () => { const b = new GeoBuilder(true); buildBodyInto(b); return b.build(); });
+  }
   const identity = new THREE.Matrix4();
   for (const [key, g] of bodyGeos) {
     const m = new THREE.SkinnedMesh(g, mat(key));
@@ -201,36 +236,15 @@ export function createTownieRig(a: AvatarAppearance, opts: TownieOptions = {}): 
   if (!low) {
     const headMesh = new THREE.Mesh(headSkin(lod), mat('skin'));
     headMesh.castShadow = true; headContent.add(headMesh);
-  }
-  const headAcc = a.accessories.filter(x => HEAD_ACCESSORIES.has(x)).sort();
-  const hat = headAcc.some(x => HATS.has(x));
-  const hairKey = low ? `bakedHead|${a.hairStyle}|${headAcc.join(',')}|${sig}` : `head|${a.hairStyle}|${headAcc.join(',')}|${lod}`;
-  const headGeos = acquireGeo(hairKey, () => {
-    const b = new GeoBuilder(false);
-    if (low) {
-      b.add('skin', headSkin('low'));
-      const eyeR = 0.0272 * (0.8 + a.face.eyeSize * 0.48);
-      for (const side of [1, -1]) {
-        const ph = side * 0.41, el = -0.075;
-        const n = headNormal(ph, el);
-        const c = headPoint(ph, el, -eyeR * 0.3);
-        const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3(n[0] * 0.5, 0, 1).normalize());
-        b.add('#1c1414|dark', sphereG(8, 6), { matrix: new THREE.Matrix4().compose(new THREE.Vector3(...c), q, new THREE.Vector3(eyeR * 0.62, eyeR * 0.85, eyeR * 0.45)) });
-      }
+    const hairKey = `head|${a.hairStyle}|${headAcc.join(',')}|${lod}`;
+    geoKeys.push(hairKey);
+    const headGeos = acquireGeo(hairKey, () => { const b = new GeoBuilder(false); buildHeadInto(b); return b.build(); });
+    for (const [key, g] of headGeos) {
+      const m = new THREE.Mesh(g, mat(key));
+      m.castShadow = !key.includes('lens'); m.name = `townie-head:${key}`;
+      if (key.includes('lens')) m.renderOrder = 2;
+      headContent.add(m);
     }
-    buildHair(b, a.hairStyle, lod, hat);
-    buildHeadAccessories(b, headAcc, a.hairStyle, lod, '');
-    const src = b.build();
-    if (!low) return src;
-    const baked = bakeColors(src, a);
-    for (const g of src.values()) g.dispose();
-    return new Map([['#ffffff|cloth', baked]]);
-  });
-  for (const [key, g] of headGeos) {
-    const m = new THREE.Mesh(g, mat(key));
-    m.castShadow = !key.includes('lens'); m.name = `townie-head:${key}`;
-    if (key.includes('lens')) m.renderOrder = 2;
-    headContent.add(m);
   }
 
   // --- face
@@ -274,7 +288,7 @@ export function createTownieRig(a: AvatarAppearance, opts: TownieOptions = {}): 
     dispose() {
       if (disposed) return; disposed = true;
       root.removeFromParent();
-      releaseGeo(bodyKey); releaseGeo(hairKey);
+      for (const k of geoKeys) releaseGeo(k);
       for (const m of usedMats) releaseMaterial(m);
       face?.dispose();
       skeleton.dispose();

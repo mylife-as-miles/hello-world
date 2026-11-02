@@ -63,7 +63,16 @@ describe('Townie procedural rig', () => {
       const h = tris(hi.root), l = tris(lo.root);
       rows.push(`${a.baseModelId}/${a.hairStyle}/${a.outfit.top}: high ${h.tris} tris ${h.meshes} meshes | low ${l.tris} tris ${l.meshes} meshes`);
       expect(l.tris).toBeLessThan(h.tris * 0.6);
-      expect(l.meshes).toBeLessThanOrEqual(3);
+      expect(l.meshes).toBe(1); // ONE draw call per distant resident
+      const only = lo.root.getObjectByProperty('isSkinnedMesh', true) as THREE.SkinnedMesh;
+      expect(only).toBeTruthy();
+      const si = only.geometry.getAttribute('skinIndex');
+      const headIdx = HUMAN_BONES.indexOf('head');
+      let headVerts = 0;
+      for (let v = 0; v < si.count; v++) if (si.getX(v) === headIdx) headVerts++;
+      expect(headVerts).toBeGreaterThan(100); // head, hair & hats rigidly follow the head bone
+      expect(lo.root.getObjectByName('attach:head')).toBeTruthy();
+      expect(Math.abs(lo.height - hi.height)).toBeLessThan(1e-6);
       hi.dispose(); lo.dispose();
     }
     console.log(rows.join('\n'));

@@ -35,6 +35,7 @@ export class GeoBuilder {
     const pos = geo.getAttribute('position') as THREE.BufferAttribute;
     if (!geo.getAttribute('normal')) geo.computeVertexNormals();
     const nrm = geo.getAttribute('normal') as THREE.BufferAttribute;
+    const srcCol = geo.getAttribute('color') as THREE.BufferAttribute | undefined;
     const m = o.matrix;
     const nm = m ? new THREE.Matrix3().getNormalMatrix(m) : null;
     const base = b.pos.length / 3;
@@ -44,8 +45,10 @@ export class GeoBuilder {
       v.fromBufferAttribute(pos, k); if (m) v.applyMatrix4(m);
       n.fromBufferAttribute(nrm, k); if (nm) n.applyMatrix3(nm); n.normalize();
       b.pos.push(v.x, v.y, v.z); b.nrm.push(n.x, n.y, n.z);
-      const c = typeof o.color === 'function' ? o.color(v.x, v.y, v.z, n.x, n.y, n.z) : (o.color ?? WHITE);
-      b.col.push(c[0], c[1], c[2]);
+      if (typeof o.color === 'function') { const c = o.color(v.x, v.y, v.z, n.x, n.y, n.z); b.col.push(c[0], c[1], c[2]); }
+      else if (o.color) b.col.push(o.color[0], o.color[1], o.color[2]);
+      else if (srcCol) b.col.push(srcCol.getX(k), srcCol.getY(k), srcCol.getZ(k));
+      else b.col.push(WHITE[0], WHITE[1], WHITE[2]);
       if (this.skinned) {
         if (o.weights) {
           sw.i[0] = sw.i[1] = sw.i[2] = sw.i[3] = 0; sw.w[0] = 1; sw.w[1] = sw.w[2] = sw.w[3] = 0;

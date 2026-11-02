@@ -123,16 +123,17 @@ export function segmentHitsProp(ax: number, ay: number, az: number, bx: number, 
   const fx = dx / D, fz = dz / D;
   const ox = o.x - ax, oz = o.z - az;
   const f = ox * fx + oz * fz;
-  if (f < 0.3 || f > D - 0.3) return false;
-  const y = ay + (by - ay) * (f / D);
+  if (f < 0.3 || f > D + 0.2) return false;
+  const y = ay + (by - ay) * (Math.min(f, D) / D);
   if (y > o.h + 0.25 || y < (o.minY ?? 0) - 0.25) return false;
   return Math.abs(ox * fz - oz * fx) < halfWidth + o.r;
 }
 
 /**
  * Clutter: any prop taller than 1.2 m standing in the central third of the frame between camera and
- * subject — including right next to the subject (only `f > D − 0.3`, i.e. behind the subject, is exempt).
- * Height-aware: a prop whose top is below the sight line (looking down over it) does not count.
+ * subject — including right at the subject (a seated body reaches ~0.5 m towards the camera, so only
+ * props beyond D + 0.2 count as "behind"), plus props up to 1.5 m BEHIND the subject that would grow
+ * out of its head. Height-aware: a prop whose top is below the sight line does not count.
  */
 export function centralClutter(ax: number, ay: number, az: number, bx: number, by: number, bz: number): boolean {
   const dx = bx - ax, dz = bz - az;
@@ -143,11 +144,17 @@ export function centralClutter(ax: number, ay: number, az: number, bx: number, b
     if (o.h < 1.2) continue;
     const ox = o.x - ax, oz = o.z - az;
     const f = ox * fx + oz * fz;
-    if (f < 0.3 || f > D - 0.3) continue;
-    const y = ay + (by - ay) * (f / D);
+    if (f < 0.3 || f > D + 1.5) continue;
+    const lateral = Math.abs(ox * fz - oz * fx);
+    if (f > D + 0.2) {
+      // behind the subject: only a prop practically in line with the head is a problem
+      if (o.h > by && lateral < 0.45 + o.r) return true;
+      continue;
+    }
+    const y = ay + (by - ay) * (Math.min(f, D) / D);
     if (y > o.h + 0.25 || y < (o.minY ?? 0) - 0.25) continue;
     const half = Math.max(f * 0.22, 0.35) + o.r * 0.8;
-    if (Math.abs(ox * fz - oz * fx) < half) return true;
+    if (lateral < half) return true;
   }
   return false;
 }

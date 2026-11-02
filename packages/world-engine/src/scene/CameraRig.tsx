@@ -14,7 +14,7 @@ import * as THREE from 'three';
 import type { CameraMode, WorldEvent, ResidentProfile } from '@hello-world/contracts';
 import { useSceneStore } from '../core/SceneContext';
 import type { SceneStore } from '../core/sceneStore';
-import { getPoi } from '../world/layout';
+import { findSeatNear, getPoi } from '../world/layout';
 import { useKit } from './context';
 import {
   OCCLUDERS, blocked, propsNear, centralClutter, foregroundClutter, pickFramingPose, poseClean, setCameraProps, POSE_RISE,
@@ -145,6 +145,11 @@ function frame(f: Framer, tx: number, tz: number, dt: number, dist: number, heig
   }
   const speed = Math.hypot(f.vel.x, f.vel.z);
   if (speed > 0.35) f.heading = angleLerp(f.heading, Math.atan2(f.vel.x, f.vel.z), 1 - Math.exp(-dt * 1.6));
+  else {
+    // seated: face the subject from the front (seat facing) instead of their last walking heading
+    const seat = findSeatNear(f.pos.x, f.pos.z, 0.7);
+    if (seat) f.heading = snap ? seat.seat.facing : angleLerp(f.heading, seat.seat.facing, 1 - Math.exp(-dt * 2));
+  }
   const ly = lookY;
   const headY = lookY + 0.45;
   // Keep the current pose while it is clean; otherwise (or every ~1.5 s while raised) re-pick:

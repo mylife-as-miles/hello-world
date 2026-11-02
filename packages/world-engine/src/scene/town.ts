@@ -915,14 +915,19 @@ export function buildTown(quality: 'low' | 'high', options: TownOptions = {}): T
   const lampSpots: Vec2[] = [];
   const tryLamp = (x: number, z: number, minGap: number) => {
     if (lampSpots.some(l => Math.hypot(l.x - x, l.z - z) < minGap)) return;
+    if (POIS.some(p => (p.seats ?? []).some(st => Math.hypot(st.x - x, st.z - z) < 2.4))) return;
     if (!c.space.free(x, z, 0.2)) return;
     lampSpots.push({ x, z });
     addLamp(c, x, z);
   };
+  const seatSpots = POIS.flatMap(p => p.seats ?? []);
   for (let i = 0; i < 8; i++) {
     const a = (i / 8) * Math.PI * 2 + Math.PI / 8;
     const x = Math.cos(a) * 8.0, z = Math.sin(a) * 8.0;
     if (c.space.pathDist(x, z) < 0.35) continue;
+    // never put a lamp post next to a bench / café seat (it would split every shot of a seated resident)
+    if (seatSpots.some(st => Math.hypot(st.x - x, st.z - z) < 2.4)) continue;
+    if (!c.space.free(x, z, 0.3)) continue;
     if (lampSpots.some(l => Math.hypot(l.x - x, l.z - z) < 4)) continue;
     lampSpots.push({ x, z });
     addLamp(c, x, z);

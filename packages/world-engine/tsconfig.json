@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["vite/client", "node"],
+    "noUnusedLocals": false,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": ["src", "dev", "test", "vite.config.ts"]
+}

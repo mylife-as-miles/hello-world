@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Landscape Lab</title>
+    <style>
+      html, body, #root { margin: 0; height: 100%; }
+      body { font-family: ui-sans-serif, system-ui, sans-serif; background: #cfe6f3; color: #1d2a24; }
+      .hud { position: fixed; left: 12px; top: 10px; font-size: 13px; background: rgba(255,255,255,.78); padding: 6px 10px; border-radius: 8px; }
+      .hud a { margin-right: 8px; color: #1f6f5a; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <div class="hud">
+      <div>
+        <a href="?view=neighborhood">neighborhood</a><a href="?view=aerial">aerial</a><a href="?view=street">street</a><a href="?view=low">low orbit</a><a href="?view=lake">lake</a>
+        <a href="?view=neighborhood&night=1">night</a><a href="?view=aerial&district=1">+district</a><a href="?q=low">q=low</a>
+      </div>
+      <div id="stats">…</div>
+    </div>
+    <script type="module" src="./landscape-lab.tsx"></script>
+  </body>
+</html>

@@ -100,6 +100,22 @@ function realisticBases(): BaseModelEntry[] {
   }
   return out;
 }
+/**
+ * Accessories that VRM / photoreal bodies can actually wear (head pieces fitted to
+ * the model's head). Mirrors the private HEAD_OK sets in src/avatars/vrm/vrmRig.ts
+ * and src/avatars/realistic/index.ts; prefers an exported list if one appears.
+ */
+const HEAD_PIECES = ['beanie', 'cap', 'crown', 'headphones'];
+function wearableAccessories(baseModelId: string, realistic: boolean, vrm: boolean): string[] | null {
+  if (!realistic && !vrm) return null; // Townies wear everything
+  const key = realistic ? 'REALISTIC_ACCESSORIES' : 'VRM_ACCESSORIES';
+  const exported = (realistic ? RealisticApi : AvatarApi) as unknown as Record<string, unknown>;
+  const list = exported[key];
+  if (Array.isArray(list) && list.every(x => typeof x === 'string')) return list as string[];
+  void baseModelId;
+  return HEAD_PIECES;
+}
+
 /** Drop a trailing parenthetical ("Elena (photoreal)" → "Elena"); provenance is shown by the tag/credit. */
 const shortLabel = (label: string) => label.replace(/\s*\([^)]*\)\s*$/, '') || label;
 const realisticTag = (id: string) => (id.startsWith('rb-') ? 'Photoreal · Rocketbox (MIT)' : 'Photoreal · MetaHuman licence');
@@ -248,6 +264,9 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
   // flag if the avatar API's support matrix grows one.
   const supportFlags = support as AppearanceSupport & { expressions?: boolean };
   const expressionsApply = supportFlags.expressions ?? !realistic;
+  const wearable = wearableAccessories(appearance.baseModelId, realistic, vrm);
+  const accessoryOptions = wearable ? ACCESSORIES.filter(x => wearable.includes(x.id)) : ACCESSORIES;
+  const wornCount = wearable ? appearance.accessories.filter(x => wearable.includes(x)).length : appearance.accessories.length;
   const sectionFixed: Partial<Record<SectionId, boolean>> = {
     face: !support.face, hair: !support.hair, outfit: !support.outfitPieces && !support.outfitColor, extras: !support.accessories,
   };
@@ -576,20 +595,21 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
               ) : <Note>{baseName}'s outfit colours are fixed.</Note>}
             </Section>
 
-            <Section id="extras" domId={secId('extras')} title="Accessories" sub={`${appearance.accessories.length}/${MAX_ACCESSORIES} equipped`}>
+            <Section id="extras" domId={secId('extras')} title="Accessories" sub={wearable ? `${wornCount} head piece${wornCount === 1 ? '' : 's'} worn` : `${wornCount}/${MAX_ACCESSORIES} equipped`}>
               {support.accessories ? (
                 <>
-              <div className="hwc-chips" role="group" aria-label="Accessories">
-                  {ACCESSORIES.map(x => {
-                    const on = appearance.accessories.includes(x.id);
-                    return (
-                      <button key={x.id} type="button" className={cls('hwc-chip', on && 'is-on')} aria-pressed={on} data-testid={`acc-${x.id}`} onClick={() => toggleAccessory(x.id)}>
-                        <span className="hwc-check" aria-hidden="true">{on && <Icon name="check" size={11} />}</span>{x.label}
-                      </button>
-                    );
-                  })}
-                </div>
-                {appearance.accessories.length >= MAX_ACCESSORIES && <div className="hwc-note">Max {MAX_ACCESSORIES} — picking another swaps out the oldest.</div>}
+                  <div className="hwc-chips" role="group" aria-label="Accessories">
+                    {accessoryOptions.map(x => {
+                      const on = appearance.accessories.includes(x.id);
+                      return (
+                        <button key={x.id} type="button" className={cls('hwc-chip', on && 'is-on')} aria-pressed={on} data-testid={`acc-${x.id}`} onClick={() => toggleAccessory(x.id)}>
+                          <span className="hwc-check" aria-hidden="true">{on && <Icon name="check" size={11} />}</span>{x.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {wearable && <Note>Only head pieces fit {baseName}; other accessories apply to Townie bodies.</Note>}
+                  {!wearable && appearance.accessories.length >= MAX_ACCESSORIES && <Note>Max {MAX_ACCESSORIES} — picking another swaps out the oldest.</Note>}
                 </>
               ) : <Note>{baseName} can't wear accessories.</Note>}
             </Section>

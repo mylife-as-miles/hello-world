@@ -76,6 +76,8 @@ class BubbleHub {
   readonly sizes = new Map<string, { w: number; h: number }>();
   /** Last on-screen scale written to each bubble. */
   readonly scale = new Map<string, number>();
+  /** Horizontal offset (px) applied to dodge the inspector card. */
+  readonly dx = new Map<string, number>();
   private seq = 0;
   subscribe(id: string, cb: (b: BubbleData | null) => void): () => void {
     this.subs.set(id, cb);
@@ -93,7 +95,7 @@ class BubbleHub {
   }
   tick(now: number) {
     for (const [id, b] of this.active) {
-      if (now - b.start > b.duration) { this.active.delete(id); this.els.delete(id); this.sizes.delete(id); this.scale.delete(id); this.subs.get(id)?.(null); }
+      if (now - b.start > b.duration) { this.active.delete(id); this.els.delete(id); this.sizes.delete(id); this.scale.delete(id); this.dx.delete(id); this.subs.get(id)?.(null); }
     }
   }
 }
@@ -127,17 +129,17 @@ function ensureStyles() {
   const s = document.createElement('style');
   s.dataset.helloWorld = 'residents';
   s.textContent = `
-.hw-bubble{--s:1;position:relative;transform-origin:50% 100%;transform:translateY(-100%) scale(var(--s));width:max-content;max-width:230px;min-width:96px;padding:8px 12px 9px;border-radius:16px;
+.hw-bubble{--s:1;--dx:0px;position:relative;transform-origin:50% 100%;transform:translateX(var(--dx)) translateY(-100%) scale(var(--s));width:max-content;max-width:230px;min-width:96px;padding:8px 12px 9px;border-radius:16px;
 background:linear-gradient(180deg,rgba(255,255,255,.97),rgba(244,247,250,.95));color:#1d2329;box-shadow:0 6px 22px rgba(10,20,30,.28),0 1px 0 rgba(255,255,255,.6) inset;
 font:500 14px/1.32 ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;letter-spacing:.005em;white-space:normal;word-wrap:break-word;overflow-wrap:anywhere;
-pointer-events:none;user-select:none;animation:hw-bubble-in .32s cubic-bezier(.2,1.4,.4,1) backwards;transition:opacity .45s ease}
-.hw-bubble::after{content:'';position:absolute;left:50%;bottom:-7px;width:14px;height:14px;margin-left:-7px;background:#f4f7fa;transform:rotate(45deg);border-radius:0 0 4px 0;box-shadow:3px 3px 6px rgba(10,20,30,.12)}
+pointer-events:none;user-select:none;animation:hw-bubble-in .32s cubic-bezier(.2,1.4,.4,1) backwards;transition:opacity .45s ease,transform .18s ease-out}
+.hw-bubble::after{content:'';position:absolute;left:calc(50% - var(--dx) / var(--s));bottom:-7px;width:14px;height:14px;margin-left:-7px;background:#f4f7fa;transform:rotate(45deg);border-radius:0 0 4px 0;box-shadow:3px 3px 6px rgba(10,20,30,.12)}
 .hw-bubble .hw-name{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font:700 11px/1.2 ui-sans-serif,system-ui,sans-serif;letter-spacing:.06em;text-transform:uppercase;color:#7a5cff;margin-bottom:2px}
 .hw-bubble.hw-sim .hw-name{color:#2f9e8a}
 .hw-bubble.hw-me{background:linear-gradient(180deg,#ffffff,#effffa);box-shadow:0 0 0 2.5px #5ef2c6,0 8px 26px rgba(10,20,30,.34)}
 .hw-bubble.hw-me::after{background:#effffa}
 .hw-bubble.hw-me .hw-name{color:#0d9a76}
-@keyframes hw-bubble-in{from{opacity:0;transform:translateY(-92%) scale(calc(var(--s) * .85))}to{opacity:1;transform:translateY(-100%) scale(var(--s))}}
+@keyframes hw-bubble-in{from{opacity:0;transform:translateX(var(--dx)) translateY(-92%) scale(calc(var(--s) * .85))}to{opacity:1;transform:translateX(var(--dx)) translateY(-100%) scale(var(--s))}}
 `;
   document.head.appendChild(s);
 }
@@ -418,8 +420,16 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
             const sc = hub.scale.get(r.id) ?? 1;
             const w = (sz?.w ?? 160) * sc, hh = ((sz?.h ?? 48) + 8) * sc;
             const x = cr.left + ((_v.x + 1) / 2) * cr.width, y = cr.top + ((1 - _v.y) / 2) * cr.height;
-            const l = x - w / 2, rt = x + w / 2, t = y - hh, bt = y;
-            if (ir && rt > ir.left && l < ir.right && bt > ir.top && t < ir.bottom) show = false;
+            let l = x - w / 2, rt = x + w / 2;
+            const t = y - hh, bt = y;
+            // Dodge the inspector card: slide left (tail keeps pointing at the speaker), else skip.
+            let dx = 0;
+            if (ir && rt > ir.left && l < ir.right && bt > ir.top && t < ir.bottom) {
+              dx = ir.left - 8 - rt;
+              if (-dx > w / 2 - 18 * sc || l + dx < cr.left) { show = false; dx = 0; }
+              else { l += dx; rt += dx; }
+            }
+            if ((hub.dx.get(r.id) ?? 0) !== dx) { hub.dx.set(r.id, dx); el.style.setProperty('--dx', `${dx.toFixed(1)}px`); }
             for (let k = 0; show && k < shown && k < 16; k++) {
               const o = k * 4;
               const ox = Math.min(rt, shownRects[o + 1]!) - Math.max(l, shownRects[o]!);
@@ -691,7 +701,7 @@ function SpeechBubble({ hub, id, height, isViewer }: { hub: BubbleHub; id: strin
   return <Html position={[0, height + 0.42, 0]} center={false} zIndexRange={[30, 10]}
     style={{ pointerEvents: 'none', transform: 'translateX(-50%)' }}>
     <div key={b.key} className={cls} style={{ ['--s' as string]: String(hub.scale.get(id) ?? 1) }}
-      ref={el => { if (el) { hub.els.set(id, el); hub.scale.delete(id); } }}>
+      ref={el => { if (el) { hub.els.set(id, el); hub.scale.delete(id); hub.dx.delete(id); } }}>
       <span className="hw-name">{b.name}</span>{b.text}
     </div>
   </Html>;

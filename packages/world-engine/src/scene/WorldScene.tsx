@@ -27,7 +27,22 @@ import { WeatherFx } from './Weather';
 import { CameraRig, poseFor, type RigMode } from './CameraRig';
 import { PostFX } from './PostFX';
 import { Hud } from './Hud';
-import { buildOverlayProps } from './town';
+import { buildOverlayProps, groundHeight } from './town';
+import { DowntownDistrict, districtOccupied } from './district';
+import { GeneratedTrees, PARK_TREE_PLACEMENTS, TREE_VARIANT_INDEX, type TreePlacement } from './foliage';
+import { Landscape, terrainHeightAt, FOREST_PLACEMENTS, FOREST_PLACEMENTS_LOW } from './landscape';
+
+/**
+ * Scenery modules. `USE_LANDSCAPE` swaps the built-in forest belt / hills / rolling ground for
+ * the terrain ring + generated forest (src/scene/landscape + src/scene/foliage).
+ */
+const USE_LANDSCAPE = true;
+const toTree = (p: { x: number; y: number; z: number; scale: number; rot: number; species: keyof typeof TREE_VARIANT_INDEX }): TreePlacement =>
+  ({ x: p.x, y: p.y, z: p.z, scale: p.scale, rot: p.rot, variant: TREE_VARIANT_INDEX[p.species] ?? 0 });
+const TREES_HIGH: ReadonlyArray<TreePlacement> = USE_LANDSCAPE ? [...PARK_TREE_PLACEMENTS, ...FOREST_PLACEMENTS.map(toTree)] : PARK_TREE_PLACEMENTS;
+const TREES_LOW: ReadonlyArray<TreePlacement> = USE_LANDSCAPE ? [...PARK_TREE_PLACEMENTS, ...FOREST_PLACEMENTS_LOW.map(toTree)] : PARK_TREE_PLACEMENTS;
+/** Stable height sampler for the downtown ring (terrain when the landscape is mounted). */
+const DISTRICT_HEIGHT = USE_LANDSCAPE ? terrainHeightAt : groundHeight;
 
 export type WorldSceneExtraProps = {
   /** Resident id of the local viewer (highlights "you", enables the inspector). */
@@ -155,16 +170,16 @@ const WorldContent = memo(function WorldContent({
       <Atmosphere transparent={transparent} quality={quality} sky={sky} cloudTint={cloudTint} />
       {!transparent && <SkyDome uniforms={sky} />}
       {!transparent && <Clouds tint={cloudTint} />}
-      {!transparent && <Town quality={quality} onLocationSelect={onLocationSelect} horizon={builtInHorizon} />}
+      {!transparent && (
+        <Town quality={quality} onLocationSelect={onLocationSelect} horizon={builtInHorizon && !USE_LANDSCAPE}
+          reservedTrees={PARK_TREE_PLACEMENTS} occupied={districtOccupied} />
+      )}
       {!transparent && <Fountain />}
       {!transparent && <StageLights />}
       {!transparent && <WeatherFx quality={quality} />}
-      {/*
-        Optional scenery modules (mounted by the coordinator; folders owned by other agents):
-          {!transparent && <DowntownDistrict quality={quality} transparent={transparent} />}   // ./district
-          {!transparent && <Landscape quality={quality} />}                                     // ./landscape (pass builtInHorizon={false})
-          {!transparent && quality === 'high' && <GeneratedTrees quality={quality} placements={PARK_TREE_PLACEMENTS} />} // ./foliage
-      */}
+      {!transparent && USE_LANDSCAPE && <Landscape quality={quality} transparent={transparent} />}
+      {!transparent && <DowntownDistrict quality={quality} transparent={transparent} heightAt={DISTRICT_HEIGHT} />}
+      {!transparent && <GeneratedTrees quality={quality} placements={quality === 'high' ? TREES_HIGH : TREES_LOW} />}
       {transparent && <ShadowCatcher />}
       {transparent && <OverlaySeating />}
       <Portal quality={quality} overlay={transparent} />

@@ -15,8 +15,12 @@ import { districtOccupied } from '../district/plan';
 import { lakeDistance, terrainHeightAt, terrainSlopeAt } from './terrain';
 import { smoothstep } from './superTerrainNoise';
 
-/** Variant index order used by `variant`. */
-export const FOREST_VARIANTS = ['conifer', 'broadleaf', 'birch', 'blossom'] as const;
+/**
+ * Variant index order used by `variant` — identical to src/scene/foliage
+ * `TREE_VARIANTS` (GeneratedTrees asset order); not imported so this module stays Node-safe.
+ */
+export const FOREST_VARIANTS = ['broadleaf', 'conifer', 'birch', 'blossom', 'autumn'] as const;
+const BROADLEAF = 0, CONIFER = 1, BIRCH = 2, BLOSSOM = 3, AUTUMN = 4;
 export type ForestVariantName = (typeof FOREST_VARIANTS)[number];
 
 /** One tree on the landscape. `variant` indexes FOREST_VARIANTS; `y` = terrainHeightAt(x, z). */
@@ -72,7 +76,7 @@ export function buildForestPlacements(opts: ForestOptions = {}): ForestPlacement
     const h = terrainHeightAt(x, z);
     c *= 1 - smoothstep(50, 64, h); // tree line
     if (c <= 0.002) return 0;
-    c *= 1 - smoothstep(0.5, 0.85, terrainSlopeAt(x, z)); // gentle slopes only
+    c *= 1 - smoothstep(0.5, 0.85, terrainSlopeAt(x, z, 1.5, h)); // gentle slopes only
     // Thick belt framing the town, thinner stands out on the range.
     return c * (1 - 0.5 * smoothstep(75, 150, r));
   };
@@ -106,10 +110,11 @@ export function buildForestPlacements(opts: ForestOptions = {}): ForestPlacement
     const alpine = smoothstep(8, 34, y) * 0.75 + smoothstep(90, 170, r) * 0.25;
     const pick = random();
     let variant: number;
-    if (r < 72 && pick < 0.07) variant = 3; // a few blossoms near town
-    else if (pick < 0.16 + alpine * 0.6) variant = 0;
-    else if (pick < 0.3 + alpine * 0.6 || (lakeDistance(x, z) < 2.4 && pick < 0.55)) variant = 2;
-    else variant = 1;
+    if (r < 72 && pick < 0.06) variant = BLOSSOM; // a few blossoms near town
+    else if (pick < 0.16 + alpine * 0.6) variant = CONIFER;
+    else if (pick < 0.29 + alpine * 0.6 || (lakeDistance(x, z) < 2.4 && pick < 0.55)) variant = BIRCH;
+    else if (pick > 0.86 - (1 - alpine) * 0.04) variant = AUTUMN; // warm accents in the lowlands
+    else variant = BROADLEAF;
 
     const openness = 1 - Math.min(1, Math.max(0, field));
     const sizeRoll = random() + (openness - random()) * 0.35;

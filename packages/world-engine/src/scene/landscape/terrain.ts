@@ -81,16 +81,21 @@ export function sampleTerrain(x: number, z: number): TerrainSample {
 
   const X = x * S + OX, Z = z * S + OZ;
 
-  // 1. Massif mask: super-terrain's spine × regional fbm, with the spine made radial.
-  const spine = smoothstep(108, 192, r);
-  const regional = fbm(X * 0.00028, Z * 0.00028, SEED + 11, 3, 2.1, 0.5);
-  const massif = clamp(smoothstep(0.18, 0.78, spine * 0.75 + regional * 0.55 + 0.08), 0, 1) * smoothstep(96, 136, r);
-
-  // 2. Domain-warped ridged multifractal (the range itself).
-  const warpX = fbm(X * 0.0011, Z * 0.0011, SEED + 71, 3, 2.2, 0.5) * 240;
-  const warpZ = fbm(X * 0.0011 + 5.7, Z * 0.0011 - 3.1, SEED + 73, 3, 2.2, 0.5) * 240;
-  const ridge = ridgedMultifractal((X + warpX) * 0.00085, (Z + warpZ) * 0.00085, SEED + 101, 6);
-  const mountains = Math.pow(ridge, RIDGE_SHARPNESS) * MOUNTAIN_AMPLITUDE * massif;
+  // 1–2. The range (only evaluated where it can exist: r > 96 m).
+  let massif = 0, mountains = 0, warpX = 0, warpZ = 0;
+  if (r > 96) {
+    // Massif mask: super-terrain's spine × regional fbm, with the spine made radial.
+    const spine = smoothstep(108, 192, r);
+    const regional = fbm(X * 0.00028, Z * 0.00028, SEED + 11, 3, 2.1, 0.5);
+    massif = clamp(smoothstep(0.18, 0.78, spine * 0.75 + regional * 0.55 + 0.08), 0, 1) * smoothstep(96, 136, r);
+    // Domain-warped ridged multifractal (the range itself).
+    warpX = fbm(X * 0.0011, Z * 0.0011, SEED + 71, 3, 2.2, 0.5) * 240;
+    warpZ = fbm(X * 0.0011 + 5.7, Z * 0.0011 - 3.1, SEED + 73, 3, 2.2, 0.5) * 240;
+    if (massif > 0) {
+      const ridge = ridgedMultifractal((X + warpX) * 0.00085, (Z + warpZ) * 0.00085, SEED + 101, 6);
+      mountains = Math.pow(ridge, RIDGE_SHARPNESS) * MOUNTAIN_AMPLITUDE * massif;
+    }
+  }
 
   // 3. Billow foothills + fbm plains (kept positive and calm under the downtown ring).
   const calm = lerp(0.5, 1, smoothstep(96, 150, r));
@@ -102,14 +107,16 @@ export function sampleTerrain(x: number, z: number): TerrainSample {
   let height = mountains + foothills + plains + bowl;
 
   // 4. Drainage valleys (second ridged field), carved only out in the range.
-  const drainage = ridgedMultifractal((X - warpZ * 0.4) * 0.00062, (Z + warpX * 0.4) * 0.00062, SEED + 401, 5);
-  const carve = smoothstep(104, 150, r);
-  const valley = clamp(smoothstep(0.62, 0.98, 1 - drainage), 0, 1) * carve;
-  height -= ((26 + massif * 120) / S) * valley;
-  const floor = 2 + bowl * 0.6 + massif * (40 / S);
-  if (valley > 0.55) {
-    const flatten = smoothstep(0.55, 0.95, valley) * 0.65;
-    height = lerp(height, Math.min(height, floor + valley * (12 / S)), flatten);
+  let valley = 0;
+  if (r > 104) {
+    const drainage = ridgedMultifractal((X - warpZ * 0.4) * 0.00062, (Z + warpX * 0.4) * 0.00062, SEED + 401, 5);
+    valley = clamp(smoothstep(0.62, 0.98, 1 - drainage), 0, 1) * smoothstep(104, 150, r);
+    height -= ((26 + massif * 120) / S) * valley;
+    const floor = 2 + bowl * 0.6 + massif * (40 / S);
+    if (valley > 0.55) {
+      const flatten = smoothstep(0.55, 0.95, valley) * 0.65;
+      height = lerp(height, Math.min(height, floor + valley * (12 / S)), flatten);
+    }
   }
 
   // 5. Lake basin: bed below the water level, gentle shore rising out of it.
@@ -135,11 +142,11 @@ export function terrainHeightAt(x: number, z: number): number {
   return sampleTerrain(x, z).height;
 }
 
-/** Surface slope (rise over run, ≈1 at 45°) by central differences. */
-export function terrainSlopeAt(x: number, z: number, d = 1.5): number {
-  const hx = terrainHeightAt(x + d, z) - terrainHeightAt(x - d, z);
-  const hz = terrainHeightAt(x, z + d) - terrainHeightAt(x, z - d);
-  return Math.hypot(hx, hz) / (2 * d);
+/** Surface slope (rise over run, ≈1 at 45°) by finite differences (pass h0 = height at (x, z) to save a sample). */
+export function terrainSlopeAt(x: number, z: number, d = 1.5, h0 = terrainHeightAt(x, z)): number {
+  const hx = terrainHeightAt(x + d, z) - h0;
+  const hz = terrainHeightAt(x, z + d) - h0;
+  return Math.hypot(hx, hz) / d;
 }
 
 /** True when (x, z) is open water (lake). */

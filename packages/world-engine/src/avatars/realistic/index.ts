@@ -94,14 +94,16 @@ function loadTexture(file: string): Promise<THREE.Texture | null> {
   let p = texCache.get(file);
   if (!p) {
     p = new Promise((resolve) => {
-      new THREE.TextureLoader().load(texUrl(file), (t) => {
+      try {
+        new THREE.TextureLoader().load(texUrl(file), (t) => {
         t.flipY = false; // glTF UV convention (same orientation as the upstream KTX2 layers)
         t.colorSpace = THREE.SRGBColorSpace;
         t.wrapS = t.wrapT = THREE.RepeatWrapping; // UDIM tile 1 (u in [1,2)) samples its own layer file with u - 1
-        t.anisotropy = 4;
-        t.needsUpdate = true;
-        resolve(t);
-      }, undefined, () => { texCache.delete(file); resolve(null); });
+          t.anisotropy = 4;
+          t.needsUpdate = true;
+          resolve(t);
+        }, undefined, () => { texCache.delete(file); resolve(null); });
+      } catch { texCache.delete(file); resolve(null); } // no DOM (Node/tests): untextured fallback colours
     });
     texCache.set(file, p);
   }
@@ -210,13 +212,13 @@ function fitHead(parts: PartGeo[], bones: string[], worldP: THREE.Vector3[]): Bo
   return { sx, sy, sz, cx: (minX + maxX) / 2, cz: (minZ + maxZ) / 2 - HC[2] * sz };
 }
 
-async function loadBody(id: string): Promise<BodyAsset | null> {
+async function loadBody(id: string, buffer?: ArrayBuffer): Promise<BodyAsset | null> {
   const data = BODIES[id], url = GLB_URLS[id];
   if (!data || !url) return null;
   const skel = SKELETONS[data.skeleton];
   if (!skel || data.ibm.length < skel.bones.length * 16) return null;
   loader ??= new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
-  const gltf = await loader.loadAsync(url);
+  const gltf = buffer ? await loader.parseAsync(buffer, '') : await loader.loadAsync(url);
   gltf.scene.updateMatrixWorld(true);
   const lods: PartGeo[][] = [];
   for (let li = 0; li < 2; li++) {
@@ -515,6 +517,14 @@ export const REALISTIC_BASE_IDS: readonly string[] = Object.keys(GLB_URLS);
 /** Start fetching/decoding a base (e.g. when the creator shows its card). Never rejects. */
 export function preloadRealisticBase(baseModelId: string): Promise<boolean> {
   return GLB_URLS[baseModelId] ? getBody(baseModelId).then((b) => !!b) : Promise.resolve(false);
+}
+
+/** Provide a base's GLB bytes yourself (custom cache, offline bundle, Node tests) instead of fetching its URL. */
+export function primeRealisticBase(baseModelId: string, glb: ArrayBuffer): Promise<boolean> {
+  if (!GLB_URLS[baseModelId]) return Promise.resolve(false);
+  const p = loadBody(baseModelId, glb).catch((e) => { console.warn('[realistic] body failed', baseModelId, e); return null; });
+  bodyCache.set(baseModelId, p);
+  return p.then((b) => { if (!b) bodyCache.delete(baseModelId); return !!b; });
 }
 
 /** Drop every cached body/texture/material (e.g. when leaving the world). Live rigs must be disposed first. */

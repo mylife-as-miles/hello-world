@@ -181,4 +181,6 @@ function App() {
   );
 }
 
-createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>);
+// Reuse the root across HMR re-executions of this module.
+const holder = window as unknown as { __districtLabRoot?: ReturnType<typeof createRoot> };
+(holder.__districtLabRoot ??= createRoot(document.getElementById('root')!)).render(<StrictMode><App /></StrictMode>);

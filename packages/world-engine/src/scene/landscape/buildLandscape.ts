@@ -49,8 +49,8 @@ export function buildLandscape(quality: 'low' | 'high', weather: SharedUniforms 
   const terrainMat = createTerrainMaterial(weather);
   const lake = buildLakeGeometry();
   const lakeMat = new THREE.MeshStandardMaterial({
-    color: '#4f9cbf', roughness: 0.14, metalness: 0.0, transparent: true, opacity: 0.9,
-    emissive: '#163b52', emissiveIntensity: 0.18,
+    vertexColors: true, roughness: 0.12, metalness: 0.0, transparent: true, opacity: 0.9,
+    emissive: '#123247', emissiveIntensity: 0.08,
   });
   lakeMat.onBeforeCompile = shader => patchLandscapeFog(shader);
   lakeMat.customProgramCacheKey = () => 'hw-landscape-lake';
@@ -168,9 +168,10 @@ export function buildTerrainGeometry(quality: 'low' | 'high'): THREE.BufferGeome
 
 export function createTerrainMaterial(weather: SharedUniforms | null): THREE.MeshStandardMaterial {
   const mat = new THREE.MeshStandardMaterial({
-    vertexColors: true, roughness: 0.94, metalness: 0,
-    // Coplanar overlap with the town ground (34–36 m): the landscape wins.
-    polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2,
+    vertexColors: true, roughness: 0.92, metalness: 0, // = kit.ground (town ground) for an invisible seam
+    // Coplanar overlap with the flat town ground (34–36 m, y = 0): the landscape wins.
+    // Constant units only (no slope factor) so draped district streets never lose to it.
+    polygonOffset: true, polygonOffsetFactor: 0, polygonOffsetUnits: -2,
   });
   const uSnow = weather?.uSnow ?? { value: 0 };
   const uWet = weather?.uWet ?? { value: 0 };
@@ -237,17 +238,29 @@ export function patchLandscapeFog(shader: THREE.WebGLProgramParametersWithUnifor
 
 /* --------------------------------------------------------------------- lake */
 
+const LAKE_DEEP = col('#2c78a0');
+const LAKE_SHALLOW = col('#76c3d3');
+
 function buildLakeGeometry(): THREE.BufferGeometry {
-  // Unit circle scaled to the ellipse (slightly larger than the shoreline; the shore hides the rim).
-  const g = new THREE.CircleGeometry(1, 64);
+  // Unit disc (with radial rings for a deep → shallow colour gradient) scaled to the
+  // ellipse, slightly larger than the shoreline — the shore terrain hides the rim.
+  const g = new THREE.RingGeometry(0, 1, 72, 6);
   g.rotateX(-Math.PI / 2);
   const p = g.attributes.position as THREE.BufferAttribute;
+  const colors = new Float32Array(p.count * 3);
   const c = Math.cos(LAKE.rot), s = Math.sin(LAKE.rot);
+  const k = new THREE.Color();
+  const EXT = 1.32;
   for (let i = 0; i < p.count; i++) {
-    const u = p.getX(i) * LAKE.rx * 1.32, v = p.getZ(i) * LAKE.rz * 1.32;
+    const ux = p.getX(i), vz = p.getZ(i);
+    const d = Math.hypot(ux, vz) * EXT; // ≈ lakeDistance (before the rim noise)
+    k.copy(LAKE_DEEP).lerp(LAKE_SHALLOW, smoothstep(0.35, 1.0, d));
+    colors[i * 3] = k.r; colors[i * 3 + 1] = k.g; colors[i * 3 + 2] = k.b;
+    const u = ux * LAKE.rx * EXT, v = vz * LAKE.rz * EXT;
     // inverse of lakeDistance's rotation
     p.setXYZ(i, LAKE.x + u * c + v * s, 0, LAKE.z - u * s + v * c);
   }
+  g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   g.deleteAttribute('uv');
   g.computeVertexNormals();
   g.computeBoundingSphere();

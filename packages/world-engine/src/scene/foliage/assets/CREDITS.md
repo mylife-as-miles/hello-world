@@ -9,16 +9,21 @@ What was used (executed in Node via `../tools/bake-trees.cts`; no super-terrain 
 shipped in the runtime bundle — only the generated data plus our own WebGL renderer):
 
 - `src/tree/generator/compileTree.ts` (+ `semanticGraph`, `woodMesher`, `foliageCompiler`,
-  `speciesCatalog`, `types` …): species `european-beech` (broadleaf), `norway-spruce`
-  (conifer), `silver-birch` (birch), `field-oak` (blossom), fixed seeds, LOD 2 ("far") wood
-  topology + leaf-card instances.
+  `speciesCatalog`, `types` …): species `european-beech` (broadleaf, seed 1201; autumn,
+  seed 5501), `norway-spruce` (conifer), `silver-birch` (birch), `field-oak` (blossom); LOD 2
+  ("far") wood topology + leaf-card instances.
 - `src/tree/materials/leafSprayAtlas.ts` (`bakeLeafSpray` → `leaf/raster`, `blade`, `layout`,
-  `pigment`, `profiles`, `dilate`, …): 4 spray variants per species at 512², downsampled to
-  128² tiles.
+  `pigment`, `profiles`, `dilate`, …): 3 spray variants per species at 512², box-downsampled
+  to 128² tiles (15 tiles in a 4×4 grid → 512² atlas).
 
-Our post-processing: height normalised to 5–7 m, leaf cards merged into one mesh and
-enlarged ×1.4, normals biased outward for soft crowns, atlas luminance remapped onto a
-pastel colour ramp per species (blossom = pink), custom minimal GLB/PNG writers.
+Our post-processing: height normalised to 5.2–7 m; woody mesh simplified to ~45 % of its
+triangles with **meshoptimizer** (MIT, © Arseny Kapoulkine — already in the workspace's
+pnpm store, used offline only, not shipped); leaf cards merged into one mesh and enlarged
+×1.4; normals biased outward for soft crowns; atlas luminance remapped onto a pastel colour
+ramp per variant (blossom = pink, autumn = orange); custom minimal GLB/PNG writers.
+
+At runtime `GeneratedTrees.tsx` (our code) renders these with three.js `MeshStandardMaterial`
+(WebGL) and bakes its own impostor atlas from the same meshes.
 
 Rebuild: `cd packages/world-engine && npx tsx src/scene/foliage/tools/bake-trees.cts`
 (needs a local clone; `SUPER_TERRAIN=/path/to/super-terrain`).

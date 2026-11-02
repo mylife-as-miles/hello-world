@@ -6,7 +6,7 @@ import { PLAZA_RADIUS } from '../world/layout';
 import { useKit } from './context';
 import { patchWeather, type SceneKit } from './kit';
 import { makeSignTexture, rng } from './batch';
-import { buildTown, poiAt, POND, PLAYGROUND_SWINGS, swingGeometry, type SignDef } from './town';
+import { buildTown, poiAt, POND, PLAYGROUND_SWINGS, swingGeometry, type SignDef, type TownOptions } from './town';
 import { createWaterMaterial } from './water';
 
 export interface TownProps {
@@ -14,11 +14,15 @@ export interface TownProps {
   onLocationSelect?: (poiId: string) => void;
   /** Built-in forest belt / hills / rolling ground (default true). Turn off when an external landscape is mounted. */
   horizon?: boolean;
+  /** STABLE (module-level) trees owned by another module; stylised trees keep clear of them. */
+  reservedTrees?: TownOptions['reservedTrees'];
+  /** STABLE footprint test of an external district. */
+  occupied?: TownOptions['occupied'];
 }
 
-export function Town({ quality, onLocationSelect, horizon = true }: TownProps) {
+export function Town({ quality, onLocationSelect, horizon = true, reservedTrees, occupied }: TownProps) {
   const kit = useKit();
-  const town = useMemo(() => buildTown(quality, { horizon }), [quality, horizon]);
+  const town = useMemo(() => buildTown(quality, { horizon, reservedTrees, occupied }), [quality, horizon, reservedTrees, occupied]);
   useEffect(() => () => {
     for (const g of [town.solid, town.detail, town.far, town.flat, town.glass, town.bulbs, town.ground]) g.dispose();
   }, [town]);

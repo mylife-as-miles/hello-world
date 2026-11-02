@@ -27,6 +27,13 @@ const LOOK = night
   ? { bg: '#1c2646', hs: '#3c4f86', hg: '#1c1f2e', hI: 0.62, sun: '#9fb2ff', sunI: 0.55, fog: '#1c2646' }
   : { bg: '#cfe6f3', hs: '#d9ecff', hg: '#8f9c62', hI: 1.08, sun: '#fff4e2', sunI: 3.3, fog: '#cfe6f3' };
 
+const genTrees = params.get('gen') === '1';
+/** The real foliage (src/scene/foliage GeneratedTrees) on FOREST_PLACEMENTS — lazy so a broken in-progress module can't break the lab. */
+const RealTrees = lazy(async () => {
+  const m = await import('../src/scene/foliage');
+  return { default: () => <m.GeneratedTrees quality={quality} placements={quality === 'high' ? FOREST_PLACEMENTS : FOREST_PLACEMENTS_LOW} /> };
+});
+
 const District = lazy(async () => {
   const m = await import('../src/scene/district');
   return { default: () => <m.DowntownDistrict quality={quality} heightAt={terrainHeightAt} /> };
@@ -73,13 +80,13 @@ function ForestMarkers({ placements }: { placements: ForestPlacement[] }) {
   const refs = useMemo(() => ({ cone: null as THREE.InstancedMesh | null, ball: null as THREE.InstancedMesh | null, trunk: null as THREE.InstancedMesh | null }), []);
   useEffect(() => {
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
-    const colors = ['#3f7d4f', '#5f9e45', '#a8c95a', '#f2a7c3'];
+    const colors = ['#5f9e45', '#3f7d4f', '#a8c95a', '#f2a7c3', '#e39a3b'];
     let ic = 0, ib = 0;
     placements.forEach((t, i) => {
       q.setFromAxisAngle(up, t.rot); s.setScalar(t.scale); p.set(t.x, t.y - 0.1, t.z); m.compose(p, q, s);
       refs.trunk?.setMatrixAt(i, m);
-      if (t.variant === 0) { refs.cone?.setMatrixAt(ic, m); refs.cone?.setColorAt(ic++, new THREE.Color(colors[0])); }
-      else { refs.ball?.setMatrixAt(ib, m); refs.ball?.setColorAt(ib++, new THREE.Color(colors[t.variant] ?? colors[1])); }
+      if (t.variant === 1) { refs.cone?.setMatrixAt(ic, m); refs.cone?.setColorAt(ic++, new THREE.Color(colors[1])); }
+      else { refs.ball?.setMatrixAt(ib, m); refs.ball?.setColorAt(ib++, new THREE.Color(colors[t.variant] ?? colors[0])); }
     });
     if (refs.cone) { refs.cone.count = ic; refs.cone.instanceMatrix.needsUpdate = true; if (refs.cone.instanceColor) refs.cone.instanceColor.needsUpdate = true; }
     if (refs.ball) { refs.ball.count = ib; refs.ball.instanceMatrix.needsUpdate = true; if (refs.ball.instanceColor) refs.ball.instanceColor.needsUpdate = true; }
@@ -133,7 +140,8 @@ function Scene() {
         shadow-mapSize={[1024, 1024]} shadow-camera-left={-45} shadow-camera-right={45} shadow-camera-top={45} shadow-camera-bottom={-45} />
       <TownDisc />
       <Landscape quality={quality} />
-      {showTrees && <ForestMarkers placements={quality === 'high' ? FOREST_PLACEMENTS : FOREST_PLACEMENTS_LOW} />}
+      {showTrees && !genTrees && <ForestMarkers placements={quality === 'high' ? FOREST_PLACEMENTS : FOREST_PLACEMENTS_LOW} />}
+      {genTrees && <Suspense fallback={null}><RealTrees /></Suspense>}
       {withDistrict && <Suspense fallback={null}><District /></Suspense>}
       <CameraSetup />
       <Stats />

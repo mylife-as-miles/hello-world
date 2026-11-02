@@ -110,6 +110,10 @@ const PINE = ['#3f7d4e', '#4a8a56', '#3a7448', '#568f5c'];
 export interface TownOptions {
   /** Built-in forest belt, distant hills and rolling ground beyond the town (switch off when an external landscape is mounted). */
   horizon?: boolean;
+  /** Trees rendered by another module (e.g. GeneratedTrees in Willow Park): kept clear of stylised trees/props. */
+  reservedTrees?: ReadonlyArray<{ x: number; z: number; scale: number }>;
+  /** Footprint test of an external district (lots/streets) so the forest belt never pierces it. */
+  occupied?: (x: number, z: number, pad: number) => boolean;
 }
 
 interface Ctx {
@@ -645,7 +649,7 @@ export function stageStringCurves(): THREE.QuadraticBezierCurve3[] {
   });
 }
 
-function buildPark(c: Ctx) {
+function buildPark(c: Ctx, reserved: ReadonlyArray<{ x: number; z: number; scale: number }> = []) {
   // Pond rim + reeds + lily pads (water surface is animated in Park component)
   c.flat.add(c.P.cyl(28), '#d9cf9f', mtx(POND.x, 0.012, POND.z, 0, POND.r + 0.45, 0.024, POND.r + 0.35));
   c.space.circle(POND.x, POND.z, POND.r + 0.6);
@@ -664,11 +668,12 @@ function buildPark(c: Ctx) {
     c.solid.add(c.P.cyl(9), '#5e9e48', mtx(POND.x + Math.cos(a) * rr, 0.075, POND.z + Math.sin(a) * rr, c.r() * 6, 0.28, 0.02, 0.28));
     if (i % 2 === 0) c.solid.add(c.P.ico(0), '#ffb3c8', mtx(POND.x + Math.cos(a) * rr, 0.13, POND.z + Math.sin(a) * rr, 0, 0.08, 0.06, 0.08), true);
   }
-  // Willows
-  addWillow(c, -19.6, -17.8, 1.0);
-  addWillow(c, -11.2, -22.6, 0.9);
-  addWillow(c, -18.6, -24.4, 1.08);
-  c.space.circle(-19.6, -17.8, 1.8); c.space.circle(-11.2, -22.6, 1.6); c.space.circle(-18.6, -24.4, 1.8);
+  // Willows (skip any that would collide with externally rendered park trees)
+  for (const [wx, wz, ws] of [[-19.6, -17.8, 1.0], [-11.2, -22.6, 0.9], [-18.6, -24.4, 1.08]] as const) {
+    if (reserved.some(t => Math.hypot(t.x - wx, t.z - wz) < 3.2)) continue;
+    addWillow(c, wx, wz, ws);
+    c.space.circle(wx, wz, 1.8 * ws);
+  }
   // Park sign at the gate
   const gate = getNavNode('park-gate');
   if (gate) {
@@ -790,7 +795,7 @@ function buildPortalBase(c: Ctx) {
 /* ---------------------------------------------------------------- ground */
 
 function buildGround(q: number, horizon = true): THREE.BufferGeometry {
-  const size = horizon ? 320 : 140, seg = q > 0.7 ? (horizon ? 160 : 90) : (horizon ? 96 : 60);
+  const size = horizon ? 320 : 92, seg = q > 0.7 ? (horizon ? 160 : 80) : (horizon ? 96 : 56);
   const g = new THREE.PlaneGeometry(size, size, seg, seg);
   g.rotateX(-Math.PI / 2);
   const pos = g.attributes.position!;
@@ -806,7 +811,7 @@ function buildGround(q: number, horizon = true): THREE.BufferGeometry {
     if (n1 > 0.7) c.lerp(D, (n1 - 0.7) * 1.5);
     const hill = smooth(46, 120, r);
     c.lerp(F, hill * 0.5);
-    const h = horizon ? hill * (5 + 14 * noise2(x * 0.025, z * 0.025, 11)) + smooth(110, 160, r) * 10 : 0;
+    const h = horizon ? hill * (5 + 14 * noise2(x * 0.025, z * 0.025, 11)) + smooth(110, 160, r) * 10 : -2.5 * smooth(39, 44, r);
     pos.setY(i, h);
     col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
   }
@@ -835,6 +840,9 @@ export function buildTown(quality: 'low' | 'high', options: TownOptions = {}): T
     P: new Prims(), r: rng(20261102), space: new Space(), q, lamps: [], chimneys: [], signs: [],
   };
   const c = ctx;
+  const reserved = options.reservedTrees ?? [];
+  for (const t of reserved) c.space.circle(t.x, t.z, 1.9 * t.scale);
+  const occupied = options.occupied;
 
   // Paths (border + top), with round joints
   const nodes = new Map<string, Vec2>();
@@ -856,7 +864,7 @@ export function buildTown(quality: 'low' | 'high', options: TownOptions = {}): T
     else buildArcade(c, b);
   }
   buildTerrace(c);
-  buildPark(c);
+  buildPark(c, reserved);
   buildPlayground(c);
   buildGarden(c);
   buildPortalBase(c);
@@ -925,6 +933,7 @@ export function buildTown(quality: 'low' | 'high', options: TownOptions = {}): T
     const d = Math.max(Math.abs(x), Math.abs(z));
     if (d < 35 || Math.hypot(x, z) > (low ? 58 : 72)) return;
     if (r() > (low ? 0.55 : 0.9)) return;
+    if (occupied?.(x, z, 2)) return;
     const kind = r() < 0.6 ? 'pine' : (r() < 0.8 ? 'round' : 'autumn');
     addTree(c, c.far, x, z, kind, 1.0 + r() * 0.7, 0, groundHeight(x, z));
   });
@@ -933,6 +942,7 @@ export function buildTown(quality: 'low' | 'high', options: TownOptions = {}): T
     const a = (i / 18) * Math.PI * 2 + c.r() * 0.2;
     const R = 115 + c.r() * 30;
     const hx = Math.cos(a) * R, hz = Math.sin(a) * R;
+    if (occupied?.(hx, hz, 4)) continue;
     c.far.add(c.P.blob(i % 6, 0.12, 2), pick(c.r, ['#86b06c', '#7ea978', '#93b884', '#7aa47a']), mtx(hx, -4, hz, c.r() * 6, 34 + c.r() * 20, 12 + c.r() * 12, 26 + c.r() * 14), false);
   }
   scatter(2.4, 38, (x, z, r) => {

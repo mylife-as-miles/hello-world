@@ -96,11 +96,12 @@ function loadTreeAssets(): Promise<TreeAssets> {
 /**
  * Shader tweaks via onBeforeCompile:
  *  - wind: sway grows with height² so trunks stay planted; phase varies per instance position.
+ *  - mipAlpha: scales cutout alpha with the sampled mip level (keeps distant crowns dense).
  *  - skyLift: multiplies the indirect (sky/ambient) diffuse — light-dependent, unlike emissive.
  *  - keepNormals: double-sided cards keep their authored (outward / upward) normal on the back
  *    face instead of flipping it, so crowns and impostors shade softly from every side.
  */
-function patchTreeMaterial(material: THREE.Material, key: string, opts: { time?: { value: number }; wind?: number; keepNormals?: boolean; skyLift?: number }) {
+function patchTreeMaterial(material: THREE.Material, key: string, opts: { time?: { value: number }; wind?: number; keepNormals?: boolean; skyLift?: number; mipAlpha?: number }) {
   material.onBeforeCompile = (shader) => {
     if (opts.time && opts.wind) {
       shader.uniforms.uTreeWind = opts.time;
@@ -117,6 +118,22 @@ function patchTreeMaterial(material: THREE.Material, key: string, opts: { time?:
         float tBend = ${opts.wind.toFixed(4)} * tH * tH;
         transformed.x += (sin(tPh) + 0.35 * sin(tPh * 2.7 + position.z * 1.7)) * tBend;
         transformed.z += (0.7 * cos(tPh * 0.83) + 0.3 * sin(tPh * 3.1 + position.x * 1.9)) * tBend;`,
+      );
+    }
+    if (opts.mipAlpha) {
+      // cutout coverage drops in small mips (thin needles vanish at distance); scale alpha
+      // up with the sampled mip level so crowns keep their density far away
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <map_fragment>',
+        `#include <map_fragment>
+        #ifdef USE_MAP
+        {
+          vec2 tSize = vec2(textureSize(map, 0));
+          vec2 tDx = dFdx(vMapUv * tSize), tDy = dFdy(vMapUv * tSize);
+          float tMip = max(0.0, 0.5 * log2(max(dot(tDx, tDx), dot(tDy, tDy))));
+          diffuseColor.a *= 1.0 + tMip * ${opts.mipAlpha.toFixed(3)};
+        }
+        #endif`,
       );
     }
     if (opts.skyLift) {
@@ -278,7 +295,7 @@ function buildForest(assets: TreeAssets, impostors: Impostors, placements: Reado
   const farMaterial = new THREE.MeshStandardMaterial({
     map: impostors.target.texture, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.9, metalness: 0,
   });
-  patchTreeMaterial(farMaterial, 'tree-impostor', { keepNormals: true, skyLift: 1.5 });
+  patchTreeMaterial(farMaterial, 'tree-impostor', { keepNormals: true, skyLift: 1.5, mipAlpha: 0.2 });
   disposables.push(farMaterial);
 
   const batches: VariantBatch[] = [];
@@ -291,7 +308,7 @@ function buildForest(assets: TreeAssets, impostors: Impostors, placements: Reado
       roughness: 0.8, metalness: 0,
     });
     patchTreeMaterial(bark, 'tree-bark', { time: wind, wind: 0.0012 });
-    patchTreeMaterial(leaf, 'tree-leaf', { time: wind, wind: 0.0034, keepNormals: true, skyLift: 1.55 });
+    patchTreeMaterial(leaf, 'tree-leaf', { time: wind, wind: 0.0034, keepNormals: true, skyLift: 1.55, mipAlpha: 0.25 });
     disposables.push(bark, leaf);
 
     const count = list.length;

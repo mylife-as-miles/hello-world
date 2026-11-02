@@ -172,10 +172,10 @@ export class EmoteSystem {
     }
   }
 
+  /** Frees GPU resources. Non-destructive: three.js re-uploads on reuse (StrictMode remounts). */
   dispose(): void {
     for (const s of this.sprites) (s.material as THREE.Material).dispose();
     for (const t of this.textures.values()) t.dispose();
-    this.group.clear();
   }
 }
 
@@ -233,10 +233,10 @@ export class GiftSystem {
     }
   }
 
+  /** Frees GPU resources. Non-destructive: three.js re-uploads on reuse (StrictMode remounts). */
   dispose(): void {
     this.geo.dispose(); this.ribbon.dispose();
     for (const m of this.mats) m.dispose();
-    this.group.clear();
   }
 }
 

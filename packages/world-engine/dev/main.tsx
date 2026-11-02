@@ -4,12 +4,14 @@
  * kind as a button so the engine can be exercised without the server.
  * URL params: ?view=world|creator|overlay  &camera=neighborhood|orbit|street|follow|cinematic  &quality=low|high  &fresh=1
  */
-import { StrictMode, useEffect, useMemo, useState } from 'react';
+import { StrictMode, useEffect, useMemo, useState, type ComponentType } from 'react';
 import { createRoot } from 'react-dom/client';
-import type { AvatarAppearance, CameraMode, WorldEvent, WorldEventKind, WorldEventPayload, WorldSnapshot } from '@hello-world/contracts';
+import type { AvatarAppearance, CameraMode, WorldEvent, WorldEventKind, WorldEventPayload, WorldSceneProps, WorldSnapshot } from '@hello-world/contracts';
 import { WorldScene, AvatarCreator, createPersistentWorldRuntime, createIndexedDbSnapshotStorage, type PersistentWorldRuntime } from '../src/index';
 
 const params = new URLSearchParams(location.search);
+// Harness opts into the engine's optional chrome (Codex's app keeps it off and uses its own UI).
+const Scene = WorldScene as unknown as ComponentType<WorldSceneProps & { viewerResidentId?: string; showHud?: boolean; showInspector?: boolean }>;
 const initialView = (params.get('view') ?? 'world') as 'world' | 'creator' | 'overlay';
 if (initialView === 'overlay') document.body.classList.add('overlay');
 
@@ -78,8 +80,9 @@ function App() {
   }
 
   return <div style={{ position: 'fixed', inset: 0 }}>
-    <WorldScene runtime={runtime} cameraMode={camera} transparent={view === 'overlay'} quality={quality}
-      selectedResidentId={selected} onResidentSelect={setSelected} />
+    <Scene runtime={runtime} cameraMode={camera} transparent={view === 'overlay'} quality={quality}
+      selectedResidentId={selected} onResidentSelect={id => setSelected(id || undefined)}
+      viewerResidentId={me ? 'viewer:me' : undefined} showHud={view !== 'overlay'} showInspector={view !== 'overlay'} />
     {view !== 'overlay' && <div style={panel} data-testid="dev-panel">
       <b style={{ alignSelf: 'center' }}>Engine harness</b>
       <select value={camera} onChange={e => setCamera(e.target.value as CameraMode)}>{['neighborhood', 'orbit', 'street', 'follow', 'cinematic'].map(c => <option key={c}>{c}</option>)}</select>

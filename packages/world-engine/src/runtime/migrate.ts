@@ -33,7 +33,7 @@ export function migrateSnapshot(input: unknown): WorldSnapshot | null {
       personality: Array.isArray(r.personality) ? r.personality.filter((t): t is string => typeof t === 'string').slice(0, 5) : [],
       needs: { energy: clamp(needs.energy, 0, 100, 70), social: clamp(needs.social, 0, 100, 60), fun: clamp(needs.fun, 0, 100, 60) },
       location: { x: clamp(loc.x, -40, 40, 0), y: clamp(loc.y, -5, 20, 0), z: clamp(loc.z, -40, 40, 0), zone: typeof loc.zone === 'string' ? loc.zone.slice(0, 40) : 'plaza' },
-      activity: typeof r.activity === 'string' ? sanitizeText(r.activity, 80) || 'idle' : 'idle',
+      activity: typeof r.activity === 'string' ? sanitizeText(r.activity, 120) || 'idle' : 'idle',
       joinedAt: clamp(r.joinedAt, 0, Number.MAX_SAFE_INTEGER, 0),
       lastActiveAt: clamp(r.lastActiveAt, 0, Number.MAX_SAFE_INTEGER, 0),
     });
@@ -50,7 +50,7 @@ export function migrateSnapshot(input: unknown): WorldSnapshot | null {
       residentB: r.residentB,
       friendship: clamp(r.friendship, 0, 100, 50),
       lastInteractionAt: clamp(r.lastInteractionAt, 0, Number.MAX_SAFE_INTEGER, 0),
-      memories: Array.isArray(r.memories) ? r.memories.filter((m): m is string => typeof m === 'string').map(m => sanitizeText(m, 220)).slice(-12) : [],
+      memories: Array.isArray(r.memories) ? r.memories.filter((m): m is string => typeof m === 'string').map(m => sanitizeText(m, 400)).slice(-12) : [],
     });
   }
 

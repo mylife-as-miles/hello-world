@@ -11,6 +11,7 @@ import { SCHEMA_VERSION, type WorldEvent, type WorldRuntime, type WorldRuntimeOp
 import { createSimulation } from '../simulation';
 import type { Simulation } from '../simulation/types';
 import { validateEvent } from './validate';
+import { migrateSnapshot } from './migrate';
 
 export const HISTORY_LIMIT = 100;
 export const POPULATION_LIMIT = 50;
@@ -55,7 +56,8 @@ export interface WorldEngineRuntime extends WorldRuntime {
 
 export function createWorldRuntime(options: WorldEngineRuntimeOptions = {}): WorldEngineRuntime {
   const now = options.now ?? (() => Date.now());
-  const initial = options.initialSnapshot && options.initialSnapshot.schemaVersion === SCHEMA_VERSION ? options.initialSnapshot : undefined;
+  // Snapshots restored from disk/IndexedDB/network are untrusted: repair + validate.
+  const initial = options.initialSnapshot ? migrateSnapshot(options.initialSnapshot) ?? undefined : undefined;
   const worldId = options.worldId ?? initial?.worldId ?? 'hello-neighborhood';
   const tickMs = Math.max(50, Math.min(5000, options.tickIntervalMs ?? DEFAULT_TICK_MS));
   const maxResidents = Math.max(1, Math.min(POPULATION_LIMIT, options.maxResidents ?? POPULATION_LIMIT));

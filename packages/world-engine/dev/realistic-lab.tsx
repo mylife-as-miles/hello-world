@@ -9,6 +9,8 @@ import type { AvatarAppearance } from '@hello-world/contracts';
 import { loadRealisticRig, REALISTIC_BASE_MODELS } from '../src/avatars/realistic/index';
 import type { HumanoidRig } from '../src/avatars/rig';
 import { AvatarAnimator } from '../src/interactions/animation/AvatarAnimator';
+import { createAvatarRig } from '../src/avatars/index';
+import { appearanceFromSeed } from '../src/avatars/catalog';
 import type { AnimationFamily } from '../src/world/activities';
 
 const params = new URLSearchParams(location.search);
@@ -60,7 +62,36 @@ function appearanceFor(id: string, i: number): AvatarAppearance {
   };
 }
 
+/** ?compare: world lighting (Atmosphere.tsx values); per base: Townie | photoreal | stylised, all idle. */
+async function compare() {
+  scene.background = new THREE.Color(0xcfe3f0);
+  (ground.material as THREE.MeshStandardMaterial).color.set(0xd8c7a8);
+  scene.children.filter((o) => (o as THREE.Light).isLight).forEach((l) => scene.remove(l));
+  const sunW = new THREE.DirectionalLight(0xfff4e2, 3); sunW.position.set(30, 50, 20); sunW.castShadow = true;
+  sunW.shadow.mapSize.set(1024, 1024); Object.assign(sunW.shadow.camera, { left: -8, right: 8, top: 8, bottom: -8, near: 5, far: 160 });
+  scene.add(sunW, new THREE.HemisphereLight(0xd9ecff, 0x8f9c62, 1), new THREE.AmbientLight(0xffffff, 0.15));
+  const bases = (params.get('bases') ?? 'mh-elena,mh-marco,rb-james').split(',');
+  const seeds = ['nova', 'mochi', 'pixelcat', 'lumi'];
+  const row: HumanoidRig[] = [];
+  for (let b = 0; b < bases.length; b++) {
+    const t = createAvatarRig(appearanceFromSeed(seeds[b % seeds.length]!));
+    row.push(t);
+    for (const stylize of [false, true]) {
+      const r = await loadRealisticRig({ ...appearanceFor(bases[b]!, b), outfit: { top: 'tee', bottom: 'jeans', shoes: 'sneakers', color: '#ff7a59' } }, { lod: 'high', stylize });
+      if (r) row.push(r);
+    }
+  }
+  row.forEach((rig, i) => {
+    rig.root.position.set((i - (row.length - 1) / 2) * 0.95, 0, 0);
+    rig.root.traverse((o) => { o.castShadow = true; o.receiveShadow = true; });
+    scene.add(rig.root);
+    entries.push({ rig, anim: new AvatarAnimator(rig, i * 31), seat: new THREE.Mesh(), label: '' });
+  });
+  hud.textContent = 'compare: per base → Townie | photoreal | stylised (world lighting)';
+}
+
 async function main() {
+  if (params.has('compare')) return compare();
   const set = params.get('set');
   const ids = REALISTIC_BASE_MODELS.map((b) => b.id).filter((id) => (!set || id.startsWith(set + '-')) && (!params.get('only') || params.get('only')!.split(',').includes(id)));
   const n = ids.length;

@@ -322,14 +322,14 @@ function maskAlphaWrites(mesh: THREE.Mesh): void {
  * sit in the warm pastel town next to the Townies. WebGL only (onBeforeCompile); WebGPU renders the plain material. */
 const STYLE_ALBEDO = /* glsl */ `
   {
-    vec3 hwS = pow(max(diffuseColor.rgb, vec3(0.0)), vec3(0.84));          // lift darks (linear space)
+    vec3 hwS = pow(max(diffuseColor.rgb, vec3(0.0)), vec3(0.76));          // lift darks (linear space)
     float hwSL = dot(hwS, vec3(0.2126, 0.7152, 0.0722));
-    hwS = mix(vec3(hwSL), hwS, 1.16) * vec3(1.06, 1.0, 0.92);               // a little saturation + warmth
+    hwS = mix(vec3(hwSL), hwS, 1.28) * vec3(1.07, 1.0, 0.9);                // livelier saturation + warmth
     diffuseColor.rgb = clamp(hwS, 0.0, 1.0);
   }`;
 const STYLE_DIFFUSE = /* glsl */ `{
     float hwBands = 0.42 * smoothstep(0.0, 0.07, dotNL) + 0.36 * smoothstep(0.28, 0.4, dotNL) + 0.22 * smoothstep(0.6, 0.72, dotNL);
-    float hwRamp = mix(dotNL, hwBands, 0.45);
+    float hwRamp = mix(dotNL, hwBands, 0.6);
     vec3 hwIrr = dotNL > 1e-4 ? irradiance * (hwRamp / dotNL) : vec3(0.0);
     reflectedLight.directDiffuse += hwIrr * diffuseBRDF * ( 1.0 - F );
   }`;
@@ -338,8 +338,8 @@ const STYLE_AMBIENT = /* glsl */ `
   {
     float hwF = 1.0 - saturate(dot(normal, normalize(vViewPosition)));
     vec3 hwAmb = (irradiance + iblIrradiance) * RECIPROCAL_PI;
-    reflectedLight.indirectDiffuse += hwAmb * vec3(1.0, 0.8, 0.58) * 0.5 * pow(hwF, 3.0) * (0.4 + 0.6 * diffuseColor.rgb);
-    reflectedLight.indirectDiffuse *= 1.18;
+    reflectedLight.indirectDiffuse += hwAmb * vec3(1.0, 0.8, 0.58) * 0.8 * pow(hwF, 2.5) * (0.4 + 0.6 * diffuseColor.rgb);
+    reflectedLight.indirectDiffuse *= 1.3;
   }
   #endif`;
 const DIFFUSE_LINE = 'reflectedLight.directDiffuse += irradiance * diffuseBRDF * ( 1.0 - F );';

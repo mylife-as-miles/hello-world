@@ -35,7 +35,8 @@ const OCCLUDERS: Occluder[] = (() => {
   }
   const stage = getPoi('stage')?.position;
   if (stage) out.push({ kind: 'circle', x: stage.x, z: stage.z, r: 3.15, h: 3.2 });
-  out.push({ kind: 'circle', x: 0, z: 0, r: 2.35, h: 2.6 });
+  // fountain: treated taller than it is so shots never look across its tiers (no see-through dither on it)
+  out.push({ kind: 'circle', x: 0, z: 0, r: 2.35, h: 3.6 });
   const portal = getPoi('portal')?.position;
   if (portal) out.push({ kind: 'box', x: portal.x, z: portal.z, hw: 3.3, hd: 0.7, c: 1, s: 0, h: 5.2 });
   return out;

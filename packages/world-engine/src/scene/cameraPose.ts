@@ -406,6 +406,11 @@ export function pickTwoShot(
       }
     }
   }
+  // nothing clean: still a two-shot (both subjects in frame matter most) — high and pulled back on the
+  // preferred side, where props sit low in the frame
+  const lvl = POSE_RISE.length - 1, d = base * (1 + lvl * 0.12) * 1.4, yaw = axis + side0 * Math.PI / 2;
+  out.x = mx + Math.sin(yaw) * d; out.y = height + POSE_RISE[lvl]!; out.z = mz + Math.cos(yaw) * d;
+  out.yaw = yaw; out.rel = side0; out.level = lvl; out.dist = d;
   return false;
 }
 const TWO_OFFS = [0, 0.28, -0.28, 0.5, -0.5, 0.75, -0.75];

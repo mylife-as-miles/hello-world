@@ -437,8 +437,12 @@ export function CameraRig({ mode, selectedResidentId, transparent = false, quali
   /** Where the resident is drawn (falls back to the snapshot); returns the rendered yaw or NaN. */
   const subjectAt = (id: string, t: number, out: THREE.Vector3): { ok: boolean; yaw: number } => {
     const g = groupOf(id, t);
-    if (g) { g.getWorldPosition(out); out.y = 0; return { ok: true, yaw: g.rotation.y }; }
     const r = store.getResident(id);
+    if (g) {
+      g.getWorldPosition(out); out.y = 0;
+      // a freshly spawned avatar sits at the origin until its first update: trust the snapshot then
+      if (!r || Math.hypot(out.x - r.location.x, out.z - r.location.z) < 4) return { ok: true, yaw: g.rotation.y };
+    }
     if (!r) return { ok: false, yaw: NaN };
     out.set(r.location.x, 0, r.location.z);
     const p = store.previous?.residents.find(q => q.id === id);
@@ -525,10 +529,9 @@ export function CameraRig({ mode, selectedResidentId, transparent = false, quali
           const px = mx + Math.sin(axis + Math.PI / 2), pz = mz + Math.cos(axis + Math.PI / 2);
           const nx = mx + Math.sin(axis - Math.PI / 2), nz = mz + Math.cos(axis - Math.PI / 2);
           const pref = Math.hypot(camera.position.x - px, camera.position.z - pz) <= Math.hypot(camera.position.x - nx, camera.position.z - nz) ? 1 : -1;
-          if (!pickTwoShot(s.subA.x, s.subA.z, s.subB.x, s.subB.z, headY, height, minDist, pref, s.two)) {
-            // no clean two-shot: front three-quarter on the actor, who faces the target
-            d.kind = 'actor'; d.cutPending = true; d.targetId = '';
-          } else if (!snap) { d.cutPending = true; } // a re-pick is a cut, never a swing through the scene
+          // no clean pose: pickTwoShot still returns a high, pulled-back two-shot (both in frame first)
+          pickTwoShot(s.subA.x, s.subA.z, s.subB.x, s.subB.z, headY, height, minDist, pref, s.two);
+          if (!snap) d.cutPending = true; // a re-pick is a cut, never a swing through the scene
           s.twoMid.set(mx, 0, mz);
         }
         s.pos.set(s.twoMid.x + Math.sin(s.two.yaw) * s.two.dist, s.two.y, s.twoMid.z + Math.cos(s.two.yaw) * s.two.dist);
@@ -558,7 +561,7 @@ export function CameraRig({ mode, selectedResidentId, transparent = false, quali
         const g = groupOf(r.id, t);
         if (g && !g.visible) continue; // not drawn by the renderer
         n = pushBox(pts, n, x - STEADY_HALF, 0, z - STEADY_HALF, x + STEADY_HALF, STEADY_TOP, z + STEADY_HALF);
-        if (g) { g.getWorldPosition(ov.tmp); n = pushBox(pts, n, ov.tmp.x - STEADY_HALF, 0, ov.tmp.z - STEADY_HALF, ov.tmp.x + STEADY_HALF, STEADY_TOP, ov.tmp.z + STEADY_HALF); }
+        if (g && g.getWorldPosition(ov.tmp) && Math.hypot(ov.tmp.x - x, ov.tmp.z - z) < 4) n = pushBox(pts, n, ov.tmp.x - STEADY_HALF, 0, ov.tmp.z - STEADY_HALF, ov.tmp.x + STEADY_HALF, STEADY_TOP, ov.tmp.z + STEADY_HALF);
         else {
           const p = store.previous?.residents.find(q => q.id === r.id);
           if (p) n = pushBox(pts, n, p.location.x - STEADY_HALF, 0, p.location.z - STEADY_HALF, p.location.x + STEADY_HALF, STEADY_TOP, p.location.z + STEADY_HALF);
@@ -586,6 +589,7 @@ export function CameraRig({ mode, selectedResidentId, transparent = false, quali
               const g = groupOf(r.id, t);
               if (g && !g.visible) continue;
               const q = g ? g.getWorldPosition(ov.tmp) : ov.tmp.set(r.location.x, 0, r.location.z);
+              if (Math.hypot(q.x - r.location.x, q.z - r.location.z) > 4) q.set(r.location.x, 0, r.location.z); // not placed yet
               sn = pushBox(sub, sn, q.x - SHOT_HALF, 0, q.z - SHOT_HALF, q.x + SHOT_HALF, SHOT_TOP, q.z + SHOT_HALF);
             }
           }

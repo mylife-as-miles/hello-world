@@ -70,10 +70,11 @@ const report = {
   startedAt: new Date().toISOString(),
   checks: [],
   pageErrors: [],
+  pageErrorStacks: [],
   consoleErrors: [],
   passed: false,
 };
-page.on("pageerror", (e) => report.pageErrors.push(e.message));
+page.on("pageerror", (e) => { report.pageErrors.push(e.message); if (report.pageErrorStacks.length < 5) report.pageErrorStacks.push({url:page.url(),stack:e.stack}); });
 page.on("console", (m) => {
   if (m.type() === "error") report.consoleErrors.push(m.text());
 });

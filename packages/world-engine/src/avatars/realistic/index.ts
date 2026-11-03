@@ -309,12 +309,14 @@ function baseMaterial(body: BodyAsset, slot: number, tile: number, kind: MatKind
  */
 function maskAlphaWrites(mesh: THREE.Mesh): void {
   mesh.onBeforeRender = (renderer, _s, _c, _g, material) => {
-    if (!(material as THREE.Material).userData.hwMaskAlpha) return;
+    // This raw colour-mask workaround belongs to WebGL. The WebGPU backend
+    // has no WebGL state/context and handles the material's coverage itself.
+    if (!(renderer as THREE.WebGLRenderer & { isWebGLRenderer?: boolean }).isWebGLRenderer || !(material as THREE.Material).userData.hwMaskAlpha) return;
     renderer.state.buffers.color.setMask(true); // sync three's cached mask, then drop alpha for this draw only
     renderer.getContext().colorMask(true, true, true, false);
   };
   mesh.onAfterRender = (renderer, _s, _c, _g, material) => {
-    if ((material as THREE.Material).userData.hwMaskAlpha) renderer.getContext().colorMask(true, true, true, true);
+    if ((renderer as THREE.WebGLRenderer & { isWebGLRenderer?: boolean }).isWebGLRenderer && (material as THREE.Material).userData.hwMaskAlpha) renderer.getContext().colorMask(true, true, true, true);
   };
 }
 

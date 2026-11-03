@@ -44,6 +44,32 @@ describe('realistic catalog + data', () => {
 const _a = new THREE.Vector3(), _b = new THREE.Vector3();
 const pos = (root: THREE.Object3D, name: string, out: THREE.Vector3) => out.setFromMatrixPosition(root.getObjectByName(name)!.matrixWorld);
 
+it('photoreal hair hooks preserve the WebGL alpha mask without accessing WebGL state on WebGPU', async () => {
+  const id = 'mh-elena';
+  const bytes = fs.readFileSync(asset(BODIES[id]!.file));
+  await primeRealisticBase(id, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+  const rig = (await loadRealisticRig({ ...appearance(id), accessories: [] }))!;
+  try {
+    const mesh = rig.root.getObjectByName('realistic-hair') as THREE.Mesh;
+    expect(mesh).toBeTruthy();
+    const material = (mesh.material as THREE.Material[]).find(m => m.userData.hwMaskAlpha)!;
+    expect(material).toBeTruthy();
+    const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(), group = new THREE.Group();
+    const draw = (renderer: THREE.WebGLRenderer) => {
+      mesh.onBeforeRender(renderer, scene, camera, mesh.geometry, material, group);
+      mesh.onAfterRender(renderer, scene, camera, mesh.geometry, material, group);
+    };
+    const gpu = { isWebGPURenderer: true, get state() { throw new Error('WebGPU has no WebGL state'); },
+      getContext() { throw new Error('WebGPU has no WebGL context'); } };
+    expect(() => draw(gpu as unknown as THREE.WebGLRenderer)).not.toThrow();
+    const calls: unknown[] = [];
+    const gl = { isWebGLRenderer: true, state: { buffers: { color: { setMask: (enabled: boolean) => calls.push(enabled) } } },
+      getContext: () => ({ colorMask: (...mask: boolean[]) => calls.push(mask) }) };
+    draw(gl as unknown as THREE.WebGLRenderer);
+    expect(calls).toEqual([true, [true, true, true, false], [true, true, true, true]]);
+  } finally { rig.dispose(); }
+});
+
 describe.each(['mh-elena', 'rb-sofia'])('realistic rig %s (Node, from GLB bytes)', (id) => {
   it('rebuilds a canonical T-pose rig whose retarget follows the rig.ts sign conventions', { timeout: 60000 }, async () => {
     const buf = fs.readFileSync(asset(BODIES[id]!.file));

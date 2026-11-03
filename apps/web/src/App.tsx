@@ -56,7 +56,7 @@ import type {
 import { useWorld } from "./lib/world";
 
 type Page = "home" | "world" | "director";
-type ModalName = "creator" | "obs" | "twitch" | "director" | "reset" | null;
+type ModalName = "creator" | "obs" | "twitch" | "director" | "reset" | "signin" | null;
 const cameras: { value: CameraMode; label: string }[] = [
   { value: "neighborhood", label: "Neighborhood" },
   { value: "orbit", label: "Free orbit" },
@@ -276,6 +276,8 @@ export default function App() {
     sendEvent,
     residentId,
   } = world;
+  const hostedWorld = "requiresSignIn" in world;
+  const requiresSignIn = hostedWorld && world.requiresSignIn;
   const overlay = window.location.pathname.startsWith("/overlay");
   const queryCamera = new URLSearchParams(window.location.search).get("camera");
   const [page, setPage] = useState<Page>(pageFromLocation);
@@ -416,6 +418,10 @@ export default function App() {
     window.scrollTo(0, 0);
   }
   function openCreator() {
+    if (requiresSignIn) {
+      setModal("signin");
+      return;
+    }
     setCreatorStep(me ? "appearance" : "name");
     setModal("creator");
   }
@@ -1054,8 +1060,9 @@ export default function App() {
                     {!isDirector && (
                       <div className="studio-lock">
                         <p>
-                          Director controls are private. Unlock the studio with
-                          your server’s Director key.
+                          {hostedWorld
+                            ? "Director controls belong to the world owner. Sign in with the owner's ChatGPT account."
+                            : "Director controls are private. Unlock the studio with your server’s Director key."}
                         </p>
                         <button
                           className="button secondary"
@@ -1539,7 +1546,7 @@ export default function App() {
             <div>
               <span className={`status-dot ${ready ? "ready" : ""}`} />
               {ready
-                ? `${clients} connected ${clients === 1 ? "session" : "sessions"}`
+                ? requiresSignIn ? "Live public world" : `${clients} connected ${clients === 1 ? "session" : "sessions"}`
                 : connection === "connecting"
                   ? "Connecting to world server"
                   : "World server offline"}
@@ -1834,7 +1841,14 @@ export default function App() {
           subtitle="Unlock private Director controls for this world."
           onClose={closeModal}
         >
-          <form
+          {hostedWorld ? (
+            <div className="name-form">
+              <p>Only the signed-in world owner can change weather, moderate interactions, reset the world, or connect Twitch.</p>
+              <a className="button primary" href="/signin-with-chatgpt" target="_top">
+                Sign in with ChatGPT <ArrowRight size={16} />
+              </a>
+            </div>
+          ) : <form
             className="name-form"
             onSubmit={(e) => {
               e.preventDefault();
@@ -1863,7 +1877,17 @@ export default function App() {
               Unlock Studio
               <ArrowRight size={16} />
             </button>
-          </form>
+          </form>}
+        </Modal>
+      )}
+      {modal === "signin" && (
+        <Modal title="Your story starts with a hello." subtitle="Watch freely. Sign in to make a resident of your own." onClose={closeModal}>
+          <div className="name-form">
+            <p>Your ChatGPT sign-in keeps your resident and saved appearance connected to you.</p>
+            <a className="button primary" href="/signin-with-chatgpt" target="_top">
+              Sign in with ChatGPT <ArrowRight size={16} />
+            </a>
+          </div>
         </Modal>
       )}
       {modal === "reset" && (

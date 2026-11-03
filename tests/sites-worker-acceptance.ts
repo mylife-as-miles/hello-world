@@ -65,7 +65,7 @@ async function main() {
     const env = {
       WORLD_DB: db,
       ASSETS: { fetch: async () => new Response("asset") },
-      DEMO_DIRECTOR: "true",
+      DIRECTOR_OWNER_EMAIL: "owner@example.test",
     };
     const send = async (
       path: string,
@@ -76,7 +76,7 @@ async function main() {
       const request = new Request(`https://world.test${path}`, {
         method: message ? "POST" : "GET",
         headers: {
-          ...(user ? { "oai-authenticated-user-id": user } : {}),
+          ...(user ? { "oai-authenticated-user-id": user, "oai-authenticated-user-email": user === "owner-test" ? "owner@example.test" : "viewer@example.test" } : {}),
           ...(message
             ? { "Content-Type": "application/json", Origin: origin }
             : {}),
@@ -112,7 +112,29 @@ async function main() {
       equal(response.status, 200);
       equal(assetPath, "/index.html");
     }
-    equal((await send("/api/status", "")).status, 401);
+    const publicView = await send("/api/snapshot", "");
+    equal(publicView.status, 200);
+    equal(publicView.data.authorized, false);
+    ok(publicView.data.snapshot.residents.length > 0);
+    equal((await send("/api/messages", "", event("Anonymous"))).status, 401);
+    equal((await send("/api/messages", "", { type: "reset" })).status, 401);
+    const viewerStatus = await send("/api/status", "ordinary-user");
+    equal(viewerStatus.status, 200);
+    equal(viewerStatus.data.authorized, false);
+    for (const message of [
+      { type: "reset" },
+      { type: "director-settings", settings: { maxResidents: 1 } },
+      { type: "approve", eventId: "anything" },
+      { type: "director-auth", key: "pretend-owner" },
+    ]) equal((await send("/api/messages", "ordinary-user", message)).status, 403);
+    const missingOwner = await worker.fetch(new Request("https://world.test/api/status", {
+      headers: { "oai-authenticated-user-id": "owner-test", "oai-authenticated-user-email": "owner@example.test" },
+    }), { ...env, DIRECTOR_OWNER_EMAIL: undefined });
+    equal((await missingOwner.json() as Reply).authorized, false);
+    const emailWithoutIdentity = await worker.fetch(new Request("https://world.test/api/status", {
+      headers: { "oai-authenticated-user-email": "owner@example.test" },
+    }), env);
+    equal((await emailWithoutIdentity.json() as Reply).authorized, false);
     const initial = await send("/api/snapshot");
     equal(initial.status, 200);
     equal(initial.data.authorized, true);
@@ -168,7 +190,7 @@ async function main() {
         },
         body: JSON.stringify(weather),
       }),
-      { ...env, DEMO_DIRECTOR: "false" },
+      env,
     );
     equal(denied.status, 403);
     console.log(

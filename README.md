@@ -8,7 +8,7 @@ This is an independent vertical slice of a persistent virtual society. All resid
 
 **[Open HELLO WORLD](https://hello-world-miles-society.myles4miles.chatgpt.site)** · [Director Studio](https://hello-world-miles-society.myles4miles.chatgpt.site/director) · [OBS browser source](https://hello-world-miles-society.myles4miles.chatgpt.site/overlay?camera=neighborhood)
 
-The Site is owner-private and requires ChatGPT sign-in. OBS uses a separate browser context and also needs authenticated access; operation inside native OBS is unverified. The hosted world uses D1 and server-side Workers, without a local Node server. It remains **Demo Mode** until the Twitch app ID/secret are configured privately and the broadcaster authorizes. [Hosted Twitch callbacks, permissions and setup](docs/HOSTED_TWITCH.md).
+The world is public to watch, including the OBS browser-source route. Creating a resident and interacting requires ChatGPT sign-in. Director controls and Twitch connection setup require the world owner’s authenticated account; public visitors cannot reset or moderate the world. Operation inside native OBS is unverified. The hosted world uses D1 and server-side Workers, without a local Node server. It remains **Demo Mode** until the Twitch app ID/secret are configured privately and the broadcaster authorizes. [Hosted Twitch callbacks, permissions and setup](docs/HOSTED_TWITCH.md).
 
 ## Run locally
 

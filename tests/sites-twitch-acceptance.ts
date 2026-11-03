@@ -53,7 +53,7 @@ async function main() {
   const env = {
     WORLD_DB: db,
     ASSETS: { fetch: async () => new Response("asset") },
-    DEMO_DIRECTOR: "true",
+    DIRECTOR_OWNER_EMAIL: "owner@example.test",
     TWITCH_CLIENT_ID: "test-app",
     TWITCH_CLIENT_SECRET: "test-secret",
     TWITCH_REDIRECT_URI: "https://world.test/api/twitch/callback",
@@ -122,7 +122,7 @@ async function main() {
         new Request("https://world.test" + path, {
           method: body ? "POST" : "GET",
           headers: {
-            ...(user ? { "oai-authenticated-user-id": user } : {}),
+            ...(user ? { "oai-authenticated-user-id": user, "oai-authenticated-user-email": user === "owner" ? "owner@example.test" : "viewer@example.test" } : {}),
             ...(body
               ? {
                   Origin: "https://world.test",

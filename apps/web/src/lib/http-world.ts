@@ -16,7 +16,8 @@ interface HttpEnvelope {
   snapshot?: WorldSnapshot;
   status?: StatusMessage;
   authorized?: boolean;
-  viewerId?: string;
+  viewerId?: string | null;
+  requiresSignIn?: boolean;
   oauthConfigured?: boolean;
   capabilities?: Record<string, string>;
   messages?: ServerMessage[];
@@ -38,6 +39,7 @@ interface HttpWorldState {
   isDirector: boolean;
   error: string | null;
   residentId: string | null;
+  requiresSignIn: boolean;
   oauthConfigured: boolean;
   capabilities: Record<string, string>;
 }
@@ -87,6 +89,7 @@ class HttpWorldConnection {
     isDirector: false,
     error: null,
     residentId: null,
+    requiresSignIn: false,
     oauthConfigured: false,
     capabilities: {},
   };
@@ -206,8 +209,11 @@ class HttpWorldConnection {
   }
   private receiveEnvelope(envelope: HttpEnvelope) {
     this.patch({
-      ...(typeof envelope.viewerId === "string"
+      ...(envelope.viewerId === null || typeof envelope.viewerId === "string"
         ? { residentId: envelope.viewerId }
+        : {}),
+      ...(typeof envelope.requiresSignIn === "boolean"
+        ? { requiresSignIn: envelope.requiresSignIn }
         : {}),
       ...(typeof envelope.oauthConfigured === "boolean"
         ? { oauthConfigured: envelope.oauthConfigured }

@@ -1,5 +1,5 @@
 /** Sites/Cloudflare adapter. One shared engine, durable D1 state, HTTP polling.
- * DEMO_DIRECTOR must only be enabled behind the owner-private Sites access gate.
+ * Public reads; writes require Sites identity, and Director access requires the owner email.
  * Simulation advances during active requests; no always-on or live Twitch claim.
  */
 import {
@@ -35,7 +35,7 @@ interface D1Database {
 interface WorkerEnv extends HostedTwitchEnv {
   WORLD_DB: D1Database;
   ASSETS: { fetch(request: Request): Promise<Response> };
-  DEMO_DIRECTOR?: string;
+  DIRECTOR_OWNER_EMAIL?: string;
   WORLD_ID?: string;
 }
 interface WorldRow {
@@ -101,13 +101,18 @@ async function siteIdentity(request: Request): Promise<string> {
   const userId = request.headers.get("oai-authenticated-user-id");
   if (!userId || userId.length > 256)
     throw new ApiError(
-      "Sign in through the private Site to open this world.",
+      "Sign in with ChatGPT to join or change this world.",
       401,
     );
   const digest = new Uint8Array(
     await crypto.subtle.digest("SHA-256", new TextEncoder().encode(userId)),
   );
   return `viewer:site:${Array.from(digest.slice(0, 16), (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+}
+async function isWorldDirector(request: Request, env: WorkerEnv, actor: string | null | undefined) {
+  const owner = env.DIRECTOR_OWNER_EMAIL?.trim().toLowerCase();
+  const signedInEmail = request.headers.get("oai-authenticated-user-email")?.trim().toLowerCase();
+  return Boolean(actor && owner && signedInEmail === owner && await twitchOwnerAllowed(env, actor));
 }
 async function getWorld(env: WorkerEnv): Promise<WorldRow> {
   const worldId = env.WORLD_ID || "hello-neighborhood";
@@ -425,7 +430,7 @@ export default {
           request,
           env,
           actor,
-          env.DEMO_DIRECTOR === "true",
+          await isWorldDirector(request, env, actor),
           {
             getSnapshot: async () =>
               parseSnapshot(JSON.parse((await getWorld(env)).snapshot_json)),
@@ -470,9 +475,13 @@ export default {
         request.headers.get("Origin") !== url.origin
       )
         throw new ApiError("Origin is not allowed.", 403);
-      const viewerId = await siteIdentity(request);
+      const viewerId = request.headers.get("oai-authenticated-user-id")
+        ? await siteIdentity(request)
+        : null;
+      if (request.method === "POST" && !viewerId)
+        throw new ApiError("Sign in with ChatGPT to join or change this world.", 401);
       const initial = await getWorld(env);
-      await requestLimit(env, initial.id, viewerId, Date.now());
+      if (viewerId) await requestLimit(env, initial.id, viewerId, Date.now());
       let message: ClientMessage | undefined;
       if (request.method === "POST") {
         const body = await request.text();
@@ -486,9 +495,7 @@ export default {
           );
         }
       }
-      const director =
-        env.DEMO_DIRECTOR === "true" &&
-        (await twitchOwnerAllowed(env, viewerId));
+      const director = await isWorldDirector(request, env, viewerId);
       if (director) await maintainHostedTwitch(env);
       const twitchStatus = await hostedTwitchStatus(env);
       const { row, data } =
@@ -502,7 +509,7 @@ export default {
                 limits: {},
               },
             }
-          : await mutate(env, viewerId, director, message);
+          : await mutate(env, viewerId || "public:observer", director, message);
       const presence = await env.WORLD_DB.prepare(
         "SELECT COUNT(*) AS count FROM world_sessions WHERE world_id = ? AND last_seen > ?",
       )
@@ -534,6 +541,7 @@ export default {
           ...status,
           status,
           viewerId: viewerId,
+          requiresSignIn: viewerId === null,
           authorized: director,
           directorLocalAllowed: director,
           oauthConfigured: director && twitchStatus.oauthConfigured,

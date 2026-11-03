@@ -139,6 +139,10 @@ interface ResidentHandle {
   /** Label occlusion state (with hysteresis: consecutive clear checks). */
   occluded: boolean;
   occClear: number;
+  /** Selected or viewer resident (written by the layer's LOD pass): never hidden indoors. */
+  forced: boolean;
+  /** Asleep inside their home: the avatar is hidden (camera fit, labels and bubbles skip it); a Zzz drifts from the door. */
+  indoors: boolean;
 }
 
 /** Shared rate limit for distress emotes (clouds, Zzz puffs, "…", sad faces): ~0.7/s, burst 3. */
@@ -1156,9 +1160,14 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
       lodRank.length = 0;
       for (const h of registry.values()) lodRank.push({ id: h.id, d: h.pos.distanceTo(camera.position) });
       lodRank.sort((a, b) => a.d - b.d);
-      lodRank.forEach((r, i) => {
+      let nShadow = 0;
+      lodRank.forEach((r) => {
         const cur = lodBus.lod.get(r.id) ?? 'mid';
         const forced = r.id === selectedResidentId || r.id === viewerResidentId;
+        const h = registry.get(r.id);
+        if (h) h.forced = forced;
+        // Asleep indoors (hidden): keep the current rig (no rebuild churn at bedtime) without using a detail or shadow slot.
+        if (h?.indoors && !forced) return;
         const highLimit = cur === 'high' ? highDist + TIER_HYST : highDist;
         const midLimit = cur === 'low' ? midDist : midDist + TIER_HYST;
         let next: AvatarLod = 'low';
@@ -1166,9 +1175,8 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
         else if (nHigh < maxHigh && r.d < highLimit) { next = 'high'; nHigh++; }
         else if (nMid < maxMid && r.d < midLimit) { next = 'mid'; nMid++; }
         lodBus.set(r.id, next);
-        // Shadow budget: at 'low' only the nearest few cast real shadows (others: blob discs).
-        const h = registry.get(r.id);
-        if (h) { h.shadowOn = quality !== 'low' || i < SHADOW_CASTERS_LOW; applyShadow(h); }
+        // Shadow budget: at 'low' only the nearest few visible residents cast real shadows (others: blob discs).
+        if (h) { h.shadowOn = quality !== 'low' || nShadow++ < SHADOW_CASTERS_LOW; applyShadow(h); }
       });
     }
 
@@ -1280,7 +1288,7 @@ const Resident = memo(function Resident(p: ResidentProps) {
       animator: null, visible: true, reaction: null, faceTarget: null,
       plateCand: false, plateAllowed: false, platePx: NAMEPLATE_MIN_PX, plateAspect: 3, plateY: 2, lastActorAt: -1e9, raidCollapsed: false,
       rigRoot: null, shadowOn: true, shadowApplied: null, plateNudgePx: 0,
-      plateSprite: null, platePxPerM: 600, plateShow: false, occluded: false, occClear: 0,
+      plateSprite: null, platePxPerM: 600, plateShow: false, occluded: false, occClear: 0, forced: false, indoors: false,
       play(g, delay = 0) {
         if (delay > 0) { setTimeout(() => h.animator?.playGesture(g), delay * 1000); return; }
         h.animator?.playGesture(g);
@@ -1437,7 +1445,11 @@ const Resident = memo(function Resident(p: ResidentProps) {
     }
     _sphere.center.set(pos.x, pos.y + 0.9, pos.z); _sphere.radius = 1.3;
     const onScreen = _frustum.intersectsSphere(_sphere);
-    handle.visible = onScreen && camDist < 90;
+    // --- Asleep indoors: a sleeper who has reached their porch goes inside. The avatar is hidden (the overlay fit,
+    // labels and bubbles skip it) and a slow Zzz drifts from the door; the selected/viewer resident stays visible.
+    const indoors = s.family === 'sleep' && !handle.forced && s.estSpeed < 0.3 && dist < 0.6;
+    if (indoors !== handle.indoors) { handle.indoors = indoors; g.visible = !indoors; }
+    handle.visible = onScreen && camDist < 90 && !indoors;
 
     const plateS = plateRef.current;
     if (plateS) {
@@ -1464,6 +1476,13 @@ const Resident = memo(function Resident(p: ResidentProps) {
       handle.platePx = px; handle.plateAspect = aspect; handle.plateY = baseY; handle.platePxPerM = pxPerM;
     }
 
+    if (indoors) {
+      if (onScreen && camDist < 40 && (s.emoteTimer -= dt) <= 0) {
+        emotes.spawn('zzz', pos.x, pos.y + 2.05, pos.z, 1, 0.04, 0.8);
+        s.emoteTimer = 3.5 + Math.random() * 2;
+      }
+      return;
+    }
     const anim = handle.animator;
     if (!anim) return;
     s.accDt += dt;

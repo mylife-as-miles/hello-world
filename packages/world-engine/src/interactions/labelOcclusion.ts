@@ -7,7 +7,8 @@
  *  - the dance stage (platform + speaker stacks),
  *  - the raid portal (stone ring + swirl disc, side pillars),
  *  - tagged town props from `getCameraProps()` (tree canopies with their `minY` band, umbrellas,
- *    planters …). Thin props (lamp posts, stage poles: r < THIN_PROP_RADIUS) are ignored.
+ *    planters …). Thin props (lamp posts, stage poles: r < THIN_PROP_RADIUS) and see-through `canopy`
+ *    spans (stage string lights) are ignored.
  */
 import { BUILDINGS, getPoi } from '../world/layout';
 import type { CameraProp } from '../scene/cameraPose';
@@ -161,7 +162,8 @@ export function labelSightBlocked(
     const minX = Math.min(ax, bx), maxX = Math.max(ax, bx), minZ = Math.min(az, bz), maxZ = Math.max(az, bz);
     for (let i = 0; i < props.length; i++) {
       const p = props[i]!;
-      if (p.r < THIN_PROP_RADIUS) continue;
+      // Thin posts never hide a name; `canopy` spans (stage string lights) are sparse, residents dance under them.
+      if (p.r < THIN_PROP_RADIUS || p.canopy) continue;
       const r = p.r * PROP_RADIUS_SCALE;
       if (p.x + r < minX || p.x - r > maxX || p.z + r < minZ || p.z - r > maxZ) continue;
       const y0 = p.minY ?? (p.r >= 1 ? p.h * DEFAULT_CANOPY_FRACTION : 0);

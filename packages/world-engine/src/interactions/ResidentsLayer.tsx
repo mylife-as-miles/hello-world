@@ -15,7 +15,7 @@ import { useAvatarRig, type AvatarLod } from '../avatars/index';
 import { hashString } from '../avatars/catalog';
 import { animationForVerb, parseActivityVerb, type AnimationFamily } from '../world/activities';
 import { findSeatNear, getPoi } from '../world/layout';
-import { getCameraProps } from '../scene/cameraPose';
+import { getCameraProps, type CameraProp } from '../scene/cameraPose';
 import { AvatarAnimator, RUN_SPEED, WALK_SPEED, type GestureName } from './animation/AvatarAnimator';
 import { EmoteSystem, GiftSystem, InstancedEmoteSystem, makeBlobTexture, makeNameplateTexture, type EmoteKind } from './effects';
 import { labelSightBlocked, PORTAL_LABEL_OCCLUDERS, WORLD_LABEL_OCCLUDERS, type LabelOccluder } from './labelOcclusion';
@@ -52,7 +52,7 @@ const BUBBLE_MAX_VISIBLE_OVERLAY = 3;
 const BUBBLE_STACK_GAP = 6;
 /** Bubble safe area: viewport inset (px); HUD/banner/inspector rects are excluded too. */
 const SAFE_MARGIN = 12;
-const MAX_OBSTACLES = 8;
+const MAX_OBSTACLES = 16;
 /** Labels may slide below a bubble by at most this much (px) — farther would detach them from the body. */
 const LABEL_MAX_NUDGE = 42;
 
@@ -60,6 +60,10 @@ const LABEL_MAX_NUDGE = 42;
 const OCCLUSION_CLEAR_CHECKS = 2;
 /** Nameplates the 20 Hz declutter keeps as candidates beyond the cap (some hide under bubbles per frame). */
 const PLATE_SPARE = 4;
+/** Bubble obstacle capacities (HUD rects + protected labels + placed bubbles / other labels). */
+const HARD_CAP = 40;
+const SOFT_CAP = 16;
+const NO_OCCLUDERS: readonly LabelOccluder[] = [];
 const BUBBLE_MAX_DISTANCE = 45;
 /** On-screen bubble scale clamp (base text 14 px → never below 14 px, never huge up close). */
 const BUBBLE_MIN_SCALE = 1;
@@ -340,12 +344,19 @@ function collectObstacles(canvas: HTMLElement, out: Float32Array, worldMode: boo
   let hud = false;
   if (root) {
     const els = root.querySelectorAll('.hw-insp, [data-testid="world-hud"], [data-testid="world-event-banner"], [data-hud]');
+    const add = (r: DOMRect) => {
+      if (r.width <= 0 || r.height <= 0 || n >= MAX_OBSTACLES) return;
+      const o = n * 4; out[o] = r.left - 6; out[o + 1] = r.right + 6; out[o + 2] = r.top - 6; out[o + 3] = r.bottom + 6; n++;
+    };
     for (let i = 0; i < els.length && n < MAX_OBSTACLES; i++) {
       const el = els[i]!;
-      const r = el.getBoundingClientRect();
-      if (r.width <= 0 || r.height <= 0) continue;
       if (el.matches('[data-testid="world-hud"], [data-hud]')) hud = true;
-      const o = n * 4; out[o] = r.left - 6; out[o + 1] = r.right + 6; out[o + 2] = r.top - 6; out[o + 3] = r.bottom + 6; n++;
+      // The banner wrapper spans the full width (a column of centred toasts): avoid the toasts, not the strip.
+      if (el.matches('[data-testid="world-event-banner"]')) {
+        for (let k = 0; k < el.children.length && n < MAX_OBSTACLES; k++) { const ch = el.children[k]!; if (ch.tagName !== 'STYLE') add(ch.getBoundingClientRect()); }
+        continue;
+      }
+      add(el.getBoundingClientRect());
     }
   }
   if (worldMode && !hud && n < MAX_OBSTACLES) { const o = n * 4; out[o] = crL + W - 360; out[o + 1] = crL + W; out[o + 2] = crT; out[o + 3] = crT + 90; n++; }
@@ -1161,48 +1172,23 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
       if (recentGifts.length > 8) recentGifts.shift();
     }
 
-    // Raid chips follow their group; keep their on-screen size readable.
+    // Raid chips follow their group; keep their on-screen size readable (visibility: finalizePlates).
     for (let ci = 0; ci < raidChips.length; ci++) {
       const chip = raidChips[ci]!;
-      chip.sprite.visible = !domPlates && chip.active && chip.allowed;
       if (!chip.active) continue;
       const pxPerM = frameCacheLayer(state, camera) / Math.max(1, chip.pos.distanceTo(camera.position));
       chip.px = Math.min(NAMEPLATE_MAX_PX, Math.max(NAMEPLATE_MIN_PX, NAMEPLATE_WORLD_H * pxPerM));
+      chip.pxPerM = pxPerM;
       const sc = chip.px / pxPerM;
       chip.sprite.scale.set(sc * chip.aspect, sc, 1);
-      chip.sprite.position.copy(chip.pos);
-      chip.sprite.position.y -= chip.nudgePx / pxPerM;
     }
 
-    // Nameplate declutter + raid collapse (~10 Hz).
+    // Nameplate declutter + occlusion + raid collapse (~20 Hz).
     if ((c.plateTimer -= dt) <= 0) {
       c.plateTimer = 0.05;
       updateRaidGroups();
       declutterPlates();
     }
-    if (domPlates) {
-      const W = state.size.width, H = state.size.height;
-      for (let i = 0; i < domPlates.els.length; i++) {
-        const el = domPlates.els[i]!;
-        const h = i < domPlates.n ? domPlates.aH[i]! : null, chip = i < domPlates.n ? domPlates.aC[i]! : null;
-        if (!h && !chip) { if (el.style.display !== 'none') el.style.display = 'none'; domPlates.kH[i] = null; domPlates.kC[i] = null; continue; }
-        if (h) _v.set(h.pos.x, h.pos.y + h.plateY, h.pos.z); else if (chip) _v.copy(chip.pos);
-        _v.project(camera);
-        if (_v.z > 1) { el.style.display = 'none'; continue; }
-        const col = !!h && hub.collapsed.has(h.id);
-        if (domPlates.kH[i] !== h || domPlates.kC[i] !== chip || domPlates.kCol[i] !== col || (chip && chip.text !== domPlates.kText[i])) {
-          domPlates.kH[i] = h; domPlates.kC[i] = chip; domPlates.kCol[i] = col;
-          const label = h ? `${store.getResident(h.id)?.displayName ?? ''}${col ? ' …' : ''}` : chip?.text ?? '';
-          domPlates.kText[i] = label;
-          el.textContent = label;
-          el.className = `hw-plate${h && h.id === viewerResidentId ? ' hw-me' : ''}${chip ? ' hw-chip' : ''}`;
-        }
-        if (el.style.display === 'none') el.style.display = '';
-        const ny = h ? h.plateNudgePx : chip?.nudgePx ?? 0;
-        el.style.transform = `translate3d(${(((_v.x + 1) / 2) * W).toFixed(1)}px,${(((1 - _v.y) / 2) * H + ny).toFixed(1)}px,0) translate(-50%,-50%)`;
-      }
-    }
-
 
     hub.tick(c.now);
     c.W = state.size.width; c.H = state.size.height;
@@ -1213,7 +1199,10 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
       c.crL = cr.left; c.crT = cr.top;
       c.nObs = collectObstacles(gl.domElement, obsRects, !overlayRef.current, c.crL, c.crT, c.W);
     }
+    // Same frame, same projection: labels (obstacles) → bubbles → final labels against the drawn bubbles.
+    projectPlates();
     layoutBubbles(dt);
+    finalizePlates(state.size.width, state.size.height);
 
   });
 
@@ -1278,6 +1267,7 @@ const Resident = memo(function Resident(p: ResidentProps) {
       animator: null, visible: true, reaction: null, faceTarget: null,
       plateCand: false, plateAllowed: false, platePx: NAMEPLATE_MIN_PX, plateAspect: 3, plateY: 2, lastActorAt: -1e9, raidCollapsed: false,
       rigRoot: null, shadowOn: true, shadowApplied: null, plateNudgePx: 0,
+      plateSprite: null, platePxPerM: 600, plateShow: false, occluded: false, occClear: 0,
       play(g, delay = 0) {
         if (delay > 0) { setTimeout(() => h.animator?.playGesture(g), delay * 1000); return; }
         h.animator?.playGesture(g);
@@ -1447,7 +1437,8 @@ const Resident = memo(function Resident(p: ResidentProps) {
         plateMat.map = col && plateAlt.current ? plateAlt.current.texture : plate.texture;
         plateMat.needsUpdate = true;
       }
-      plateS.visible = !p.domPlates && handle.plateCand && handle.plateAllowed;
+      // Visibility + nudge are written by the layer (finalizePlates) in the same frame as the bubble layout.
+      handle.plateSprite = plateS;
       plateMat.opacity = fade;
       // Readable in wide shots: clamp the on-screen pill height, keep depth cue in between.
       const pxPerM = frameCache.pxk / Math.max(1, camDist);
@@ -1456,9 +1447,8 @@ const Resident = memo(function Resident(p: ResidentProps) {
       const aspect = plateCol.current && plateAlt.current ? plateAlt.current.aspect : plate.aspect;
       plateS.scale.set(sc * aspect, sc, 1);
       const baseY = handle.height + 0.16 + sc * 0.55 - (seated ? 0.42 : 0);
-      // Declutter projects the un-nudged spot (no feedback loop); the sprite shows the nudged one.
-      plateS.position.y = baseY - handle.plateNudgePx / pxPerM;
-      handle.platePx = px; handle.plateAspect = aspect; handle.plateY = baseY;
+      // Declutter projects the un-nudged spot (no feedback loop); the layer places the sprite at the nudged one.
+      handle.platePx = px; handle.plateAspect = aspect; handle.plateY = baseY; handle.platePxPerM = pxPerM;
     }
 
     const anim = handle.animator;
@@ -1509,27 +1499,6 @@ const Resident = memo(function Resident(p: ResidentProps) {
   return <group ref={groupRef} name={`resident:${id}`}>
     {rig && <primitive object={rig.root} />}
     <mesh geometry={hit.geo} material={hit.mat} position={[0, 0.85, 0]} onClick={onClick} onPointerOver={onOver} onPointerOut={onOut} />
-    <sprite ref={plateRef} material={plateMat} renderOrder={40} raycast={() => null} />
-    <SpeechBubble hub={hub} id={id} height={handle.height} isViewer={p.isViewer} />
+    <sprite ref={plateRef} material={plateMat} renderOrder={40} visible={false} raycast={() => null} />
   </group>;
 });
-
-/**
- * Bubble DOM. No drei `distanceFactor`: the layer writes a clamped `--s`
- * scale every frame so text never drops below ~14 px in wide shots.
- */
-function SpeechBubble({ hub, id, height, isViewer }: { hub: BubbleHub; id: string; height: number; isViewer: boolean }) {
-  const [b, setB] = useState<BubbleData | null>(null);
-  useEffect(() => hub.subscribe(id, setB), [hub, id]);
-  if (!b) return null;
-  const cls = `hw-bubble${b.sim ? ' hw-sim' : ''}${isViewer ? ' hw-me' : ''}`;
-  // Hidden until the layout pass places it (opacity is driven by the layer).
-  return <Html position={[0, height + 0.42, 0]} center={false} zIndexRange={[30, 10]}
-    style={{ pointerEvents: 'none', transform: 'translateX(-50%)' }}>
-    <div key={b.key} className={cls} style={{ opacity: 0 }}
-      ref={el => { const L = hub.layout.get(id); if (el && L) { L.el = el; L.wsc = NaN; L.wdx = NaN; L.wdy = NaN; L.wop = NaN; } }}>
-      <span className="hw-name">{b.name}</span>{b.text}<i className="hw-stem" />
-    </div>
-  </Html>;
-
-}

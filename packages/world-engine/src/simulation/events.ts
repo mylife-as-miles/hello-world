@@ -96,6 +96,8 @@ export function joinResident(w: World, id: string, name: string, payload: WorldE
     joinedAt: Math.floor(w.now), lastActiveAt: Math.floor(w.now),
   });
   a.needsWelcome = true;
+  // A fresh arrival explores for about an hour before following the night routine (joins at 2 AM still get to look around).
+  a.awakeUntil = w.simTime + 75;
   w.agents.set(id, a);
   arrive(w, a);
   return a;
@@ -119,7 +121,12 @@ export function reactToNewLook(w: World, a: Agent): void {
 function actorOf(w: World, e: WorldEvent, autoJoin: boolean): Agent | null {
   const a = w.agents.get(e.actorId);
   if (a) {
-    if (e.source !== 'simulation') { a.lastActiveAt = Math.max(a.lastActiveAt, Math.floor(w.now)); if (e.actorDisplayName && e.actorDisplayName !== a.displayName && e.kind !== 'raid') a.displayName = cleanText(e.actorDisplayName, 40) || a.displayName; }
+    if (e.source !== 'simulation') {
+      a.lastActiveAt = Math.max(a.lastActiveAt, Math.floor(w.now));
+      if (e.actorDisplayName && e.actorDisplayName !== a.displayName && e.kind !== 'raid') a.displayName = cleanText(e.actorDisplayName, 40) || a.displayName;
+      // An active viewer's resident stays up a little while after acting (night routine resumes afterwards).
+      a.awakeUntil = Math.max(a.awakeUntil, w.simTime + 20);
+    }
     return a;
   }
   return autoJoin ? joinResident(w, e.actorId, e.actorDisplayName, e.payload, false) : null;

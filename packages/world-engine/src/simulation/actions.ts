@@ -13,7 +13,7 @@ import { atPlace, freeSeat, hasFreeSeat, pickSpot, placeName, poi, pushOut, SEAT
 import { pathLength, planPath, RUN_SPEED, WALK_SPEED, meetingPoint } from './movement';
 import type { Temperament } from './personality';
 import { friendshipOf, removeRelationshipsOf } from './relationships';
-import { bedBound, deepNight, minutesUntilWake, nightCalmFactor, nightDanceOk, nightSleepAction, nightSleepHours, nightSleeper, sleepSpot } from './night';
+import { bedBound, bedtimeOf, deepNight, minutesUntilWake, nightCalmFactor, nightDanceOk, nightSleepAction, nightSleepHours, nightSleeper, sleepSpot } from './night';
 import { dist, emit, NO_EFFECT, type Action, type ActionType, type Agent, type Needs, type World } from './state';
 
 export interface ActionDef {
@@ -142,7 +142,8 @@ function sleepScore(w: World, a: Agent, c: WorldClock): number | null {
   const owl = a.temperament.nightOwl > 0.5;
   const e = a.needs.energy;
   let s: number;
-  if (c.period === 'night' && !owl) s = 0.25 + urgency(e) * 1.6;
+  // Before their bedtime only genuinely tired residents turn in early; after it, sleep wins easily.
+  if (c.period === 'night' && !owl) s = (c.hours < 12 || c.hours >= bedtimeOf(a) - 0.5 ? 0.25 : 0) + urgency(e) * 1.6;
   else if (owl && c.period === 'morning') s = 0.05 + urgency(e) * 1.2;
   else if (e < 15) s = urgency(e) * 1.1;
   else return null;
@@ -315,7 +316,7 @@ export function travelPhrase(p: PoiDef, type: ActionType, run: boolean): string 
 
 export function startChoice(w: World, a: Agent, choice: Choice, c: WorldClock, priority = 0, forceRun = false): boolean {
   const { def, poi: p } = choice;
-  if (def.type === 'sleep' && p.id === a.homeId && nightSleepHours(a, c.hours) !== null) {
+  if (def.type === 'sleep' && p.id === a.homeId && nightSleepHours(w, a, c.hours) !== null) {
     startNightSleep(w, a, c, priority);
     a.lastPoiId = p.id;
     a.lastType = 'sleep';
@@ -330,7 +331,8 @@ export function startChoice(w: World, a: Agent, choice: Choice, c: WorldClock, p
     spot = { x: s.seat.x, z: s.seat.z };
   } else spot = pickSpot(w, p, a, def.groundSit(p));
   const remaining = w.rng.range(def.duration[0], def.duration[1], 'dur', a.id);
-  const run = forceRun || (dist(a, spot) > 26 && (a.temperament.speed > 1.05 || a.needs.energy > 80));
+  // Nobody jogs across town in the quiet hours (raid crowds excepted).
+  const run = forceRun || (dist(a, spot) > 26 && (a.temperament.speed > 1.05 || a.needs.energy > 80) && (a.visitor || !deepNight(c.hours)));
   interrupt(w, a);
   startAction(w, a, {
     type: def.type, phase: 'travel', travelActivity: travelPhrase(p, def.type, run), activity: def.phrase(w, a, p, c),

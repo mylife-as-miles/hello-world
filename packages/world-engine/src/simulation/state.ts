@@ -97,6 +97,8 @@ export interface Agent {
   awakeUntil: number;
   /** Night index of this resident's last restless spell (one per night at most). */
   restlessNight?: number;
+  /** Night index this resident last took part in (went to bed, or — night owls — was up through it). Mornings only continue such a night. */
+  nightSeen?: number;
 }
 
 export type EncounterKind = 'greet' | 'chat' | 'compliment' | 'gift' | 'befriend' | 'bicker' | 'makeup';

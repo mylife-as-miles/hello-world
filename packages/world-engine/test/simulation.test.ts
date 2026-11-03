@@ -642,3 +642,153 @@ describe('simulation: contract events', () => {
     expect(extra).toBeGreaterThan(0);
   });
 });
+
+describe('simulation: night routine', () => {
+  const hourOf = (simTime: number) => (simTime / 60 + 8) % 24;
+  const asleep = (r: { activity: string }) => r.activity.startsWith('sleeping');
+  const owl = (r: { personality: string[] }) => r.personality.includes('night-owl');
+
+  it('over 2 game days most locals sleep 23:00–05:00, a small calm night shift stays up, and mornings wake gradually', () => {
+    const { rt, tick } = runtime();
+    let nightN = 0, nightAsleep = 0, minAwake = Infinity, maxOthersUp = 0, walkedThenSlept = 0;
+    const lowDance: string[] = [], deepDance: string[] = [], noisyPlay: string[] = [], tiredOut: string[] = [];
+    const awakeAt = new Map<number, number>();
+    const prev = new Map<string, string>();
+    for (let i = 1; i <= 2 * 2880; i++) { // 2 game days from 08:00, no viewer events
+      tick(1);
+      if (i % 4) continue;
+      const s = rt.getSnapshot();
+      const h = hourOf(s.simulationTime);
+      const locals = s.residents.filter(r => !r.id.startsWith('raid:'));
+      for (const r of locals) {
+        const p = prev.get(r.id);
+        if (p?.startsWith('walking home to ') && r.activity === `sleeping at ${p.slice('walking home to '.length)}`) walkedThenSlept++;
+        prev.set(r.id, r.activity);
+      }
+      if ([1320, 1380, 1470, 1560].includes(s.simulationTime)) awakeAt.set(s.simulationTime, locals.filter(r => !asleep(r)).length / locals.length);
+      if (!(h >= 23 || h < 5)) continue;
+      const awake = locals.filter(r => !asleep(r));
+      nightN += locals.length;
+      nightAsleep += locals.length - awake.length;
+      minAwake = Math.min(minAwake, awake.length);
+      maxOthersUp = Math.max(maxOthersUp, awake.filter(r => !owl(r) && !r.activity.startsWith('walking home')).length);
+      for (const r of awake) {
+        const tag = `${h.toFixed(2)} ${r.displayName} e${r.needs.energy} ${r.activity}`;
+        if (r.activity.startsWith('dancing') && r.needs.energy < 40) lowDance.push(tag);
+        // 00:00–05:00: only rested night owls dance on their own; nobody plays frisbee or swings.
+        if (h < 5 && r.activity.startsWith('dancing') && !(owl(r) && r.needs.energy >= 48)) deepDance.push(tag);
+        if (h < 5 && /^playing .*(Playground|Willow Park)/.test(r.activity)) noisyPlay.push(tag);
+        // Tired neighbours (energy < 40) head home instead of chatting or dancing.
+        if (!owl(r) && r.needs.energy < 40 && /^(chatting|dancing|playing)/.test(r.activity)) tiredOut.push(tag);
+      }
+    }
+    expect(nightAsleep / nightN).toBeGreaterThanOrEqual(0.55); // (a) the majority sleeps
+    expect(lowDance).toEqual([]); // (b) no low-energy dancing in the quiet hours
+    expect(deepDance).toEqual([]);
+    expect(noisyPlay).toEqual([]);
+    expect(tiredOut).toEqual([]);
+    expect(minAwake).toBeGreaterThanOrEqual(2); // never deserted: night owls + a small shift
+    expect(maxOthersUp).toBeLessThanOrEqual(3);
+    expect(walkedThenSlept).toBeGreaterThanOrEqual(13); // "walking home to …" then "sleeping at …"
+    // (c) mornings: staggered wake-ups fill the town, ≥ 70 % awake by 10:00.
+    const [a6, a7, a830, a10] = [1320, 1380, 1470, 1560].map(t => awakeAt.get(t)!);
+    expect(a6).toBeLessThan(0.5);
+    expect(a7).toBeGreaterThan(a6!);
+    expect(a830).toBeGreaterThan(a7!);
+    expect(a10).toBeGreaterThanOrEqual(0.7);
+  });
+
+  it('bedtime and mornings are spoken now and then (goodnight / can’t sleep / good morning), rate-limited', () => {
+    const { rt, tick } = runtime();
+    const seen = new Map<string, { t: number; text: string }>();
+    for (let i = 0; i < 2 * 1500; i++) { // 08:00 → ~09:00 next day
+      tick(1);
+      for (const e of rt.getSnapshot().eventHistory) {
+        const r = String(e.payload?.reaction);
+        if (e.source === 'simulation' && ['goodnight', 'restless', 'good-morning'].includes(r) && !seen.has(e.id)) seen.set(e.id, { t: rt.getSnapshot().simulationTime, text: `${r}|${e.kind}|${e.text}` });
+      }
+    }
+    const kinds = new Set([...seen.values()].map(v => v.text.split('|')[0]));
+    expect(kinds.has('goodnight')).toBe(true);
+    expect(kinds.has('good-morning')).toBe(true);
+    for (const v of seen.values()) { expect(v.text.split('|')[1]).toBe('chat'); expect(v.text.split('|')[2]!.length).toBeGreaterThan(5); }
+    expect(seen.size).toBeLessThan(40);
+  });
+
+  it('viewer events still work at 2 AM: a join walks out of the portal and is greeted by someone awake; greeting a sleeper leaves an "asleep" memory', () => {
+    const { rt, c, tick } = runtime();
+    tick(2 * 1080); // → 02:00
+    const before = rt.getSnapshot();
+    expect(hourOf(before.simulationTime)).toBeCloseTo(2, 3);
+    rt.dispatch(ev('join', 'tw:moth', 'Moth', {}, c.now()));
+    let me = rt.getSnapshot().residents.find(r => r.id === 'tw:moth')!;
+    expect(me.activity).toBe('arriving through the portal');
+    expect(Math.hypot(me.location.x - SPAWN_POINT.x, me.location.z - SPAWN_POINT.z)).toBeLessThan(2.5);
+    let hello: WorldEvent | undefined, welcome: WorldEvent | undefined;
+    for (let i = 0; i < 160 && !welcome; i++) {
+      tick(1);
+      const s = rt.getSnapshot();
+      hello ??= s.eventHistory.find(e => e.source === 'simulation' && e.actorId === 'tw:moth' && e.payload?.reaction === 'hello');
+      if (hello) welcome = s.eventHistory.find(e => e.source === 'simulation' && e.actorId === hello!.targetId && e.targetId === 'tw:moth' && e.payload?.action === 'greet');
+      if (hello && !welcome) expect(asleep(s.residents.find(r => r.id === hello!.targetId)!)).toBe(false);
+    }
+    expect(hello).toBeTruthy();
+    expect(welcome).toBeTruthy();
+    me = rt.getSnapshot().residents.find(r => r.id === 'tw:moth')!;
+    expect(asleep(me)).toBe(false); // a fresh arrival looks around before bed
+    // A greeting to a sleeper: no reply, an "asleep" memory, and they keep sleeping.
+    const sleeper = rt.getSnapshot().residents.find(r => r.id.startsWith('seed:') && asleep(r))!;
+    expect(sleeper).toBeTruthy();
+    c.advance(2000);
+    rt.dispatch(ev('social', 'tw:moth', 'Moth', { targetId: sleeper.id, payload: { action: 'greet' } }, c.now()));
+    const s2 = rt.getSnapshot();
+    const rel = s2.relationships.find(r => [r.residentA, r.residentB].sort().join('|') === [sleeper.id, 'tw:moth'].sort().join('|'))!;
+    expect(rel.memories.some(m => /(tiptoed past a sleeping|tried to wake|fast asleep)/.test(m))).toBe(true);
+    expect(asleep(s2.residents.find(r => r.id === sleeper.id)!)).toBe(true);
+    // A gift wakes them up smiling; afterwards they go back to bed.
+    c.advance(3000);
+    rt.dispatch(ev('gift', 'tw:moth', 'Moth', { targetId: sleeper.id, payload: { item: 'moon cake' } }, c.now()));
+    let thanked = false, backToBed = false;
+    for (let i = 0; i < 240 && !backToBed; i++) {
+      tick(1);
+      const s = rt.getSnapshot();
+      thanked ||= s.eventHistory.some(e => e.source === 'simulation' && e.actorId === sleeper.id && e.payload?.reaction === 'thanks');
+      const r = s.residents.find(x => x.id === sleeper.id)!;
+      if (thanked && /^(walking home to|sleeping at)/.test(r.activity)) backToBed = true;
+    }
+    expect(thanked).toBe(true);
+    expect(rt.getSnapshot().relationships.some(r => r.memories.some(m => /woke up smiling/.test(m)))).toBe(true);
+    expect(backToBed).toBe(true);
+  });
+
+  it('a viewer dance at night still makes residents dance; raid visitors at night never sleep and still leave in waves', () => {
+    const { rt, c, tick } = runtime();
+    tick(2 * 1140); // → 03:00
+    rt.dispatch(ev('dance', 'tw:dj', 'DJ', {}, c.now()));
+    expect(rt.getSnapshot().residents.find(r => r.id === 'tw:dj')!.activity).toMatch(/^(dancing|arriving)/);
+    c.advance(2000);
+    rt.dispatch(ev('raid', 'tw:owlcast', 'OwlCast', { id: 'raid-night', payload: { amount: 30, channel: 'OwlCast' } }, c.now()));
+    let maxVisitors = 0;
+    for (let i = 0; i < 2 * 320; i++) {
+      tick(1);
+      const vs = rt.getSnapshot().residents.filter(r => r.id.startsWith('raid:raid-night:'));
+      maxVisitors = Math.max(maxVisitors, vs.length);
+      for (const v of vs) expect(v.activity.startsWith('sleeping') || v.activity.startsWith('walking home')).toBe(false);
+    }
+    expect(maxVisitors).toBe(12);
+    expect(rt.getSnapshot().residents.filter(r => r.id.startsWith('raid:')).length).toBe(0);
+  });
+
+  it('a snapshot restored at night keeps sleepers asleep in place', () => {
+    const { rt, tick } = runtime();
+    tick(2 * 1100); // → 02:20
+    const snap = JSON.parse(JSON.stringify(rt.getSnapshot())) as WorldSnapshot;
+    const sleepers = snap.residents.filter(asleep);
+    expect(sleepers.length).toBeGreaterThanOrEqual(6);
+    const { rt: rt2, tick: tick2 } = runtime({ initialSnapshot: snap });
+    tick2(2 * 60);
+    const after = rt2.getSnapshot().residents;
+    const still = sleepers.filter(s => { const r = after.find(x => x.id === s.id)!; return asleep(r) && Math.hypot(r.location.x - s.location.x, r.location.z - s.location.z) < 0.5; });
+    expect(still.length).toBeGreaterThanOrEqual(sleepers.length - 1);
+  });
+});

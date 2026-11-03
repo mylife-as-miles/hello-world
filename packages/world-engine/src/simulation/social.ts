@@ -12,6 +12,8 @@ import { complimentThing, GIFT_ITEMS, lines, memoryLine, pickTopic, placeVars, r
 import { meetingPoint, WALK_SPEED } from './movement';
 import { bump, feel, isSleeping, urgency } from './needs';
 import { atPlace, homeFor, nearestPoi, spotAround } from './places';
+import { bedBound, nightSleeper } from './night';
+import { worldClock } from '../world/time';
 import { addMemory, adjustFriendship, friendshipOf, getRel, pairKey, reactsPositively } from './relationships';
 import { cleanText, dist, emit, schedule, type Agent, type Encounter, type EncounterKind, type PlannedLine, type World } from './state';
 
@@ -22,9 +24,9 @@ const COLD_EFFECTS = { energy: 0, social: 0.1, fun: -0.1 };
 export function socialAvailable(w: World, a: Agent): boolean {
   if (a.leaving || w.simTime < a.socialReadyAt || a.needs.energy < 15) return false;
   const act = a.action;
-  if (!act) return true;
-  if (act.type === 'sleep' || act.type === 'converse' || act.priority > 0) return false;
-  return true;
+  if (act && (act.type === 'sleep' || act.type === 'converse' || act.priority > 0)) return false;
+  // Residents on their way to bed don't get pulled into new chats.
+  return !bedBound(w, a, worldClock(w.simTime).hours);
 }
 
 function seated(a: Agent): boolean { return !!a.action?.seatKey && a.action.phase === 'perform'; }
@@ -331,22 +333,40 @@ export function startWelcomeWalk(w: World, a: Agent): void {
 function newcomerHello(w: World, a: Agent): void {
   let local: Agent | null = null;
   let bd = 14;
+  // Late at night the plaza may be empty: the nearest neighbour who is up (within ~50 m) walks over instead.
+  let far: Agent | null = null;
+  let fd = 50;
+  const h = worldClock(w.simTime).hours;
   for (const o of w.agents.values()) {
-    if (o === a || o.visitor || o.leaving || isSleeping(o) || (o.action && o.action.priority >= 2)) continue;
+    if (o === a || o.visitor || o.leaving || isSleeping(o) || nightSleeper(o) || (o.action && o.action.priority >= 2)) continue;
     const d = dist(a, o);
     if (d < bd) { bd = d; local = o; }
+    if (d < fd && !bedBound(w, o, h) && o.action?.type !== 'converse') { fd = d; far = o; }
   }
   w.facts.newcomer = { name: a.displayName, at: w.simTime };
-  if (!local || w.simTime - w.facts.lastWelcomeAt < 4) return;
+  if ((!local && !far) || w.simTime - w.facts.lastWelcomeAt < 4) return;
   w.facts.lastWelcomeAt = w.simTime;
-  const L = local;
+  const L = (local ?? far)!;
   const at = atPlace(nearestPoi(a.x, a.z));
   if (a.action) a.action.activity = `waving at ${L.displayName}`;
   a.activity = `waving at ${L.displayName}`;
   const rejoin = !!getRel(w, a.id, L.id);
   emit(w, 'wave', a, { target: L, text: lines.newcomerHello(w, a, rejoin, placeVars(w, a, L, at)), payload: { reaction: 'hello', sentiment: 'positive' } });
-  schedule(w, 1.4, w2 => {
-    const A = w2.agents.get(a.id), B = w2.agents.get(L.id);
+  if (!local) {
+    // The newcomer keeps waving while the neighbour comes over, then they meet face to face.
+    const d = dist(a, L);
+    gesture(w, a, `waving at ${L.displayName}`, Math.min(30, d / (WALK_SPEED * L.temperament.speed) + 5), { priority: 1 });
+    goThen(w, L, meetingPoint(a, L, 1.3, `${L.id}|welcome`), `walking to ${a.displayName}`, `greeting ${a.displayName}`, 3, {
+      priority: 1, onArrive: w2 => welcomeReply(w2, a.id, L.id, at),
+    });
+    return;
+  }
+  schedule(w, 1.4, w2 => welcomeReply(w2, a.id, L.id, at));
+}
+
+function welcomeReply(w2: World, newcomerId: string, localId: string, at: string): void {
+  {
+    const A = w2.agents.get(newcomerId), B = w2.agents.get(localId);
     if (!A || !B || isSleeping(B) || B.leaving) return;
     const positive = reactsPositively(w2, B, A, 'greet');
     if (!(B.action && B.action.priority >= 2)) gesture(w2, B, `greeting ${A.displayName}`, 3, { priority: 1 });
@@ -355,5 +375,5 @@ function newcomerHello(w: World, a: Agent): void {
     addMemory(w2, B, A, memoryLine(w2, 'welcome', positive, { a: B.displayName, b: A.displayName, at }));
     bump(A, { social: 6, fun: 3 });
     bump(B, { social: 4 });
-  });
+  }
 }

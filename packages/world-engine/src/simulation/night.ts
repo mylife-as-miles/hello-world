@@ -65,19 +65,26 @@ export function inSleepWindow(a: Agent, h: number): boolean {
   return bed > wake ? h >= bed || h < wake : h >= bed && h < wake;
 }
 
-/** A local resident who should be on the way to bed / asleep now (not on a restless spell or freshly arrived). */
+/** Mornings (05:00–12:00) only continue a night this resident actually had — a fresh 08:00 world starts awake. */
+const nightOf = (w: World, a: Agent, h: number) => !(h >= 5 && h < 12) || a.nightSeen === nightIndex(w.simTime);
+
+/**
+ * A local resident who should be on the way to bed / asleep now. Restless spells, fresh arrivals and active
+ * viewers may stay up (`awakeUntil`) — unless they are tired (energy < 40), then it's bed after all.
+ */
 export function bedBound(w: World, a: Agent, h: number): boolean {
-  if (a.visitor || a.leaving || w.simTime < a.awakeUntil || !inSleepWindow(a, h)) return false;
+  if (a.visitor || a.leaving || (w.simTime < a.awakeUntil && a.needs.energy >= 40) || !inSleepWindow(a, h)) return false;
   // Not worth going back to bed right before the alarm.
-  return hoursUntil(h, wakeOf(a)) >= 0.75;
+  return hoursUntil(h, wakeOf(a)) >= 0.75 && nightOf(w, a, h);
 }
 
 /** Hours of sleep if this resident lay down for the night now, or null when it would only be a daytime nap. */
-export function nightSleepHours(a: Agent, h: number): number | null {
+export function nightSleepHours(w: World, a: Agent, h: number): number | null {
   if (a.visitor) return null;
   const wake = wakeOf(a);
-  if (isOwl(a)) return h >= 4.5 && h < wake - 0.5 ? hoursUntil(h, wake) : null;
-  return h >= 20 || h < wake - 0.5 ? hoursUntil(h, wake) : null;
+  // Owls sleep from dawn — or earlier when they are running on empty.
+  const ok = isOwl(a) ? (h >= 4.5 && h < wake - 0.5) || (deepNight(h) && a.needs.energy < 30) : h >= 20 || h < wake - 0.5;
+  return ok && nightOf(w, a, h) ? hoursUntil(h, wake) : null;
 }
 
 /** Is a resident currently in (or walking home to) a night's sleep? */
@@ -155,6 +162,7 @@ export function minutesUntilWake(w: World, a: Agent, h: number): number {
 /** A night's sleep at home: walk home, then sleep until the wake-up time (recomputed on arrival). */
 export function nightSleepAction(w: World, a: Agent, h: number, spot: Vec2, priority = 0): Action {
   const home = poi(a.homeId);
+  a.nightSeen = nightIndex(w.simTime);
   return {
     type: 'sleep', phase: 'travel', travelActivity: `walking home to ${home.name}`, activity: `sleeping at ${home.name}`,
     poiId: home.id, spot, remaining: minutesUntilWake(w, a, h), effects: { energy: NIGHT_SLEEP_ENERGY, social: 0, fun: 0 },

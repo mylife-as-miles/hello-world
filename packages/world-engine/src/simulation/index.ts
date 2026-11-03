@@ -19,7 +19,7 @@ import { startAction } from './actions';
 import { ambientCompany, decide, nightWatch, updateAgent } from './behavior';
 import { createAgent, handleEvent } from './events';
 import { decayNeeds, updateMood } from './needs';
-import { minutesUntilWake, nightSleepAction, nightSleepHours } from './night';
+import { minutesUntilWake, nightIndex, nightSleepAction, nightSleepHours } from './night';
 import { pushOut, zoneAt, POI_BY_ID } from './places';
 import { MAX_MEMORIES, MAX_RELATIONSHIPS, pairKey } from './relationships';
 import { createRng } from './rng';
@@ -101,7 +101,8 @@ function restore(w: World, snap: WorldSnapshot): void {
     const moving = /^(walking|running|arriving|leaving|wandering)/.test(a.activity);
     // A resident restored asleep at night keeps sleeping in place until the personal wake-up time.
     const hours = worldClock(w.simTime).hours;
-    if (sleeping && !a.visitor && nightSleepHours(a, hours) !== null) {
+    if (sleeping && !a.visitor) a.nightSeen = nightIndex(w.simTime);
+    if (sleeping && !a.visitor && nightSleepHours(w, a, hours) !== null) {
       const act = nightSleepAction(w, a, hours, { x: a.x, z: a.z });
       act.spot = null;
       act.remaining = minutesUntilWake(w, a, hours);

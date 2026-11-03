@@ -47,6 +47,8 @@ const SECTIONS = [
   { id: 'personality', label: 'Traits', icon: 'personality' },
 ] as const;
 type SectionId = typeof SECTIONS[number]['id'];
+type SheetState = 'peek' | 'half' | 'full';
+const SHEET_ORDER: readonly SheetState[] = ['peek', 'half', 'full'];
 
 const EXPRESSION_BUTTONS: Array<{ name: PreviewExpression; label: string; emo: string }> = [
   { name: 'happy', label: 'Happy', emo: '\u{1F60A}' },
@@ -227,15 +229,27 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
   const topRef = useRef<HTMLDivElement>(null);
   const dockRef = useRef<HTMLDivElement>(null);
   const insets = useRef({ top: 70, bottom: 120 });
+  // Compact layouts (phones, narrow hosts) show the options as a bottom sheet:
+  // 'half' by default (preview keeps ~half the height), 'full' for long edits,
+  // 'peek' (tabs + Save only) to admire the character. Desktop ignores it.
+  const [sheet, setSheet] = useState<SheetState>('half');
+  const sheetBtnRef = useRef<HTMLButtonElement>(null);
   // Measure the overlay bands so the camera frames the character in the free space.
   useEffect(() => {
     const stage = stageRef.current, top = topRef.current, dock = dockRef.current;
     if (!stage || !top || !dock || typeof ResizeObserver === 'undefined') return;
     const measure = () => {
-      const s = stage.getBoundingClientRect(), t = top.getBoundingClientRect(), d = dock.getBoundingClientRect();
+      const s = stage.getBoundingClientRect(), t = top.getBoundingClientRect();
       const panel = stage.parentElement?.querySelector<HTMLElement>('.hwc-panel')?.getBoundingClientRect();
       const coveredBottom = panel && panel.top < s.bottom && panel.left < s.right - 1 ? s.bottom - panel.top : 0;
-      insets.current = { top: Math.max(0, t.bottom - s.top + 10), bottom: Math.max(coveredBottom, s.bottom - d.top + 12) };
+      // Horizontal dock bands (desktop) cover the bottom of the stage; the compact
+      // layout's vertical side rails (taller than wide) leave the centre free.
+      let dockBottom = 0;
+      for (const row of Array.from(dock.children)) {
+        const r = row.getBoundingClientRect();
+        if (r.width > 0 && r.height > 0 && r.width >= r.height && r.top < s.bottom) dockBottom = Math.max(dockBottom, s.bottom - r.top + 12);
+      }
+      insets.current = { top: Math.max(0, t.bottom - s.top + 10), bottom: Math.max(coveredBottom, dockBottom) };
     };
     measure();
     const ro = new ResizeObserver(measure);
@@ -382,6 +396,13 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
     setBase(name);
   };
   const pickCamera = (id: CameraPreset) => { setCamera(id); setCameraNonce(n => n + 1); };
+  // The stage changes height with the sheet: re-run the current framing so the
+  // character re-fits the new free band (zoom included, not just the target).
+  const sheetMounted = useRef(false);
+  useEffect(() => { if (sheetMounted.current) setCameraNonce(n => n + 1); sheetMounted.current = true; }, [sheet]);
+  const sheetActive = () => Boolean(sheetBtnRef.current?.offsetParent);
+  const stepSheet = (dir: 1 | -1) => setSheet(s => SHEET_ORDER[Math.max(0, Math.min(SHEET_ORDER.length - 1, SHEET_ORDER.indexOf(s) + dir))] ?? 'half');
+  const swipe = useRef<{ y: number; id: number } | null>(null);
   // Smart framing (inZOI-style): face edits are tiny at full-body zoom, so engaging
   // the Face section frames the face — once, and only from the full-body view, so a
   // user who deliberately goes back to full body is never overridden.
@@ -409,6 +430,7 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
     void el.offsetWidth; // restart the CSS animation
     el.classList.add('is-flash');
     setActiveSection(id);
+    setSheet(s => (s === 'peek' ? 'half' : s));
   };
   useEffect(() => {
     const box = scrollRef.current;
@@ -435,7 +457,7 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
   const editingExisting = Boolean(props.initialAppearance);
 
   return (
-    <div className={cls('hwc-root', className)} role="region" aria-label="Character creator" data-testid="avatar-creator">
+    <div className={cls('hwc-root', `is-sheet-${sheet}`, className)} role="region" aria-label="Character creator" data-testid="avatar-creator">
       <style>{CREATOR_CSS}</style>
       <div className="hwc-layout">
         {/* ------------------------------------------------ preview */}
@@ -469,17 +491,17 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
           <div className="hwc-loading" ref={loadingEl} aria-hidden="true" data-testid="creator-loading"><i /><span>Loading…</span></div>
           <div className="hwc-standin" ref={standInEl} role="status" data-testid="creator-standin">Couldn't load this body — showing a Townie stand-in</div>
           <div className="hwc-dock" ref={dockRef}>
-            <div className="hwc-dock-row" role="group" aria-label="Preview expression">
+            <div className={cls('hwc-dock-row', 'hwc-dock-expr', !expressionsApply && 'is-empty')} role="group" aria-label="Preview expression">
               <span className="hwc-dock-label">Expression</span>
               {!expressionsApply && <span className="hwc-dock-note" role="note" title="Expressions work on Townie & VRM bodies">No facial rig on {baseName}</span>}
               {expressionsApply && EXPRESSION_BUTTONS.map(x => (
                 <button key={x.name} type="button" className={cls('hwc-pill', flash.expr === x.name && 'is-on')} aria-pressed={flash.expr === x.name}
-                  aria-label={`Preview ${x.label.toLowerCase()} expression`} data-testid={`expr-${x.name}`} onClick={() => playExpression(x.name)}>
-                  <span className="hwc-emo" aria-hidden="true">{x.emo}</span>{x.label}
+                  aria-label={`Preview ${x.label.toLowerCase()} expression`} title={x.label} data-testid={`expr-${x.name}`} onClick={() => playExpression(x.name)}>
+                  <span className="hwc-emo" aria-hidden="true">{x.emo}</span><span className="hwc-pill-text">{x.label}</span>
                 </button>
               ))}
             </div>
-            <div className="hwc-dock-row" role="group" aria-label="Preview animation">
+            <div className="hwc-dock-row hwc-dock-anim" role="group" aria-label="Preview animation">
               <span className="hwc-dock-label">Animation</span>
               {ANIMATION_BUTTONS.map(x => {
                 const on = x.name === 'wave' ? flash.wave : base === x.name;
@@ -496,7 +518,15 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
 
         {/* ------------------------------------------------ panel */}
         <aside className="hwc-panel" aria-label="Character options">
-          <header className="hwc-head">
+          <header className="hwc-head"
+            onPointerDown={e => { swipe.current = sheetActive() ? { y: e.clientY, id: e.pointerId } : null; }}
+            onPointerCancel={() => { swipe.current = null; }}
+            onPointerUp={e => {
+              const s0 = swipe.current; swipe.current = null;
+              if (!s0 || s0.id !== e.pointerId) return;
+              const dy = e.clientY - s0.y;
+              if (Math.abs(dy) > 24) stepSheet(dy < 0 ? 1 : -1); // swipe up = taller sheet
+            }}>
             <div className="hwc-avatar-dot" aria-hidden="true">
               <Bust hair={appearance.hairStyle} hairColor={appearance.hairColor} skin={appearance.skinTone} outfit={appearance.outfit.color} eye={appearance.face.eyeColor} size={42} />
             </div>
@@ -507,6 +537,11 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
                 {personality.length ? personality.map(t => <span key={t}>{traitLabel(t)}</span>) : <em>No personality picked yet</em>}
               </div>
             </div>
+            <button ref={sheetBtnRef} type="button" className={cls('hwc-sheet-btn', sheet === 'full' && 'is-open')} aria-expanded={sheet === 'full'}
+              aria-label={sheet === 'full' ? 'Shrink options to show the preview' : 'Expand options'} title={sheet === 'full' ? 'Show preview' : 'More options'}
+              data-testid="creator-sheet-toggle" onClick={() => setSheet(s => (s === 'full' ? 'half' : s === 'half' ? 'full' : 'half'))}>
+              <Icon name="chevron" size={18} />
+            </button>
           </header>
           <nav className="hwc-nav" aria-label="Creator sections">
             {visibleSections.map(s => (

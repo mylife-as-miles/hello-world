@@ -404,7 +404,9 @@ export default {
       // Serve the same app entry while retaining the browser's selected route.
       if (["/world", "/director", "/overlay"].includes(url.pathname.replace(/\/$/, ""))) {
         const entry = new URL(request.url);
-        entry.pathname = "/index.html";
+        // Fetch the canonical asset root: /index.html can redirect to / on the
+        // public asset host, which would otherwise discard the selected route.
+        entry.pathname = "/";
         entry.search = "";
         return env.ASSETS.fetch(new Request(entry, request));
       }

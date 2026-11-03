@@ -110,7 +110,7 @@ async function main() {
         } },
       });
       equal(response.status, 200);
-      equal(assetPath, "/index.html");
+      equal(assetPath, "/");
     }
     const publicView = await send("/api/snapshot", "");
     equal(publicView.status, 200);

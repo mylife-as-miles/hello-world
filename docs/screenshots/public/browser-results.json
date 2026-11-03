@@ -1,0 +1,47 @@
+{
+  "origin": "https://hello-world-miles-society.myles4miles.chatgpt.site",
+  "startedAt": "2026-11-03T03:39:44.839Z",
+  "checks": [
+    {
+      "name": "Anonymous visitor loads the actual hosted shared world without login",
+      "passed": true
+    },
+    {
+      "name": "Public hosted world renders a visible 3D canvas",
+      "passed": true
+    },
+    {
+      "name": "Creating a resident explains ChatGPT sign-in with a normal top-level link",
+      "passed": true
+    },
+    {
+      "name": "Anonymous Director weather controls are disabled",
+      "passed": true
+    },
+    {
+      "name": "Anonymous direct reset request is rejected server-side",
+      "passed": true
+    },
+    {
+      "name": "Director unlock requires the signed-in world owner, without a public key form",
+      "passed": true
+    },
+    {
+      "name": "Public overlay renders without login or application chrome",
+      "passed": true
+    },
+    {
+      "name": "No uncaught browser runtime errors",
+      "passed": true
+    }
+  ],
+  "pageErrors": [],
+  "responses": [
+    {
+      "url": "https://hello-world-miles-society.myles4miles.chatgpt.site/api/messages",
+      "status": 401
+    }
+  ],
+  "passed": true,
+  "finishedAt": "2026-11-03T03:41:32.799Z"
+}

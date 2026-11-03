@@ -1,0 +1,35 @@
+{
+  "sourceCommit": "24f4bb0076cb5a65686bc9cb5c240e1847848f3d",
+  "siteSourceCommit": "60c4b51764b6a4e29c6b2b1d6729f348b94ce60f",
+  "deployment": {
+    "id": "appgdep_6ae9576bccc0819199494963d2d6ff13",
+    "project_id": "appgprj_6ae8fd7157cc819192278eef3774227d",
+    "title": "HELLO WORLD",
+    "version_id": "appgprj_6ae8fd7157cc819192278eef3774227d~appgver_c2132d1c961c8191aad0370cc3c8040c",
+    "type": "publish",
+    "status": "succeeded",
+    "url": "https://hello-world-miles-society.myles4miles.chatgpt.site",
+    "has_mcp": false,
+    "screenshot_asset_pointer": null,
+    "provider_deployment_id": "site---6ae8fd7157cc819192278eef3774227d",
+    "failure_message": null,
+    "env_set_revision": 3,
+    "updated_at": "2026-11-03T03:39:36.474067+00:00"
+  },
+  "access": {
+    "project_id": "appgprj_6ae8fd7157cc819192278eef3774227d",
+    "access_mode": "public",
+    "revision": 2,
+    "updated_at": "2026-11-03T03:36:16.458633+00:00"
+  },
+  "checks": {
+    "localHostedAssertions": 123,
+    "productionSignedOutBrowserChecks": 8
+  },
+  "permissions": {
+    "watch": "public",
+    "residentWrites": "Sites sign-in required",
+    "director": "trusted Sites owner identity only",
+    "twitchSetup": "trusted Sites owner identity only"
+  }
+}

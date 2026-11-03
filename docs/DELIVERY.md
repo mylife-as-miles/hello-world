@@ -53,3 +53,7 @@ Fresh production-build screenshots: [world](screenshots/round9/world-neighborhoo
 The final renderer fix was published successfully to the same private Site at 03:10:56 UTC, Sites version 4, preserving runtime environment revision 2 and the existing D1 world. [Native deployment result](evidence/sites-round9-deployment.json). OAuth and EventSub callback URLs remain unchanged.
 
 Production HTTP verification confirms `/`, `/world`, `/director` and `/overlay` return the current built entry; the served JavaScript bytes match the local Sites artifact exactly. Identity-less service access to the owner API returns 401 as intended. [HTTP evidence](evidence/sites-round9-http.json).
+
+## Public access update — 2026-11-03
+
+At the user's request the Site is now public, with owner-only Director/Twitch controls. Deployed runtime `24f4bb0`, Sites version 6, uses runtime revision 3. Visitors can watch the world and OBS overlay without login; creating a resident requires Sites sign-in. Eight actual signed-out hosted-browser checks pass with zero page errors. Anonymous reset/OAuth and forged owner headers are rejected; 123 hosted adapter/security assertions pass. See [public access permissions and proof](PUBLIC_ACCESS.md). Earlier owner-private deployment records above are historical.

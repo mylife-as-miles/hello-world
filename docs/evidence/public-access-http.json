@@ -1,0 +1,28 @@
+{
+  "origin": "https://hello-world-miles-society.myles4miles.chatgpt.site",
+  "checks": [
+    {
+      "name": "anonymous-world",
+      "status": 200,
+      "authorized": false,
+      "viewerIdIsNull": true,
+      "residents": 13,
+      "requiresSignIn": true,
+      "pendingCount": 0
+    },
+    {
+      "name": "anonymous-reset",
+      "status": 401
+    },
+    {
+      "name": "forged-owner-headers",
+      "status": 200,
+      "authorized": false,
+      "viewerIdIsNull": true
+    },
+    {
+      "name": "anonymous-oauth",
+      "status": 401
+    }
+  ]
+}

@@ -299,6 +299,60 @@ Remaining:
 - **Mobile creator (390×844).** The expression strip is clipped, the preview is only about 250 px tall, and 52 tap targets are under 32 px.
 - **Photoreal and Townie style clash.** Kept by design: the MetaHuman-derived bodies were an explicit product request, so they stay in the town.
 
+### Round 8 (verified at `b98c2fc`)
+
+Changes routed from cycle 7, each built by its own specialist agent:
+- **Overlay readability (camera).**
+  - The resting overlay now exact-fits the drawn residents' points, and the portal is included only around raids and joins or when someone is near it.
+  - New subject-only event shots for raid, join, gift, social, wave, dance, confetti and chat: about 6 s (raid about 9 s), then a glide back. They can be turned off with `overlayEventShots={false}`.
+  - The guarantee from the integration review still holds: nobody visible is clipped in the resting frame.
+- **Event shots (camera).**
+  - Two-shots frame both actor and target, roughly perpendicular to the line between them.
+  - Shot timing uses the render clock, and the hold starts only once the subjects are in frame.
+  - A subject who leaves the central 60 % of the frame for 0.6 s triggers a re-cut.
+  - Single-actor shots start from the actor's front three-quarter.
+- **Clutter (camera).** The pose tests now cover the stage string lights and posts, the portal ring, café planters, arcade cabinets and yard fences. A near-lens prop anywhere in the frame is rejected, and so is a side wall covering more than 30 % of the frame. The see-through dither is off during close event shots.
+- **Labels and bubbles (interactions).**
+  - Labels hide behind the fountain, the stage, the portal and big props (tree canopies, umbrellas).
+  - Bubbles are laid out in the same frame by a collision-free slot search, so they avoid each other, the HUD, the toasts and protected labels.
+  - In an 8-chat burst the agent measured 0 bubble–bubble, 0 bubble–label and 0 bubble–HUD overlaps in neighborhood, cinematic and overlay.
+- **Night routine (simulation).**
+  - Each resident gets personal bed and wake times. A calm night watch keeps 2–3 residents up, there is no tired or late dancing, and wake-ups are staggered.
+  - Over 2 days with the default seeds, the share of residents asleep between 23:00 and 05:00 went from 16.6 % to 66.3 %, and 85 % are awake at 10:00.
+  - Sleepers go inside: they are hidden once they reach their porch, with a Zzz at the door.
+- **Avatar cost (avatars).**
+  - New `mid` LOD.
+  - Every Townie LOD is one merged mesh with per-vertex finishes. A `high` Townie costs 14 calls, down from 27–31; `mid` and `low` cost 1 each.
+- **Mobile creator.**
+  - The bottom sheet has three states, and expressions and animations sit in side rails.
+  - At 390×844, tap targets under 40 px went from 89 to 0, and the avatar now fills 43 % of the screen height (24.5 % before).
+- **Persistence.** Routine ticks save at most every 5 s; dispatched viewer actions are saved within 300 ms, and the world is also saved when the page is hidden.
+
+Verified at `b98c2fc` in an isolated worktree: tsc 0 errors, vitest **83/83** (11 files), build OK.
+
+Measured on the frozen build of `b98c2fc` at quality=low, 1280×720:
+
+| View | Draw calls (`11e48c5` → `b98c2fc`) | Triangles at `b98c2fc` |
+| --- | --- | ---: |
+| Default (neighborhood) | 127 → **76–86** | 313–331k |
+| Street | 198–252 → **69–78** | 406–456k |
+| Cinematic | 113–131 → **67–75** | 365–450k |
+| Follow | 126 → **75–86** | 309–326k |
+
+Every view is now within the ≤ 120 draw-call target. The ~250k triangle target is not met, because the `mid` LOD keeps full tessellation.
+
+Overlay readability, measured by projecting each resident at 720p (the same probe on both builds):
+
+| | `11e48c5` | `b98c2fc` |
+| --- | --- | --- |
+| Resting frame, median (range) | 27 px (24–31) | **50 px (38–66)** |
+| Clipped residents | 0 | 0 |
+| Fully transparent pixels | 97.2 % | 91 % |
+| Gift from Nova to PixelCat, +1.5 s / +2.5 s | 27 / 29 px, no cut | median 98 / 89 px, up to 150 / 169 px, both subjects in frame |
+| After the shot | | eases back out to 42 px, all 13 in frame |
+
+At 01:45 on day 2 (fast-forwarded), 9 of 13 residents were asleep, and exactly those 9 were hidden indoors. The other 4 were having a café drink, sitting on the pond bench or walking. The world and overlay pages logged 0 page errors.
+
 ## Launch film
 
 A 21.2 s, 1920×1080, 30 fps silent launch cut was made from real product renders by a separate agent pair: footage capture plus a director working from the [cinetic](https://github.com/Leonxlnx/cinetic) skill (MIT). Remotion was skipped for time and the film was assembled with ffmpeg. The film is delivered outside the repository and is not committed.
@@ -307,8 +361,18 @@ A 21.2 s, 1920×1080, 30 fps silent launch cut was made from real product render
 
 - Simulation: ~1.0 ms per step with 50 residents including the runtime wrapper (vitest, Node 22, best of 6×100-step chunks).
 - Renderer (critic, `renderer.info` under SwiftShader, quality=low, before the routed fixes): 254 draw calls, ~523 k triangles, 39 programs. Static town geometry is merged (~7 draw calls); the remaining calls are residents, vegetation and effects. Real-GPU frame rates were **not measured**.
+- Round 8, frozen `b98c2fc`, quality=low, 1280×720:
+  - Draw calls: default 76–86, street 69–78, cinematic 67–75, follow 75–86.
+  - Triangles: 309–456k.
 - Bundle (harness build): main chunk 1.82 MB (538 kB gzip); VRM loader chunk 149 kB; realistic GLBs ~1 MB each, loaded on demand.
-- Avatars: per-resident LOD (detailed within ~30 m, ≤ 20 detailed rigs), animator update throttling for far/off-screen residents; photoreal bodies share cached geometry and materials per body (LOD0 ~31 k verts, LOD1 ~11 k).
+- Avatars:
+  - Three LODs per resident:
+    - `high`, live face: 3 within 9 m at low quality, 8 within 14 m at high quality.
+    - `mid`, baked face: the next 10 within 18 m at low quality, the next 20 within 30 m at high quality.
+    - `low`, everyone else.
+  - Every Townie LOD is a single merged mesh; `high` is 14 draw calls, `mid` and `low` are 1.
+  - Animation updates are throttled for far and off-screen residents.
+  - Photoreal bodies share cached geometry and materials per body (LOD0 ~31k verts, LOD1 ~11k).
 
 ## 5. Licences of shipped assets
 

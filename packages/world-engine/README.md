@@ -82,6 +82,16 @@ renderers map the verb to an animation and treat unknown strings as idle.
 
 All bases share the canonical `HumanoidRig` (T-pose, +Z forward), so every procedural animation (idle, walk, run, talk, sit, sleep, dance ×3, celebrate, gestures) plays on every body. `getAppearanceSupport(baseModelId)` tells UIs which controls apply.
 
+Levels of detail (`AvatarLod = 'high' | 'mid' | 'low'`, chosen per resident by distance in `ResidentsLayer`; the selected and viewer residents are always `high`):
+
+| LOD | Townie | Draw calls | Assigned (quality low / high) |
+| --- | --- | ---: | --- |
+| `high` | live face (blink, gaze, expressions, visemes) + one merged body/head/hair mesh | 14 | nearest 3 within 9 m / nearest 8 within 14 m |
+| `mid` | same tessellation, neutral face baked in; expressions are no-ops | 1 (2 with glasses) | next 10 within 18 m / next 20 within 30 m |
+| `low` | reduced tessellation, eye dots | 1 | everyone else |
+
+Merged Townie meshes use one shared material that reads roughness, metalness and emissive per vertex (`onBeforeCompile`, WebGL); on WebGPU they fall back to a single average roughness. VRM skins always use their single LOD; photoreal bodies map `mid` and `low` to their lighter LOD1. Residents asleep at home are hidden indoors (a Zzz drifts from the door) and use no detail or shadow slot.
+
 ## Environment modules
 
 | Module | What | Cost |
@@ -95,7 +105,7 @@ All bases share the canonical `HumanoidRig` (T-pose, +Z forward), so every proce
 
 - **WebGPU renderer path** (super-terrain's native terrain/roads/lighting, TSL materials): requires porting the town's GLSL `onBeforeCompile`/`ShaderMaterial` effects and postprocessing to TSL; keep WebGL as the OBS-safe default with detected backend.
 - **Facial rigs for photoreal bodies** (MPFB2/MakeHuman offline pipeline with shape keys, or ARKit-style blendshapes).
-- **Raid crowds** (instanced extras beyond the 8 simulated visitors) and **server-side dialogue provider** (`registerDialogueProvider`).
+- **Raid crowds** (instanced extras beyond the 16 simulated visitors a raid can bring) and **server-side dialogue provider** (`registerDialogueProvider`).
 - **Multiplayer scale-out** (Colyseus room owning the same runtime) and **navmesh** (recast-navigation-js) for free-roaming avatars.
 
 ## Dev harness & scripts

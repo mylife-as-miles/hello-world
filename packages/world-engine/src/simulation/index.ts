@@ -16,9 +16,10 @@ import { hashString } from '../avatars/catalog';
 import { findSeatNear } from '../world/layout';
 import { worldClock } from '../world/time';
 import { startAction } from './actions';
-import { ambientCompany, decide, updateAgent } from './behavior';
+import { ambientCompany, decide, nightWatch, updateAgent } from './behavior';
 import { createAgent, handleEvent } from './events';
 import { decayNeeds, updateMood } from './needs';
+import { minutesUntilWake, nightSleepAction, nightSleepHours } from './night';
 import { pushOut, zoneAt, POI_BY_ID } from './places';
 import { MAX_MEMORIES, MAX_RELATIONSHIPS, pairKey } from './relationships';
 import { createRng } from './rng';
@@ -98,6 +99,15 @@ function restore(w: World, snap: WorldSnapshot): void {
     if (!free) pushOut(a);
     const sleeping = a.activity.startsWith('sleeping');
     const moving = /^(walking|running|arriving|leaving|wandering)/.test(a.activity);
+    // A resident restored asleep at night keeps sleeping in place until the personal wake-up time.
+    const hours = worldClock(w.simTime).hours;
+    if (sleeping && !a.visitor && nightSleepHours(a, hours) !== null) {
+      const act = nightSleepAction(w, a, hours, { x: a.x, z: a.z });
+      act.spot = null;
+      act.remaining = minutesUntilWake(w, a, hours);
+      startAction(w, a, act);
+      continue;
+    }
     startAction(w, a, {
       type: sleeping ? 'sleep' : 'gesture', phase: 'perform', travelActivity: a.activity, activity: a.activity, spot: null,
       remaining: moving ? 0.5 : w.rng.range(sleeping ? 10 : 1.5, sleeping ? 30 : 5, 'restore', a.id),
@@ -172,6 +182,7 @@ function substep(w: World, h: number): void {
     if (!w.agents.has(a.id)) continue;
     updateAgent(w, a, h, clock);
   }
+  nightWatch(w, clock);
   updateEncounters(w);
   directSocial(w);
   ambientCompany(w, h);

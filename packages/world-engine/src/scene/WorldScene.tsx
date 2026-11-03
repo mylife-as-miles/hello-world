@@ -76,12 +76,18 @@ export type WorldSceneExtraProps = {
    * Set false when an external landscape module (src/scene/landscape) is mounted.
    */
   builtInHorizon?: boolean;
+  /**
+   * OBS overlay (`transparent` + 'neighborhood'): viewer events (raid, join, gift, social, wave, dance,
+   * confetti, chat) get a short directed shot that exact-fits only their subjects, then glide back to the
+   * full fit. Default true; false keeps the static full fit.
+   */
+  overlayEventShots?: boolean;
 };
 
 export function WorldScene(props: WorldSceneProps & WorldSceneExtraProps) {
   const {
     runtime, transparent = false, cameraMode = 'neighborhood', selectedResidentId, onResidentSelect,
-    quality = 'high', className, viewerResidentId, onLocationSelect, builtInHorizon = true,
+    quality = 'high', className, viewerResidentId, onLocationSelect, builtInHorizon = true, overlayEventShots = true,
   } = props;
   const preference = props.renderer ?? 'webgl';
   const [webGPUFailed, setWebGPUFailed] = useState(false);
@@ -155,7 +161,7 @@ export function WorldScene(props: WorldSceneProps & WorldSceneExtraProps) {
             <Suspense fallback={null}><WorldContent
               kit={kit} store={store} transparent={transparent} quality={quality} rigMode={rigMode}
               selectedResidentId={selected} onResidentSelect={select} viewerResidentId={viewerResidentId}
-              onLocationSelect={selectLocation} builtInHorizon={builtInHorizon}
+              onLocationSelect={selectLocation} builtInHorizon={builtInHorizon} overlayEventShots={overlayEventShots}
             /></Suspense>
           </KitContext.Provider>
         </SceneStoreContext.Provider>
@@ -190,10 +196,11 @@ interface ContentProps {
   viewerResidentId?: string;
   onLocationSelect?: (poiId: string) => void;
   builtInHorizon: boolean;
+  overlayEventShots: boolean;
 }
 
 const WorldContent = memo(function WorldContent({
-  kit, store, transparent, quality, rigMode, selectedResidentId, onResidentSelect, viewerResidentId, onLocationSelect, builtInHorizon,
+  kit, store, transparent, quality, rigMode, selectedResidentId, onResidentSelect, viewerResidentId, onLocationSelect, builtInHorizon, overlayEventShots,
 }: ContentProps) {
   const webgpu = useThree(state => Boolean((state.gl as unknown as { backend?: { isWebGPUBackend?: boolean } }).backend?.isWebGPUBackend));
   const sky = useMemo(() => createSkyUniforms(), []);
@@ -227,7 +234,7 @@ const WorldContent = memo(function WorldContent({
         selectedResidentId={selectedResidentId} onResidentSelect={onResidentSelect} quality={quality}
         viewerResidentId={viewerResidentId} overlay={transparent}
       />
-      <CameraRig mode={rigMode} selectedResidentId={selectedResidentId} transparent={transparent} quality={quality} />
+      <CameraRig mode={rigMode} selectedResidentId={selectedResidentId} transparent={transparent} quality={quality} overlayEventShots={overlayEventShots} />
       {quality === 'high' && !transparent && !webgpu && <PostFX />}
     </>
   );

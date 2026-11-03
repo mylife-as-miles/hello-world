@@ -44,7 +44,7 @@ const runtime = createWorldRuntime({ worldId: 'hello-neighborhood', seedResident
 | --- | --- | --- |
 | `createWorldRuntime` options | `now`, `maxResidents`, `catchUpMaxSeconds`, `onReject`, `ingressCooldowns` | injectable clock, population cap, bounded offline catch-up (off by default), rejection diagnostics; `ingressCooldowns: false` disables the engine's defensive per-actor cooldowns when the server owns rate limits (validation, dedupe and queue bounds stay on) |
 | runtime object | `tick(seconds?)`, `setPaused(bool)`, `isPaused()`, `stats` | manual stepping (tests, `autoTick:false`), director pause |
-| `WorldScene` props | `viewerResidentId`, `onLocationSelect`, `showHud` | in-scene action buttons dispatch events as the viewer's resident; place picking; HUD toggle |
+| `WorldScene` props | `viewerResidentId`, `onLocationSelect`, `showHud`, `overlayEventShots` | in-scene action buttons dispatch events as the viewer's resident; place picking; HUD toggle; OBS overlay event shots (default `true`: raid/join/gift/social/wave/dance/confetti/chat get a ~6 s shot (raid ~9 s) that exact-fits only the event's subjects, then glide back to the full fit; `false` = static full fit) |
 | `AvatarCreator` props | `initialPersonality`, `onSaveCharacter({appearance, personality, displayName})`, `className` | personality trait selection (send as `join` / `custom` `payload.personality`) |
 | event payload | `destination` (POI id, with `custom`), `item` (gift), `channel` (raid source name), `sentiment` (simulation replies) | movement requests, gift labels, raid naming, reaction tone |
 

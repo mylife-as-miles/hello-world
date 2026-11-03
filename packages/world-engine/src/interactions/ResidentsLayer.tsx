@@ -7,7 +7,6 @@
  */
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { useFrame, useThree, type ThreeEvent } from '@react-three/fiber';
-import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 import type { AvatarAppearance, WorldEvent } from '@hello-world/contracts';
 import { useSceneStore } from '../core/SceneContext';
@@ -15,9 +14,12 @@ import type { ResidentStructure, SceneStore } from '../core/sceneStore';
 import { useAvatarRig, type AvatarLod } from '../avatars/index';
 import { hashString } from '../avatars/catalog';
 import { animationForVerb, parseActivityVerb, type AnimationFamily } from '../world/activities';
-import { BUILDINGS, findSeatNear, getPoi } from '../world/layout';
+import { findSeatNear, getPoi } from '../world/layout';
+import { getCameraProps } from '../scene/cameraPose';
 import { AvatarAnimator, RUN_SPEED, WALK_SPEED, type GestureName } from './animation/AvatarAnimator';
 import { EmoteSystem, GiftSystem, InstancedEmoteSystem, makeBlobTexture, makeNameplateTexture, type EmoteKind } from './effects';
+import { labelSightBlocked, PORTAL_LABEL_OCCLUDERS, WORLD_LABEL_OCCLUDERS, type LabelOccluder } from './labelOcclusion';
+import { BUBBLE_GAP, overlaps, placeBubble, type BubbleSlot, type Placement, type SafeArea } from './bubbleLayout';
 
 /** Common surface of the sprite (high) and instanced (low) emote pools. */
 interface EmotePool {
@@ -54,34 +56,10 @@ const MAX_OBSTACLES = 8;
 /** Labels may slide below a bubble by at most this much (px) — farther would detach them from the body. */
 const LABEL_MAX_NUDGE = 42;
 
-/** Building boxes (from the layout) for cheap label occlusion: centre, yaw cos/sin, half extents, height. */
-const BUILDING_BOXES = BUILDINGS.map(b => ({
-  x: b.position.x, z: b.position.z, c: Math.cos(b.rotation), s: Math.sin(b.rotation),
-  hw: Math.max(0.5, b.width / 2 - 0.15), hd: Math.max(0.5, b.depth / 2 - 0.15), h: b.kind === 'arcade' ? 6 : 5.5,
-}));
-
-/** Segment A→B (world) vs rotated building boxes (slab test in each box frame). */
-function occludedByBuilding(ax: number, ay: number, az: number, bx: number, by: number, bz: number): boolean {
-  for (let i = 0; i < BUILDING_BOXES.length; i++) {
-    const B = BUILDING_BOXES[i]!;
-    const ux = ax - B.x, uz = az - B.z, vx = bx - B.x, vz = bz - B.z;
-    // world → box local (inverse yaw)
-    const p0x = ux * B.c - uz * B.s, p0z = ux * B.s + uz * B.c;
-    const p1x = vx * B.c - vz * B.s, p1z = vx * B.s + vz * B.c;
-    let t0 = 0, t1 = 1;
-    const slab = (p0: number, p1: number, lo: number, hi: number): boolean => {
-      const d = p1 - p0;
-      if (Math.abs(d) < 1e-9) return p0 >= lo && p0 <= hi;
-      let a = (lo - p0) / d, b = (hi - p0) / d;
-      if (a > b) { const tmp = a; a = b; b = tmp; }
-      if (a > t0) t0 = a;
-      if (b < t1) t1 = b;
-      return t0 <= t1;
-    };
-    if (slab(p0x, p1x, -B.hw, B.hw) && slab(ay, by, 0, B.h) && slab(p0z, p1z, -B.hd, B.hd)) return true;
-  }
-  return false;
-}
+/** Label occlusion: a label becomes visible again only after this many consecutive clear checks (~20 Hz). */
+const OCCLUSION_CLEAR_CHECKS = 2;
+/** Nameplates the 20 Hz declutter keeps as candidates beyond the cap (some hide under bubbles per frame). */
+const PLATE_SPARE = 4;
 const BUBBLE_MAX_DISTANCE = 45;
 /** On-screen bubble scale clamp (base text 14 px → never below 14 px, never huge up close). */
 const BUBBLE_MIN_SCALE = 1;
@@ -149,6 +127,14 @@ interface ResidentHandle {
   shadowApplied: boolean | null;
   /** Label pushed below an overlapping speech bubble (screen px; 0 = at its normal spot). */
   plateNudgePx: number;
+  /** Nameplate sprite (quality 'high'); the layer owns its visibility + nudge (same frame as the bubble layout). */
+  plateSprite: THREE.Sprite | null;
+  platePxPerM: number;
+  /** Final per-frame label visibility (after occlusion, declutter and bubble avoidance). */
+  plateShow: boolean;
+  /** Label occlusion state (with hysteresis: consecutive clear checks). */
+  occluded: boolean;
+  occClear: number;
 }
 
 /** Shared rate limit for distress emotes (clouds, Zzz puffs, "…", sad faces): ~0.7/s, burst 3. */
@@ -162,8 +148,10 @@ function takeDistress(d: DistressBudget): boolean {
   return true;
 }
 
-interface RaidChip { sprite: THREE.Sprite; mat: THREE.SpriteMaterial; tex: THREE.CanvasTexture | null; text: string; aspect: number; active: boolean; allowed: boolean; px: number; pos: THREE.Vector3; nudgePx: number }
+interface RaidChip { sprite: THREE.Sprite; mat: THREE.SpriteMaterial; tex: THREE.CanvasTexture | null; text: string; aspect: number; active: boolean; allowed: boolean; px: number; pos: THREE.Vector3; nudgePx: number; pxPerM: number; show: boolean }
 interface PlateCand { h: ResidentHandle | null; chip: RaidChip | null; x: number; y: number; w: number; hh: number; score: number }
+/** A nameplate kept by the 20 Hz declutter; projected and finalised every frame. */
+interface PlateSel { h: ResidentHandle | null; chip: RaidChip | null; prot: boolean; l: number; r: number; t: number; b: number; on: boolean }
 
 function safeIdPart(s: string): string {
   return s.replace(/[^\w:.@-]/g, '-').slice(0, 56) || 'raid';
@@ -172,20 +160,27 @@ interface BubbleData { key: number; text: string; name: string; start: number; d
 
 /** Per-bubble layout state (allocated once per bubble, mutated per frame). */
 interface BubbleLayout {
+  /** Positioned wrapper (the layer writes its transform every frame) and the bubble inside it. */
+  wrap: HTMLDivElement | null;
   el: HTMLDivElement | null;
   /** Unscaled size (px), measured once. */
   w: number; h: number;
-  sc: number; dx: number; dy: number; dyT: number;
+  /** Scale; displayed offsets (smoothed) and layout targets. */
+  sc: number; dx: number; dy: number; dxT: number; dyT: number;
   /** Anchor in client px (this frame). */
   x: number; y: number;
   cls: number; start: number;
   vis: boolean; shown: boolean; placedOnce: boolean;
   /** Last written CSS values (NaN = force write). */
-  wsc: number; wdx: number; wdy: number; wop: number;
+  wsc: number; wdx: number; wdy: number; wop: number; wx: number; wy: number;
 }
 
+/**
+ * Speech bubbles as plain DOM in one layer-owned container (no per-bubble React root / drei Html):
+ * the layer projects the anchor, lays every bubble out and writes its final position in the SAME
+ * frame, so what the layout guarantees (no overlaps) is exactly what is drawn.
+ */
 class BubbleHub {
-  private subs = new Map<string, (b: BubbleData | null) => void>();
   readonly active = new Map<string, BubbleData>();
   readonly layout = new Map<string, BubbleLayout>();
   /** Active bubble ids (insertion order), iterated per frame without allocation. */
@@ -194,26 +189,40 @@ class BubbleHub {
   readonly shown = new Set<string>();
   /** Ids whose bubble is active but collapsed (over the cap / no room): nameplate shows "Name …". */
   readonly collapsed = new Set<string>();
+  /** Container (absolutely positioned over the canvas); null outside the browser. */
+  root: HTMLDivElement | null = null;
   private seq = 0;
-  subscribe(id: string, cb: (b: BubbleData | null) => void): () => void {
-    this.subs.set(id, cb);
-    const b = this.active.get(id);
-    if (b) cb(b);
-    return () => { if (this.subs.get(id) === cb) this.subs.delete(id); };
-  }
-  show(id: string, name: string, text: string, now: number, sim = false): number {
+  show(id: string, name: string, text: string, now: number, sim = false, me = false): number {
     const duration = Math.min(7, Math.max(5, 3.6 + text.length / 30));
     const b: BubbleData = { key: ++this.seq, text, name, start: now, duration, sim };
     this.active.set(id, b);
     let L = this.layout.get(id);
     if (!L) {
-      L = { el: null, w: 0, h: 0, sc: 1, dx: 0, dy: 0, dyT: 0, x: 0, y: 0, cls: 2, start: now, vis: false, shown: false, placedOnce: false, wsc: NaN, wdx: NaN, wdy: NaN, wop: NaN };
+      L = { wrap: null, el: null, w: 0, h: 0, sc: 1, dx: 0, dy: 0, dxT: 0, dyT: 0, x: 0, y: 0, cls: 2, start: now, vis: false, shown: false, placedOnce: false,
+        wsc: NaN, wdx: NaN, wdy: NaN, wop: NaN, wx: NaN, wy: NaN };
       this.layout.set(id, L);
     }
-    L.el = null; L.w = 0; L.h = 0; L.dx = 0; L.dy = 0; L.dyT = 0; L.start = now; L.placedOnce = false;
-    L.wsc = NaN; L.wdx = NaN; L.wdy = NaN; L.wop = NaN;
+    L.wrap?.remove();
+    L.wrap = null; L.el = null;
+    L.w = 0; L.h = 0; L.dx = 0; L.dy = 0; L.dxT = 0; L.dyT = 0; L.start = now; L.placedOnce = false;
+    L.wsc = NaN; L.wdx = NaN; L.wdy = NaN; L.wop = NaN; L.wx = NaN; L.wy = NaN;
+    if (this.root && typeof document !== 'undefined') {
+      // Plain text only (textContent): never parsed as HTML.
+      const wrap = document.createElement('div');
+      wrap.className = 'hw-bwrap';
+      const el = document.createElement('div');
+      el.className = `hw-bubble${sim ? ' hw-sim' : ''}${me ? ' hw-me' : ''}`;
+      el.style.opacity = '0';
+      const nm = document.createElement('span');
+      nm.className = 'hw-name'; nm.textContent = name;
+      const stem = document.createElement('i');
+      stem.className = 'hw-stem';
+      el.append(nm, document.createTextNode(text), stem);
+      wrap.appendChild(el);
+      this.root.appendChild(wrap);
+      L.wrap = wrap; L.el = el;
+    }
     if (this.list.indexOf(id) < 0) this.list.push(id);
-    this.subs.get(id)?.(b);
     return duration;
   }
   tick(now: number) {
@@ -222,9 +231,14 @@ class BubbleHub {
       const b = this.active.get(id);
       if (b && now - b.start <= b.duration) continue;
       this.list.splice(i, 1);
+      this.layout.get(id)?.wrap?.remove();
       this.active.delete(id); this.layout.delete(id); this.shown.delete(id); this.collapsed.delete(id);
-      this.subs.get(id)?.(null);
     }
+  }
+  dispose() {
+    for (const L of this.layout.values()) L.wrap?.remove();
+    this.list.length = 0;
+    this.active.clear(); this.layout.clear(); this.shown.clear(); this.collapsed.clear();
   }
 }
 
@@ -278,6 +292,8 @@ pointer-events:none;user-select:none;animation:hw-bubble-in .32s cubic-bezier(.2
 .hw-bubble.hw-me::after{background:#effffa}
 .hw-bubble.hw-me .hw-name{color:#0d9a76}
 .hw-plates{position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:9}
+.hw-bubbles{position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:12}
+.hw-bwrap{position:absolute;left:0;top:0;transform:translate3d(-9999px,0,0);will-change:transform}
 .hw-plate{position:absolute;left:0;top:0;transform:translate3d(-9999px,0,0);padding:2px 9px 3px;border-radius:999px;background:rgba(12,16,20,.86);border:1.5px solid rgba(255,255,255,.28);color:#fff;font:650 12.5px/1.25 ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;white-space:nowrap;max-width:240px;overflow:hidden;text-overflow:ellipsis;will-change:transform;user-select:none}
 .hw-plate.hw-me{border-color:rgba(94,242,198,.85)}
 .hw-plate.hw-chip{border-color:rgba(195,155,255,.85)}
@@ -415,14 +431,33 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
   useEffect(() => () => emotes.dispose(), [emotes]);
   useEffect(() => () => gifts.dispose(), [gifts]);
   useEffect(() => { ensureStyles(); }, []);
+  // Speech bubbles live in one DOM container over the canvas (positioned by layoutBubbles).
   useEffect(() => {
-    // QA only (?hwdebug): expose bubble layout state for automated checks.
+    if (typeof document === 'undefined') return;
+    ensureStyles();
+    const root = document.createElement('div');
+    root.className = 'hw-bubbles';
+    gl.domElement.parentElement?.appendChild(root);
+    hub.root = root;
+    return () => { hub.dispose(); hub.root = null; root.remove(); };
+  }, [hub, gl]);
+  useEffect(() => {
+    // QA only (?hwdebug): expose bubble layout state + final nameplate rects for automated checks.
     if (typeof location === 'undefined' || !location.search.includes('hwdebug')) return;
-    (window as unknown as { __hwHub?: BubbleHub }).__hwHub = hub;
-    return () => { delete (window as unknown as { __hwHub?: BubbleHub }).__hwHub; };
+    const w = window as unknown as { __hwHub?: BubbleHub; __hwPlates?: () => Array<{ name: string; l: number; r: number; t: number; b: number }> };
+    w.__hwHub = hub;
+    w.__hwPlates = () => plateSel.slice(0, plateSelN.current).filter(s => s.on).map(s => ({
+      name: s.h ? (store.getResident(s.h.id)?.displayName ?? s.h.id) : (s.chip?.text ?? ''), l: s.l, r: s.r, t: s.t, b: s.b,
+    }));
+    return () => { delete w.__hwHub; delete w.__hwPlates; };
   }, [hub]);
 
   const clock = useRef({ now: 0, lodTimer: 0, bubbleTimer: 0, plateTimer: 0, bubbleCount: 0, rectAt: -1, crL: 0, crT: 0, W: 1, H: 1, nObs: 0 });
+  /** Overlay mode draws the portal only during a raid (label occluder then). */
+  const raidUntil = useRef(-1);
+  /** Nameplates kept by the 20 Hz declutter, in priority order (projected + finalised per frame). */
+  const plateSel = useMemo(() => [] as PlateSel[], []);
+  const plateSelN = useRef(0);
   /** Screen rects bubbles must avoid (inspector card, HUD pills, event banner), refreshed at 4 Hz. */
   const obsRects = useMemo(() => new Float32Array(4 * MAX_OBSTACLES), []);
   /** Registered residents as an array (allocation-free per-frame iteration). */
@@ -491,7 +526,7 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
       if (text && (e.kind === 'chat' || e.kind === 'social' || e.kind === 'gift' || e.kind === 'custom' || e.kind === 'wave')) {
         withHandle(actor, h => {
           const name = store.getResident(actor)?.displayName ?? e.actorDisplayName;
-          const d = hub.show(actor, name, text, now(), e.source === 'simulation');
+          const d = hub.show(actor, name, text, now(), e.source === 'simulation', actor === viewerRef.current);
           h.animator?.setTalking(true, d * 0.75);
           face(h, target, d);
         });
@@ -573,7 +608,8 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
           break;
         }
         case 'raid': {
-          // Raid bursts at the portal and over the plaza.
+          // Raid bursts at the portal and over the plaza (the overlay draws the portal only meanwhile).
+          raidUntil.current = now() + 16;
           const portal = getPoi('portal')?.position ?? { x: 0, z: -24 };
           cheerAround(portal.x, portal.z + 3, e.id, ['wave', 'cheer']);
           cheerAround(0, 0, `${e.id}:plaza`, ['cheer', 'clap']);
@@ -589,7 +625,7 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
     const mat = new THREE.SpriteMaterial({ transparent: true, depthWrite: false, depthTest: false, toneMapped: false });
     const sprite = new THREE.Sprite(mat);
     sprite.visible = false; sprite.renderOrder = 41; sprite.raycast = () => {};
-    return { sprite, mat, tex: null, text: '', aspect: 4, active: false, allowed: false, px: NAMEPLATE_MIN_PX, pos: new THREE.Vector3(), nudgePx: 0 };
+    return { sprite, mat, tex: null, text: '', aspect: 4, active: false, allowed: false, px: NAMEPLATE_MIN_PX, pos: new THREE.Vector3(), nudgePx: 0, pxPerM: 600, show: false };
   }), []);
   useEffect(() => () => { for (const ch of raidChips) { ch.tex?.dispose(); ch.mat.dispose(); } }, [raidChips]);
   const raidGroups = useMemo(() => new Map<string, ResidentHandle[]>(), []);
@@ -666,10 +702,32 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
     for (; slot < raidChips.length; slot++) raidChips[slot]!.active = false;
   };
 
-  /** Greedy screen-space label selection: viewer > selected > raid chip > recent actor > nearest; shown bubbles block. */
+  /**
+   * Label occlusion (camera → label anchor and camera → head) against buildings, fountain, stage, portal
+   * and tagged props (world) or the portal during a raid (overlay). Hidden at once, shown again only after
+   * OCCLUSION_CLEAR_CHECKS clear checks (no flicker at edges). The viewer / selected label is never hidden.
+   */
+  const labelHidden = (h: ResidentHandle, statics: readonly LabelOccluder[], props: ReadonlyArray<CameraProp> | null): boolean => {
+    if (h.id === viewerResidentId || h.id === selectedResidentId) { h.occluded = false; h.occClear = OCCLUSION_CLEAR_CHECKS; return false; }
+    const cx = camera.position.x, cy = camera.position.y, cz = camera.position.z;
+    const blocked = labelSightBlocked(cx, cy, cz, h.pos.x, h.pos.y + h.plateY, h.pos.z, statics, props)
+      || labelSightBlocked(cx, cy, cz, h.pos.x, h.pos.y + h.plateY - 0.42, h.pos.z, statics, props);
+    if (blocked) { h.occluded = true; h.occClear = 0; }
+    else if (h.occluded && ++h.occClear >= OCCLUSION_CLEAR_CHECKS) h.occluded = false;
+    return h.occluded;
+  };
+
+  /**
+   * Greedy screen-space label selection (~20 Hz): viewer > selected > raid chip > recent actor > nearest.
+   * Occluded labels drop out; overlapping labels yield to higher priority. Keeps cap + PLATE_SPARE labels in
+   * `plateSel`; bubbles are resolved per frame (finalizePlates), against the bubbles actually drawn.
+   */
   const declutterPlates = () => {
     const c = clock.current;
     const W = c.W, H = c.H;
+    const overlayMode = overlayRef.current;
+    const statics = overlayMode ? (c.now < raidUntil.current ? PORTAL_LABEL_OCCLUDERS : NO_OCCLUDERS) : WORLD_LABEL_OCCLUDERS;
+    const props = overlayMode ? null : getCameraProps();
     let nCand = 0;
     const take = () => {
       let cnd = plateCandPool[nCand];
@@ -683,8 +741,8 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
       // Body must be on screen (label anchored to the rendered body, never to an off-screen resident).
       _v.set(h.pos.x, h.pos.y + 0.9, h.pos.z).project(camera);
       if (_v.z > 1 || _v.x < -1 || _v.x > 1 || _v.y < -1 || _v.y > 1) { h.plateAllowed = false; continue; }
-      // Hidden behind a building (camera → label anchor crosses a building box).
-      if (occludedByBuilding(camera.position.x, camera.position.y, camera.position.z, h.pos.x, h.pos.y + h.plateY, h.pos.z)) { h.plateAllowed = false; continue; }
+      // Hidden behind scenery (building, fountain, stage, portal, tree canopy …).
+      if (labelHidden(h, statics, props)) { h.plateAllowed = false; continue; }
       _v.set(h.pos.x, h.pos.y + h.plateY, h.pos.z).project(camera);
       if (_v.z > 1) { h.plateAllowed = false; continue; }
       const age = c.now - h.lastActorAt;
@@ -698,7 +756,7 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
       const chip = raidChips[i]!;
       chip.allowed = false;
       if (!chip.active) continue;
-      if (occludedByBuilding(camera.position.x, camera.position.y, camera.position.z, chip.pos.x, chip.pos.y, chip.pos.z)) continue;
+      if (labelSightBlocked(camera.position.x, camera.position.y, camera.position.z, chip.pos.x, chip.pos.y, chip.pos.z, statics, props)) continue;
       _v.set(chip.pos.x, chip.pos.y, chip.pos.z).project(camera);
       if (_v.z > 1) continue;
       const cnd = take();
@@ -706,18 +764,74 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
       cnd.w = chip.px * chip.aspect; cnd.hh = chip.px; cnd.score = -2e5;
     }
     insertionSort(plateCands, nCand, cmpCand);
-    let shownPlates = 0;
-    if (domPlates) domPlates.n = 0;
-    const nb = c.bubbleCount;
-    const cap = quality === 'low' ? NAMEPLATE_MAX_VISIBLE_LOW : NAMEPLATE_MAX_VISIBLE;
+    let kept = 0;
+    const keep = (quality === 'low' ? NAMEPLATE_MAX_VISIBLE_LOW : NAMEPLATE_MAX_VISIBLE) + PLATE_SPARE;
     for (let ci = 0; ci < nCand; ci++) {
       const cnd = plateCands[ci]!;
       const l = cnd.x - cnd.w / 2 - 2, r = cnd.x + cnd.w / 2 + 2;
-      let t = cnd.y - cnd.hh / 2 - 1, b = cnd.y + cnd.hh / 2 + 1;
-      let ok = shownPlates < cap;
-      // Clear of ALL bubbles: nudge the label just below the overlapping bubble(s), else hide.
+      const t = cnd.y - cnd.hh / 2 - 1, b = cnd.y + cnd.hh / 2 + 1;
+      let ok = kept < keep && kept < 16;
+      for (let k = 0; ok && k < kept; k++) if (overlaps(l, r, t, b, plateRects, k)) ok = false;
+      if (cnd.h) cnd.h.plateAllowed = ok; else if (cnd.chip) cnd.chip.allowed = ok;
+      if (!ok) continue;
+      const o = kept * 4; plateRects[o] = l; plateRects[o + 1] = r; plateRects[o + 2] = t; plateRects[o + 3] = b;
+      let s = plateSel[kept];
+      if (!s) { s = { h: null, chip: null, prot: false, l: 0, r: 0, t: 0, b: 0, on: false }; plateSel[kept] = s; }
+      s.h = cnd.h; s.chip = cnd.chip; s.on = false;
+      s.prot = cnd.h ? cnd.h.id === viewerResidentId || cnd.h.id === selectedResidentId : true;
+      kept++;
+    }
+    plateSelN.current = kept;
+  };
+
+  /** Per frame: project the kept labels (un-nudged rect; `on` = still a valid label this frame). */
+  const projectPlates = () => {
+    const c = clock.current;
+    for (let si = 0; si < plateSelN.current; si++) {
+      const s = plateSel[si]!;
+      s.on = false;
+      const h = s.h, chip = s.chip;
+      let w: number, hh: number;
+      if (h) {
+        if (!h.plateCand || !h.plateAllowed || registry.get(h.id) !== h) continue;
+        _v.set(h.pos.x, h.pos.y + h.plateY, h.pos.z);
+        w = h.platePx * h.plateAspect; hh = h.platePx;
+      } else if (chip && chip.active && chip.allowed) {
+        _v.copy(chip.pos);
+        w = chip.px * chip.aspect; hh = chip.px;
+      } else continue;
+      _v.project(camera);
+      if (_v.z > 1) continue;
+      const x = c.crL + ((_v.x + 1) / 2) * c.W, y = c.crT + ((1 - _v.y) / 2) * c.H;
+      s.l = x - w / 2 - 2; s.r = x + w / 2 + 2; s.t = y - hh / 2 - 1; s.b = y + hh / 2 + 1;
+      s.on = true;
+    }
+  };
+
+  /**
+   * Per frame, after layoutBubbles: final label visibility against the bubbles as DRAWN this frame. A label
+   * under a bubble slides just below it (≤ LABEL_MAX_NUDGE px) or hides; then labels may not overlap each
+   * other; at most the cap are shown. Writes the sprite (quality 'high') or DOM pill (quality 'low').
+   */
+  const finalizePlates = (W: number, H: number) => {
+    const c = clock.current;
+    const nb = c.bubbleCount;
+    const cap = quality === 'low' ? NAMEPLATE_MAX_VISIBLE_LOW : NAMEPLATE_MAX_VISIBLE;
+    for (let i = 0; i < handleList.length; i++) handleList[i]!.plateShow = false;
+    for (let i = 0; i < raidChips.length; i++) raidChips[i]!.show = false;
+    if (domPlates) domPlates.n = 0;
+    let shown = 0;
+    for (let si = 0; si < plateSelN.current; si++) {
+      const s = plateSel[si]!;
+      if (!s.on) continue;
+      s.on = false;
+      const h = s.h, chip = s.chip;
+      if (shown >= cap || (h && hub.shown.has(h.id))) continue;
+      const l = s.l, r = s.r;
+      let t = s.t, b = s.b;
+      let ok = true;
       let nudge = 0;
-      for (let iter = 0; ok && iter < 4; iter++) {
+      for (let iter = 0; iter < 4; iter++) {
         let moved = false;
         for (let k = 0; k < nb; k++) {
           const o = k * 4;
@@ -731,20 +845,51 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
       if (nudge > 0) {
         t += nudge; b += nudge;
         if (nudge > LABEL_MAX_NUDGE) ok = false;   // would float away from the body: hide instead
-        for (let k = 0; ok && k < nb; k++) {
-          const o = k * 4;
-          if (r > shownRects[o]! && l < shownRects[o + 1]! && b > shownRects[o + 2]! && t < shownRects[o + 3]!) ok = false;
+        for (let k = 0; ok && k < nb; k++) if (overlaps(l, r, t, b, shownRects, k)) ok = false;
+      }
+      for (let k = 0; ok && k < shown; k++) if (overlaps(l, r, t, b, finalRects, k)) ok = false;
+      if (!ok) continue;
+      s.t = t; s.b = b; s.on = true;
+      const o = shown * 4; finalRects[o] = l; finalRects[o + 1] = r; finalRects[o + 2] = t; finalRects[o + 3] = b;
+      shown++;
+      if (h) { h.plateShow = true; h.plateNudgePx = nudge; } else if (chip) { chip.show = true; chip.nudgePx = nudge; }
+      if (domPlates && domPlates.n < domPlates.els.length) { domPlates.aH[domPlates.n] = h; domPlates.aC[domPlates.n] = chip; domPlates.n++; }
+    }
+    // Sprites (quality 'high'): visibility + nudge decided here, in the same frame as the bubbles.
+    for (let i = 0; i < handleList.length; i++) {
+      const h = handleList[i]!;
+      const sp = h.plateSprite;
+      if (!sp) continue;
+      sp.visible = !domPlates && h.plateShow;
+      sp.position.y = h.plateY - (h.plateShow ? h.plateNudgePx : 0) / Math.max(1e-3, h.platePxPerM);
+    }
+    for (let i = 0; i < raidChips.length; i++) {
+      const chip = raidChips[i]!;
+      chip.sprite.visible = !domPlates && chip.active && chip.show;
+      if (!chip.sprite.visible) continue;
+      chip.sprite.position.copy(chip.pos);
+      chip.sprite.position.y -= chip.nudgePx / Math.max(1e-3, chip.pxPerM);
+    }
+    if (domPlates) {
+      for (let i = 0; i < domPlates.els.length; i++) {
+        const el = domPlates.els[i]!;
+        const h = i < domPlates.n ? domPlates.aH[i]! : null, chip = i < domPlates.n ? domPlates.aC[i]! : null;
+        if (!h && !chip) { if (el.style.display !== 'none') el.style.display = 'none'; domPlates.kH[i] = null; domPlates.kC[i] = null; continue; }
+        if (h) _v.set(h.pos.x, h.pos.y + h.plateY, h.pos.z); else if (chip) _v.copy(chip.pos);
+        _v.project(camera);
+        if (_v.z > 1) { el.style.display = 'none'; continue; }
+        const col = !!h && hub.collapsed.has(h.id);
+        if (domPlates.kH[i] !== h || domPlates.kC[i] !== chip || domPlates.kCol[i] !== col || (chip && chip.text !== domPlates.kText[i])) {
+          domPlates.kH[i] = h; domPlates.kC[i] = chip; domPlates.kCol[i] = col;
+          const label = h ? `${store.getResident(h.id)?.displayName ?? ''}${col ? ' …' : ''}` : chip?.text ?? '';
+          domPlates.kText[i] = label;
+          el.textContent = label;
+          el.className = `hw-plate${h && h.id === viewerResidentId ? ' hw-me' : ''}${chip ? ' hw-chip' : ''}`;
         }
+        if (el.style.display === 'none') el.style.display = '';
+        const ny = h ? h.plateNudgePx : chip?.nudgePx ?? 0;
+        el.style.transform = `translate3d(${(((_v.x + 1) / 2) * W).toFixed(1)}px,${(((1 - _v.y) / 2) * H + ny).toFixed(1)}px,0) translate(-50%,-50%)`;
       }
-      for (let k = 0; ok && k < shownPlates && k < 16; k++) {
-        const o = k * 4;
-        if (r > plateRects[o]! && l < plateRects[o + 1]! && b > plateRects[o + 2]! && t < plateRects[o + 3]!) ok = false;
-      }
-      if (cnd.h) { cnd.h.plateAllowed = ok; cnd.h.plateNudgePx = ok ? nudge : 0; }
-      else if (cnd.chip) { cnd.chip.allowed = ok; cnd.chip.nudgePx = ok ? nudge : 0; }
-      if (ok && domPlates && domPlates.n < domPlates.els.length) { domPlates.aH[domPlates.n] = cnd.h; domPlates.aC[domPlates.n] = cnd.chip; domPlates.n++; }
-      if (ok && shownPlates < 16) { const o = shownPlates * 4; plateRects[o] = l; plateRects[o + 1] = r; plateRects[o + 2] = t; plateRects[o + 3] = b; }
-      if (ok) shownPlates++;
     }
   };
 
@@ -761,8 +906,11 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
   };
 
   /**
-   * Per-frame speech-bubble layout (allocation-free): readable scale, cap with
-   * collapse-oldest, inspector dodge, and upward stacking so bubbles never overlap.
+   * Per-frame speech-bubble layout (allocation-free): readable scale, cap with collapse-oldest, then each
+   * bubble (class, oldest first) takes the cheapest slot (side shift ≤ tail reach × lift) inside the safe
+   * area that clears HUD pills / banner / inspector, every bubble placed before it and protected labels
+   * (viewer, selected, raid chips) — other visible labels and leader lines are avoided when there is room.
+   * Displayed offsets ease toward their slots but snap whenever easing would make two bubbles overlap.
    */
   const layoutBubbles = (dt: number) => {
     const c = clock.current;
@@ -793,54 +941,74 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
     let np = 0;
     for (let i = 0; i < nc && np < cap; i++) bubblePlace[np++] = bubbleCands[i]!;
     insertionSort(bubblePlace, np, cmpPlace);
-    let n = 0;
+    const area = safeArea;
+    area.minL = c.crL + SAFE_MARGIN; area.maxR = c.crL + c.W - SAFE_MARGIN;
+    area.minT = c.crT + SAFE_MARGIN; area.maxB = c.crT + c.H - SAFE_MARGIN;
+    let n = 0, nStems = 0;
     for (let i = 0; i < np; i++) {
-      const L = hub.layout.get(bubblePlace[i]!)!;
-      const w = (L.w || 160) * L.sc, hh = ((L.h || 48) + 8) * L.sc;
-      let l = L.x - w / 2, r = L.x + w / 2;
-      const bt = L.y, t = L.y - hh;
-      // Safe area: keep inside the viewport (minus margins); the tail/stem must still reach the speaker.
-      const maxShift = w / 2 - 18 * L.sc;
-      const minL = c.crL + SAFE_MARGIN, maxR = c.crL + c.W - SAFE_MARGIN;
-      let dx = l < minL ? minL - l : r > maxR ? maxR - r : 0;
-      l += dx; r += dx;
-      // Slide sideways off HUD pills / event banner / inspector card.
-      for (let k = 0; k < c.nObs; k++) {
-        const o = k * 4;
-        if (r > obsRects[o]! && l < obsRects[o + 1]! && bt > obsRects[o + 2]! && t < obsRects[o + 3]!) {
-          const toLeft = obsRects[o]! - 8 - r, toRight = obsRects[o + 1]! + 8 - l;
-          const sh = Math.abs(dx + toLeft) <= Math.abs(dx + toRight) ? toLeft : toRight;
-          dx += sh; l += sh; r += sh;
-        }
+      const id = bubblePlace[i]!;
+      const L = hub.layout.get(id)!;
+      // Obstacles: HUD rects + protected labels + bubbles placed so far (hard); other labels (soft).
+      let nh = 0, ns = 0;
+      for (let k = 0; k < c.nObs && nh < HARD_CAP; k++) { hardRects.set(obsRects.subarray(k * 4, k * 4 + 4), nh * 4); nh++; }
+      for (let si = 0; si < plateSelN.current; si++) {
+        const s = plateSel[si]!;
+        if (!s.on || (s.h && s.h.id === id)) continue;   // the speaker's own label hides while its bubble shows
+        if (s.prot) { if (nh < HARD_CAP) { const o = nh * 4; hardRects[o] = s.l; hardRects[o + 1] = s.r; hardRects[o + 2] = s.t; hardRects[o + 3] = s.b; nh++; } }
+        else if (ns < SOFT_CAP) { const o = ns * 4; softRects[o] = s.l; softRects[o + 1] = s.r; softRects[o + 2] = s.t; softRects[o + 3] = s.b; ns++; }
       }
-      if (Math.abs(dx) > maxShift || l < minL - 0.5 || r > maxR + 0.5) continue;   // no slot: collapsed
-      // Stack upward until clear of every placed bubble.
-      let dy = 0;
-      for (let iter = 0; iter < 10; iter++) {
-        let moved = false;
-        for (let k = 0; k < n; k++) {
-          const o = k * 4;
-          if (r > shownRects[o]! + 2 && l < shownRects[o + 1]! - 2 && bt + dy > shownRects[o + 2]! && t + dy < shownRects[o + 3]!) {
-            dy = shownRects[o + 2]! - BUBBLE_STACK_GAP - bt;
-            moved = true;
-          }
-        }
-        if (!moved) break;
-      }
-      if (t + dy < c.crT + SAFE_MARGIN || bt + dy > c.crT + c.H - SAFE_MARGIN || n >= 16) continue;   // no room: collapsed
-      let blocked = false;
-      for (let k2 = 0; k2 < c.nObs && !blocked; k2++) {
-        const o = k2 * 4;
-        if (r > obsRects[o]! && l < obsRects[o + 1]! && bt + dy > obsRects[o + 2]! && t + dy < obsRects[o + 3]!) blocked = true;
-      }
-      if (blocked) continue;
-      L.shown = true; L.dx = dx; L.dyT = dy;
+      for (let k = 0; k < n && nh < HARD_CAP; k++) { hardRects.set(shownRects.subarray(k * 4, k * 4 + 4), nh * 4); nh++; }
+      const slot = bubbleSlot;
+      slot.ax = L.x; slot.ay = L.y;
+      slot.w = (L.w || 160) * L.sc; slot.h = (L.h || 48) * L.sc;
+      slot.maxShift = Math.max(0, slot.w / 2 - 18 * L.sc);
+      slot.prevDx = L.placedOnce ? L.dxT : NaN; slot.prevDy = L.placedOnce ? L.dyT : NaN;
+      if (n >= 16 || !placeBubble(slot, area, hardRects, nh, softRects, ns, stemRects, nStems, placement)) continue;   // no slot: collapsed
+      L.shown = true; L.dxT = placement.dx; L.dyT = placement.dy;
       const o = n * 4;
-      shownRects[o] = l; shownRects[o + 1] = r; shownRects[o + 2] = t + dy; shownRects[o + 3] = bt + dy;
+      shownRects[o] = L.x + placement.dx - slot.w / 2; shownRects[o + 1] = L.x + placement.dx + slot.w / 2;
+      shownRects[o + 2] = L.y + placement.dy - slot.h; shownRects[o + 3] = L.y + placement.dy;
+      shownIds[n] = id;
       n++;
+      if (nStems < 16) { const so = nStems * 4; stemRects[so] = L.x - 6; stemRects[so + 1] = L.x + 6; stemRects[so + 2] = L.y + placement.dy; stemRects[so + 3] = L.y + 8; nStems++; }
     }
     c.bubbleCount = n;
+    // Displayed offsets: ease toward the slots; snap any bubble whose eased box would touch another
+    // bubble, a HUD rect or a protected label (slots never do), so the drawn state is overlap-free too.
     const k = 1 - Math.exp(-dt * 14);
+    for (let i = 0; i < n; i++) {
+      const L = hub.layout.get(shownIds[i]!)!;
+      if (!L.placedOnce) { L.dx = L.dxT; L.dy = L.dyT; L.placedOnce = true; }
+      else { L.dx += (L.dxT - L.dx) * k; L.dy += (L.dyT - L.dy) * k; }
+      if (Math.abs(L.dx - L.dxT) < 0.3) L.dx = L.dxT;
+      if (Math.abs(L.dy - L.dyT) < 0.3) L.dy = L.dyT;
+    }
+    const dispRect = (i: number) => {
+      const L = hub.layout.get(shownIds[i]!)!;
+      const w = (L.w || 160) * L.sc, hh = (L.h || 48) * L.sc, o = i * 4;
+      shownRects[o] = L.x + L.dx - w / 2; shownRects[o + 1] = L.x + L.dx + w / 2;
+      shownRects[o + 2] = L.y + L.dy - hh; shownRects[o + 3] = L.y + L.dy;
+    };
+    for (let i = 0; i < n; i++) dispRect(i);
+    for (let iter = 0; iter < n + 1; iter++) {
+      let snapped = false;
+      for (let i = 0; i < n; i++) {
+        const L = hub.layout.get(shownIds[i]!)!;
+        if (L.dx === L.dxT && L.dy === L.dyT) continue;
+        const o = i * 4;
+        const l = shownRects[o]!, r = shownRects[o + 1]!, t = shownRects[o + 2]!, b = shownRects[o + 3]!;
+        let hit = false;
+        for (let j = 0; j < n && !hit; j++) if (j !== i && overlaps(l, r, t, b, shownRects, j, 1)) hit = true;
+        for (let j = 0; j < c.nObs && !hit; j++) if (overlaps(l, r, t, b, obsRects, j)) hit = true;
+        for (let si = 0; si < plateSelN.current && !hit; si++) {
+          const s = plateSel[si]!;
+          if (s.on && s.prot && s.h?.id !== shownIds[i] && r > s.l && l < s.r && b > s.t && t < s.b) hit = true;
+        }
+        if (!hit) continue;
+        L.dx = L.dxT; L.dy = L.dyT; dispRect(i); snapped = true;
+      }
+      if (!snapped) break;
+    }
     for (let i = 0; i < list.length; i++) {
       const id = list[i]!;
       const L = hub.layout.get(id), b = hub.active.get(id);
@@ -849,13 +1017,17 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
       const show = L.vis && L.shown && !fading;
       if (show) { hub.shown.add(id); hub.collapsed.delete(id); }
       else { hub.shown.delete(id); if (L.vis && !fading) hub.collapsed.add(id); else hub.collapsed.delete(id); }
-      if (show) {
-        if (!L.placedOnce) { L.dy = L.dyT; L.placedOnce = true; } else L.dy += (L.dyT - L.dy) * k;
-      }
       const el = L.el;
+      if (L.wrap && L.vis) {
+        const px = L.x - c.crL, py = L.y - c.crT;
+        if (L.wx !== L.wx || Math.abs(px - L.wx) > 0.2 || Math.abs(py - L.wy) > 0.2) {
+          L.wx = px; L.wy = py;
+          L.wrap.style.transform = `translate3d(${px.toFixed(1)}px,${py.toFixed(1)}px,0) translateX(-50%)`;
+        }
+      }
       if (L.wsc !== L.wsc || Math.abs(L.sc - L.wsc) > 0.004) { L.wsc = L.sc; el.style.setProperty('--s', L.sc.toFixed(3)); }
-      if (L.wdx !== L.wdx || Math.abs(L.dx - L.wdx) > 0.5) { L.wdx = L.dx; el.style.setProperty('--dx', `${L.dx.toFixed(1)}px`); }
-      if (L.wdy !== L.wdy || Math.abs(L.dy - L.wdy) > 0.5) {
+      if (L.wdx !== L.wdx || Math.abs(L.dx - L.wdx) > 0.3) { L.wdx = L.dx; el.style.setProperty('--dx', `${L.dx.toFixed(1)}px`); }
+      if (L.wdy !== L.wdy || Math.abs(L.dy - L.wdy) > 0.3) {
         L.wdy = L.dy;
         el.style.setProperty('--dy', `${L.dy.toFixed(1)}px`);
         el.style.setProperty('--stem', `${Math.max(0, -L.dy / L.sc - 5).toFixed(1)}px`);
@@ -888,6 +1060,15 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
   const bubbleRank = useMemo(() => [] as Array<{ id: string; d: number; score: number }>, []);
   const shownRects = useMemo(() => new Float32Array(4 * 16), []);
   const plateRects = useMemo(() => new Float32Array(4 * 16), []);
+  /** Final (drawn) label rects, bubble obstacles and leader lines — scratch for the per-frame passes. */
+  const finalRects = useMemo(() => new Float32Array(4 * 16), []);
+  const hardRects = useMemo(() => new Float32Array(4 * HARD_CAP), []);
+  const softRects = useMemo(() => new Float32Array(4 * SOFT_CAP), []);
+  const stemRects = useMemo(() => new Float32Array(4 * 16), []);
+  const shownIds = useMemo(() => new Array<string>(16).fill(''), []);
+  const safeArea = useMemo<SafeArea>(() => ({ minL: 0, maxR: 1, minT: 0, maxB: 1 }), []);
+  const bubbleSlot = useMemo<BubbleSlot>(() => ({ ax: 0, ay: 0, w: 0, h: 0, maxShift: 0, prevDx: NaN, prevDy: NaN }), []);
+  const placement = useMemo<Placement>(() => ({ dx: 0, dy: 0, cost: 0, softHits: 0 }), []);
 
   useFrame((state, delta) => {
     const dt = Math.min(delta, 0.1);

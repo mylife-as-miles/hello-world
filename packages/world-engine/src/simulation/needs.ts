@@ -5,6 +5,7 @@
  */
 import type { Weather } from '@hello-world/contracts';
 import type { WorldClock } from '../world/time';
+import { pastSleepyHour } from './night';
 import { clamp, type Agent, type Needs } from './state';
 
 /** Points lost per simulation second (1 s = 1 game minute). */
@@ -39,13 +40,14 @@ export function decayNeeds(a: Agent, dt: number, clock: WorldClock): void {
   // Evenings make (non night-owl) residents visibly tired; owls fade in the morning instead.
   // Night owls run on fumes in the late morning instead; everyone else gets genuinely tired after their bedtime.
   const h = clock.hours;
-  const pastBedtime = h >= a.bedtime || h < 5.5;
   const tiredness = owl
     ? (clock.period === 'night' ? 0.45 : clock.period === 'evening' ? 0.7 : clock.period === 'morning' ? 2.4 : clock.period === 'afternoon' ? 1.4 : 1)
-    : pastBedtime ? 3.2 : clock.period === 'evening' ? 1.6 : 1;
+    : pastSleepyHour(a, h) ? 3.2 : clock.period === 'evening' ? 1.6 : 1;
+  // A full night's sleep barely drains company/fun, so mornings start bright instead of lonely.
+  const night = sleeping && !!a.action?.night;
   if (!sleeping) a.needs.energy = clampNeed(a.needs.energy - BASE_DECAY.energy * t.energyDecay * tiredness * dt);
-  a.needs.social = clampNeed(a.needs.social - BASE_DECAY.social * t.socialDecay * (sleeping ? 0.25 : 1) * dt);
-  a.needs.fun = clampNeed(a.needs.fun - BASE_DECAY.fun * t.funDecay * (sleeping ? 0.2 : 1) * dt);
+  a.needs.social = clampNeed(a.needs.social - BASE_DECAY.social * t.socialDecay * (night ? 0.08 : sleeping ? 0.25 : 1) * dt);
+  a.needs.fun = clampNeed(a.needs.fun - BASE_DECAY.fun * t.funDecay * (night ? 0.06 : sleeping ? 0.2 : 1) * dt);
 }
 
 const add = (v: number, delta: number) => clampNeed(v + (delta > 0 ? delta * gainFactor(v) : delta));

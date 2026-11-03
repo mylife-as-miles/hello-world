@@ -6,14 +6,15 @@
  */
 import type { Affordance, PoiDef, PoiKind, Vec2 } from '../world/layout';
 import { POIS, PLAZA_RADIUS } from '../world/layout';
-import type { WorldClock } from '../world/time';
-import { BOOKS, DRINKS_COLD, DRINKS_HOT, FOODS, GAMES, PLAYGROUND_TOYS } from './dialogue';
+import { worldClock, type WorldClock } from '../world/time';
+import { BOOKS, DRINKS_COLD, DRINKS_HOT, FOODS, GAMES, lines, placeVars, PLAYGROUND_TOYS } from './dialogue';
 import { attention, isSleeping, lowestNeed, urgency } from './needs';
-import { atPlace, freeSeat, hasFreeSeat, pickSpot, placeName, pushOut, SEAT_BY_KEY } from './places';
+import { atPlace, freeSeat, hasFreeSeat, pickSpot, placeName, poi, pushOut, SEAT_BY_KEY } from './places';
 import { pathLength, planPath, RUN_SPEED, WALK_SPEED, meetingPoint } from './movement';
 import type { Temperament } from './personality';
 import { friendshipOf, removeRelationshipsOf } from './relationships';
-import { dist, NO_EFFECT, type Action, type ActionType, type Agent, type Needs, type World } from './state';
+import { bedBound, deepNight, minutesUntilWake, nightCalmFactor, nightDanceOk, nightSleepAction, nightSleepHours, nightSleeper, sleepSpot } from './night';
+import { dist, emit, NO_EFFECT, type Action, type ActionType, type Agent, type Needs, type World } from './state';
 
 export interface ActionDef {
   type: ActionType;
@@ -56,7 +57,7 @@ export const ACTION_DEFS: ActionDef[] = [
   { type: 'dance', affordance: 'dance', kinds: ['stage'], effects: { energy: -0.4, social: 0.15, fun: 0.9 }, duration: [14, 24], base: 0.18,
     needsSeat: no, groundSit: no, pref: t => (t.playfulness + t.creative) / 2,
     phrase: (w, _a, p, c) => (w.weather === 'rain' ? `dancing in the rain ${atPlace(p)}` : c.period === 'night' || c.period === 'evening' ? 'dancing under the stage lights' : `dancing ${atPlace(p)}`),
-    available: (_w, a) => a.needs.energy > 22 },
+    available: (_w, a, _p, c) => a.needs.energy > 22 && nightDanceOk(a, c.hours) },
   { type: 'play', affordance: 'play', kinds: ['arcade', 'playground', 'park'], effects: { energy: -0.35, social: 0.05, fun: 0.9 }, duration: [16, 28], base: 0.18,
     needsSeat: no, groundSit: no,
     pref: (t, p) => (p.kind === 'arcade' ? 0.45 * t.playfulness + 0.6 * t.competitive : p.kind === 'playground' ? t.playfulness : 0.8 * t.playfulness),
@@ -100,8 +101,10 @@ function weatherFactor(type: ActionType, p: PoiDef, w: World, t: Temperament): n
   }
 }
 
-function timeFactor(type: ActionType, p: PoiDef, c: WorldClock, t: Temperament): number {
+function timeFactor(type: ActionType, p: PoiDef, c: WorldClock, t: Temperament, visitor: boolean): number {
   const h = c.hours, owl = t.nightOwl > 0.5, night = c.period === 'night';
+  // Quiet hours: locals who are up do calm things (benches, stars, books, a café nightcap). Raid crowds party on.
+  if (deepNight(h) && !visitor) return nightCalmFactor(type, p.kind, owl);
   switch (type) {
     case 'drink': return h >= 6 && h < 11 ? 1.6 : night ? 0.8 : 1;
     case 'eat': return (h >= 11.5 && h < 14) || (h >= 18 && h < 20.5) ? 1.6 : 1;
@@ -123,9 +126,14 @@ export function sleepersCount(w: World): number {
   return n;
 }
 
-export function sleepCap(w: World): number {
+/**
+ * How many locals may be asleep at once. Nights (21:00–06:00) have no cap — the night routine
+ * (night.ts + the night watch) keeps a small shift awake instead; daytime naps stay capped at 30 %.
+ */
+export function sleepCap(w: World, c: WorldClock = worldClock(w.simTime)): number {
   let locals = 0;
   for (const a of w.agents.values()) if (!a.visitor) locals++;
+  if (c.hours >= 21 || c.hours < 6) return Math.max(1, locals);
   return Math.max(1, Math.floor(locals * 0.3));
 }
 
@@ -138,7 +146,7 @@ function sleepScore(w: World, a: Agent, c: WorldClock): number | null {
   else if (owl && c.period === 'morning') s = 0.05 + urgency(e) * 1.2;
   else if (e < 15) s = urgency(e) * 1.1;
   else return null;
-  if (sleepersCount(w) >= sleepCap(w) && e > 8) return null;
+  if (sleepersCount(w) >= sleepCap(w, c) && e > 8) return null;
   return s;
 }
 
@@ -178,7 +186,7 @@ export function scoreChoices(w: World, a: Agent, c: WorldClock): Choice[] {
         // Exhausted (and not a night owl at night): resting beats fun-seeking.
         if (a.needs.energy < 25 && !(t.nightOwl > 0.5 && c.period === 'night')) s *= def.effects.energy >= 0.2 ? 2 : def.effects.fun >= 0.2 ? 0.3 : 1;
         s *= def.pref(t, p);
-        s *= timeFactor(def.type, p, c, t);
+        s *= timeFactor(def.type, p, c, t, a.visitor);
         if (a.visitor) s *= def.type === 'dance' ? 1.4 : def.type === 'watch' || def.type === 'admire' || def.type === 'play' ? 1.2 : def.type === 'sit' || def.type === 'rest' || def.type === 'read' ? 0.6 : 1;
         if (def.type === 'dance' || def.type === 'watch') s *= 1 + 0.12 * Math.min(occ, 4);
         else s *= 1 - (0.2 * occ) / p.capacity;
@@ -200,9 +208,9 @@ export function socializeCandidate(w: World, a: Agent): { score: number; target:
   let best: Agent | null = null;
   let bs = -Infinity;
   for (const o of w.agents.values()) {
-    if (o === a || o.leaving || isSleeping(o) || o.needs.energy < 15 || (o.action && o.action.priority >= 2)) continue;
+    if (o === a || o.leaving || isSleeping(o) || nightSleeper(o) || o.needs.energy < 15 || (o.action && o.action.priority >= 2)) continue;
     const d = dist(a, o);
-    if (d > 30 || d < 0.5) continue;
+    if (d > 30 || d < 0.5 || bedBound(w, o, worldClock(w.simTime).hours)) continue;
     const f = friendshipOf(w, a.id, o.id) ?? 42;
     const s = (f - 40) / 100 - d * 0.012;
     if (s > bs) { bs = s; best = o; }
@@ -307,6 +315,12 @@ export function travelPhrase(p: PoiDef, type: ActionType, run: boolean): string 
 
 export function startChoice(w: World, a: Agent, choice: Choice, c: WorldClock, priority = 0, forceRun = false): boolean {
   const { def, poi: p } = choice;
+  if (def.type === 'sleep' && p.id === a.homeId && nightSleepHours(a, c.hours) !== null) {
+    startNightSleep(w, a, c, priority);
+    a.lastPoiId = p.id;
+    a.lastType = 'sleep';
+    return true;
+  }
   let seatKey: string | undefined;
   let spot: Vec2;
   if (def.needsSeat(p)) {
@@ -339,6 +353,33 @@ export function startSocialize(w: World, a: Agent, target: Agent): void {
     travelTimeout: 40, anchored: false, seekingId: target.id,
   });
   a.lastType = 'socialize';
+}
+
+/**
+ * Go home and sleep until the personal wake-up time ("walking home to …" → "sleeping at …").
+ * `sayGoodnight` lets a few residents say goodnight out loud (rate-limited town-wide).
+ */
+export function startNightSleep(w: World, a: Agent, c: WorldClock, priority = 0, sayGoodnight = false): void {
+  const spot = sleepSpot(w, a);
+  interrupt(w, a);
+  const act = nightSleepAction(w, a, c.hours, spot, priority);
+  // The wake-up time counts from the moment they actually lie down.
+  act.onArrive = (w2, ag) => { if (ag.action === act) act.remaining = minutesUntilWake(w2, ag, worldClock(w2.simTime).hours); };
+  act.onDone = wakeUp;
+  if (sayGoodnight && !a.visitor && w.simTime - (w.facts.lastNightLineAt ?? -1e9) > 14 && w.rng.chance(0.55, 'goodnight', a.id)) {
+    w.facts.lastNightLineAt = w.simTime;
+    emit(w, 'chat', a, { text: lines.goodnight(w, a, placeVars(w, a, null, '', { home: poi(a.homeId).name })), payload: { reaction: 'goodnight', sentiment: 'positive' } });
+  }
+  startAction(w, a, act);
+  a.lastType = 'sleep';
+}
+
+/** Morning: a few early risers greet the day out loud (rate-limited) before heading out. */
+function wakeUp(w: World, a: Agent): void {
+  const h = worldClock(w.simTime).hours;
+  if (h < 5.5 || h > 11.5 || w.simTime - (w.facts.lastMorningLineAt ?? -1e9) < 12 || !w.rng.chance(0.5, 'good-morning', a.id)) return;
+  w.facts.lastMorningLineAt = w.simTime;
+  emit(w, 'chat', a, { text: lines.goodMorning(w, a, placeVars(w, a, null, '')), payload: { reaction: 'good-morning', sentiment: 'positive' } });
 }
 
 /** Remove a resident completely (raid visitors leaving, population eviction). */

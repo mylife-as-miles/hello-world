@@ -3,13 +3,15 @@
  * need effects), wander hops, and choosing what to do next.
  */
 import type { WorldClock } from '../world/time';
-import { cancelEncounter, clearAction, gesture, goThen, interrupt, removeAgent, scoreChoices, sleepCap, sleepersCount, socializeCandidate, startAction, startChoice, startSocialize } from './actions';
+import { cancelEncounter, clearAction, gesture, goThen, interrupt, removeAgent, scoreChoices, socializeCandidate, startAction, startChoice, startNightSleep, startSocialize } from './actions';
 import { lines, placeVars } from './dialogue';
 import { moveAlong, planPath, STROLL_SPEED, WALK_SPEED } from './movement';
 import { applyEffects, distressNeed, fixes, lowestNeed, primaryNeed, type NeedKey } from './needs';
 import { worldClock } from '../world/time';
 import { atPlace, freeSeat, nearestPoi, pickSpot, placeName, poi, portalSpot, spotAround } from './places';
 import { POIS, type PoiDef } from '../world/layout';
+import { bedBound, hoursUntil, isOwl, nightIndex, nightShiftSize, nightSleeper, nightSleepHours, wakeOf } from './night';
+import { hashUnit } from './rng';
 import { startWelcomeWalk } from './social';
 import { dist, emit, type Agent, type World } from './state';
 
@@ -21,6 +23,8 @@ export function updateAgent(w: World, a: Agent, dt: number, clock: WorldClock): 
   const act = a.action;
   if (!act) { decide(w, a, clock); return; }
   if (act.phase === 'travel') {
+    // Bedtime: autonomous errands are dropped and the resident heads home instead.
+    if (act.priority === 0 && !act.hold && act.type !== 'sleep' && !a.visitor && bedBound(w, a, clock.hours)) { clearAction(w, a); decide(w, a, clock); return; }
     a.activity = act.travelActivity;
     const done = moveAlong(a, act.speed * dt);
     applyEffects(a, TRAVEL_COST, dt);
@@ -37,14 +41,16 @@ export function updateAgent(w: World, a: Agent, dt: number, clock: WorldClock): 
     return;
   }
   applyEffects(a, act.effects, dt);
-  // Distress interrupts unrelated autonomous activities so it stays visible.
-  if (!a.visitor && act.priority === 0 && !act.hold && !act.distress && act.remaining > 0.5 && w.simTime - a.moodShownAt >= 6) {
+  // Distress interrupts unrelated autonomous activities so it stays visible (never a night's sleep).
+  if (!a.visitor && act.priority === 0 && !act.hold && !act.distress && !act.night && act.remaining > 0.5 && w.simTime - a.moodShownAt >= 6) {
     const low = distressNeed(a, clock.period === 'night');
     if (low && !fixes(act.type, low)) act.remaining = 0.5;
   }
-  // Satiation: an activity ends early once the need it serves is full.
+  // Satiation: an activity ends early once the need it serves is full (a night's sleep runs until the wake-up time).
   const primary = primaryNeed(act.type);
-  if (primary && act.priority < 1 && !act.hold && act.remaining > 1.5 && a.needs[primary] >= (act.type === 'sleep' ? 96 : 90)) act.remaining = 1.5;
+  if (primary && !act.night && act.priority < 1 && !act.hold && act.remaining > 1.5 && a.needs[primary] >= (act.type === 'sleep' ? 96 : 90)) act.remaining = 1.5;
+  // Bedtime: autonomous activities wrap up so residents head home instead of dancing or chatting on.
+  if (act.priority === 0 && !act.hold && act.type !== 'sleep' && act.remaining > 1.5 && !a.visitor && bedBound(w, a, clock.hours)) act.remaining = 1.5;
   if (act.hop) {
     if (a.path.length) moveAlong(a, STROLL_SPEED * dt);
     else if (w.simTime >= act.hop.next) {
@@ -67,6 +73,8 @@ export function decide(w: World, a: Agent, clock: WorldClock): void {
   if (a.visitor && w.simTime >= a.leaveAt) { beginLeaving(w, a); return; }
   if (a.needsWelcome) { a.needsWelcome = false; startWelcomeWalk(w, a); return; }
   if (!a.visitor) {
+    // Bedtime (or back to bed after a restless spell): walk home and sleep until the personal wake-up time.
+    if (bedBound(w, a, clock.hours)) { startNightSleep(w, a, clock, 0, clock.hours >= 20); return; }
     // Distress stays visible: while a need is under 25 its state is re-shown ~10 s after the last one ended.
     const low = distressNeed(a, clock.period === 'night');
     if (low && w.simTime - a.moodShownAt >= 4) { showLowNeed(w, a, low); return; }
@@ -125,10 +133,11 @@ function showLowNeed(w: World, a: Agent, need: NeedKey): void {
     return;
   }
   if (need === 'energy') {
-    const owl = a.temperament.nightOwl > 0.5;
-    if (clock.period === 'night' && !owl && r < 0.6 && sleepersCount(w) < sleepCap(w) + 1) {
-      const sleep = scoreChoices(w, a, clock).find(c => c.def.type === 'sleep');
-      if (sleep && startChoice(w, a, sleep, clock)) { mark(20); return; }
+    // Tired at night: exhausted residents always head home to bed; sleepy ones sometimes turn in early.
+    if (nightSleepHours(a, clock.hours) !== null && (a.needs.energy < 25 || r < 0.45)) {
+      startNightSleep(w, a, clock, 0, clock.hours >= 20);
+      mark(20);
+      return;
     }
     if (r < 0.4) {
       const d = dur(6, 10);
@@ -239,4 +248,46 @@ export function beginLeaving(w: World, a: Agent): void {
   goThen(w, a, spot, 'leaving through the portal', 'leaving through the portal', 0.6, {
     priority: 3, type: 'leave', poiId: 'portal', run: dist(a, spot) > 15, onDone: (w2, ag) => removeAgent(w2, ag.id),
   });
+}
+
+/**
+ * Night watch (quiet hours 23:30–04:45): a live stream should never look deserted, so besides the night
+ * owls a small shift of `nightShiftSize` neighbours stays up. When fewer are awake, the most restless
+ * sleeper (rested enough, not up already tonight, not about to wake anyway) gets up for an hour or so of
+ * calm night life — stargazing, a bench, a book, a café nightcap — then walks home to bed again.
+ */
+export function nightWatch(w: World, clock: WorldClock): void {
+  const h = clock.hours;
+  if (!(h >= 23.5 || h < 4.75) || w.simTime < (w.facts.nextRestlessAt ?? -1e9)) return;
+  w.facts.nextRestlessAt = w.simTime + 5;
+  const night = nightIndex(w.simTime);
+  let locals = 0, up = 0;
+  let best: Agent | null = null;
+  let bs = -Infinity;
+  for (const a of w.agents.values()) {
+    if (a.visitor || a.leaving) continue;
+    locals++;
+    if (isOwl(a)) continue;
+    if (!nightSleeper(a)) { up++; continue; }
+    const act = a.action!;
+    if (act.phase !== 'perform' || a.restlessNight === night || a.needs.energy < 55 || w.simTime - (act.since ?? w.simTime) < 50 || hoursUntil(h, wakeOf(a)) < 1.75) continue;
+    const t = a.temperament;
+    const s = hashUnit(`restless:${a.id}:${night}`) + 0.25 * (t.curiosity + t.creative - 2) + 0.2 * t.chaos + 0.15 * (t.romance - 0.8)
+      + 0.1 * (t.bookish - 0.7) - 0.35 * (t.restLove - 1);
+    if (s > bs) { bs = s; best = a; }
+  }
+  if (!best || up >= nightShiftSize(locals)) return;
+  getUpRestless(w, best, clock, night);
+  w.facts.nextRestlessAt = w.simTime + w.rng.range(8, 16, 'restless-gap', best.id);
+}
+
+function getUpRestless(w: World, a: Agent, clock: WorldClock, night: number): void {
+  a.restlessNight = night;
+  a.awakeUntil = w.simTime + w.rng.range(50, 90, 'restless-for', a.id);
+  interrupt(w, a);
+  if (w.simTime - (w.facts.lastNightLineAt ?? -1e9) > 20 && w.rng.chance(0.6, 'restless-say', a.id)) {
+    w.facts.lastNightLineAt = w.simTime;
+    emit(w, 'chat', a, { text: lines.restless(w, a, placeVars(w, a, null, '')), payload: { reaction: 'restless', sentiment: 'positive' } });
+  }
+  decide(w, a, clock);
 }

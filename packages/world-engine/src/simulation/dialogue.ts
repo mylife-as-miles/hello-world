@@ -380,6 +380,35 @@ const CONFETTI_LINES: Bank = ['Confetti! Who’s celebrating?', 'Woohoo! Party t
 const DANCE_JOIN: Bank = ['Ooh, I love this song!', 'Dance party? Count me in!', 'Wait for me, {name}!', 'Move over, {name}, I’ve moves too!'];
 const DANCE_GRUMBLE: Bank = ['Some of us are trying to relax here.', 'Must you dance right now, {name}?', 'Hmph. Show-off.'];
 const CELEBRATE_REPLIES: Bank = ['Woo! Go {name}!', 'Celebrate good times!', 'Yay, {name}!'];
+// Night routine (behavior/night.ts): heading to bed, can't sleep, waking up.
+const GOODNIGHT_LINES: Bank = [
+  'Night, everyone! See you at breakfast.', 'That’s me done for today. Goodnight, town!', '*yawn* Bedtime. Sweet dreams, all.',
+  'Off to bed before I fall asleep standing up.', 'Goodnight! Save me a croissant tomorrow.', 'Lights out for me. Night night!',
+  'My pillow is calling my name. Goodnight!', 'Big day tomorrow. Night, everyone!', 'Heading home to {home}. Sleep well!',
+];
+const GOODNIGHT_BY_TRAIT: Partial<Record<string, Bank>> = {
+  grumpy: ['Finally. Peace and quiet. Goodnight.', 'Don’t wake me before noon.'],
+  lazy: ['Bed. Glorious bed.', 'I’ve been looking forward to this all day.'],
+  bookish: ['One more chapter in bed, then lights out.'],
+  energetic: ['Going to bed so I can be up at dawn!'],
+  romantic: ['Goodnight, moon. Goodnight, town.'],
+};
+const RESTLESS_LINES: Bank = [
+  'Can’t sleep... maybe some fresh air will help.', 'Too awake to sleep. Stargazing it is.', 'Is anyone else up? The town is so quiet.',
+  'Counting sheep isn’t working. Time for a little walk.', 'A midnight cocoa sounds perfect right now.', 'Couldn’t sleep — the stars are too pretty tonight.',
+  'Shh... everyone’s asleep. Just me and the moon.', 'Wide awake. Might as well enjoy the quiet.',
+];
+const MORNING_LINES: Bank = [
+  'Good morning, everyone!', 'Morning! Who’s up for breakfast at Sunbeam Café?', 'What a lovely morning.', 'Rise and shine, neighbors!',
+  'Morning! I slept like a log.', 'Coffee first. Then words.', 'Morning, town! It smells like fresh bread out here.', 'Ahh, what a sunrise. Morning, all!',
+];
+const MORNING_BY_TRAIT: Partial<Record<string, Bank>> = {
+  grumpy: ['Too early. Way too early.', 'Morning. Don’t talk to me yet.'],
+  lazy: ['Five more minutes would’ve been nice...', '*yawn* Is it really morning already?'],
+  energetic: ['Up and at ’em! Who wants to race to the fountain?', 'Best sleep ever. Let’s GO!'],
+  foodie: ['I dreamt about pancakes. Café, here I come!'],
+  'night-owl': ['Morning? Already? Ugh, fine.'],
+};
 const BEFRIEND_MILESTONE: Bank = ['{name}, I think we’re officially friends now!', 'Friends? Friends. Definitely friends, {name}.', 'You know what, {name}? You’re one of my favorite people.'];
 
 // ---------------------------------------------------------------------------
@@ -563,6 +592,9 @@ export const lines = {
   apologyReply(w: World, s: Agent, yes: boolean, vars: Vars, pair: string): string { return fill(yes ? choosePair(w, pair, 'apology-yes', APOLOGY_YES, s.id) : choosePair(w, pair, 'apology-no', APOLOGY_NO, s.id), vars); },
   mutter(w: World, s: Agent, need: 'energy' | 'social' | 'fun'): string { return choose(w, `mutter:${need}`, DISTRESS_MUTTERS[need], s.id); },
   celebrateReply(w: World, s: Agent, vars: Vars): string { return fill(choose(w, 'celebrate', CELEBRATE_REPLIES, s.id), vars); },
+  goodnight(w: World, s: Agent, vars: Vars): string { return fill(flavored(w, s, 'goodnight', GOODNIGHT_LINES, GOODNIGHT_BY_TRAIT, 0.4), vars); },
+  restless(w: World, s: Agent, vars: Vars): string { return fill(choose(w, 'restless', RESTLESS_LINES, s.id), vars); },
+  goodMorning(w: World, s: Agent, vars: Vars): string { return fill(flavored(w, s, 'good-morning', MORNING_LINES, MORNING_BY_TRAIT, 0.4), vars); },
 };
 
 export type MemoryKind = 'met' | 'greet' | 'chat' | 'rebuff' | 'compliment' | 'gift' | 'friends' | 'declined' | 'welcome' | 'reply' | 'raid' | 'asleep' | 'bicker' | 'makeup';

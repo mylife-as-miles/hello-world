@@ -10,6 +10,7 @@ import { worldClock } from '../world/time';
 import { gesture, goThen, interrupt, removeAgent, scoreChoices, startAction, startChoice } from './actions';
 import { complimentThing, lines, memoryLine, placeVars, requestExtraLine, withArticle } from './dialogue';
 import { meetingPoint, WALK_SPEED } from './movement';
+import { baseBedtime } from './night';
 import { bump, feel, isSleeping } from './needs';
 import { compatibility, defaultPersonality, temperamentFor } from './personality';
 import { arrivalSpot, atPlace, homeFor, nearestPoi, pickSpot, poi, portalSpot, pushOut, spotAround } from './places';
@@ -36,8 +37,8 @@ export function createAgent(w: World, init: NewAgentInit): Agent {
     joinedAt: init.joinedAt, lastActiveAt: init.lastActiveAt, homeId: homeFor(init.id).id, seed: !!init.seed, visitor: !!init.visitor,
     leaveAt: Infinity, leaving: false, needsWelcome: false, action: null, path: [], mood: 0.2, sentiment: 0,
     socialReadyAt: 0, lastReplyAt: -1e9, moodShownAt: -1e9,
-    // Personal bedtime (non night-owls get genuinely tired after it): 20:00–23:30.
-    bedtime: 20 + (hashString(`bed:${init.id}`) % 36) / 10,
+    // Personal bedtime (night.ts adds temperament; night owls keep their own dawn schedule).
+    bedtime: baseBedtime(init.id), awakeUntil: -1e9,
   };
 }
 

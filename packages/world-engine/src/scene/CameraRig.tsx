@@ -17,8 +17,8 @@ import type { SceneStore } from '../core/sceneStore';
 import { findSeatNear, getPoi } from '../world/layout';
 import { useKit } from './context';
 import {
-  OCCLUDERS, blocked, propsNear, centralClutter, foregroundClutter, pickFramingPose, poseClean, setCameraProps, POSE_RISE,
-  type PickedPose,
+  OCCLUDERS, blocked, propsNear, centralClutter, foregroundClutter, pickFramingPose, pickTwoShot, poseClean, setCameraProps, POSE_RISE,
+  fitPointsToView, pushBackToFit, type PickedPose, type ViewFit,
 } from './cameraPose';
 
 export type RigMode = CameraMode | 'overlay';
@@ -105,14 +105,60 @@ function pushOutOfBuildings(p: THREE.Vector3) {
 
 const DIRECTED_KINDS = new Set<WorldEvent['kind']>(['join', 'raid', 'gift', 'social', 'dance', 'chat', 'wave', 'confetti']);
 
+/**
+ * Event director state. All times are on the render clock (`state.clock.elapsedTime`): events are queued
+ * by `store.onEvent` and accepted inside useFrame. A shot's hold (`hold` s) starts when its subjects are
+ * actually in frame (`acquired`); until then `until` is a short acquisition window.
+ */
 interface Director {
-  kind: 'none' | 'actor' | 'portal' | 'speaker';
+  kind: 'none' | 'actor' | 'portal' | 'speaker' | 'two';
   actorId: string;
+  targetId: string;
   until: number;
+  start: number;
+  hold: number;
+  acquired: boolean;
+  recut: boolean;
+  offFor: number;
   lastCut: number;
   lastPush: number;
   cutPending: boolean;
   raid: boolean;
+  /** last raid / join (render clock): the overlay keeps the portal in its fit for a while */
+  portalAt: number;
+  queue: WorldEvent[];
+}
+
+/** Two-shot only while actor and target are close enough to read together. */
+const TWO_SHOT_MAX_SEP = 16;
+
+function acceptEvent(d: Director, event: WorldEvent, t: number, store: SceneStore) {
+  if (event.kind === 'raid' || event.kind === 'join') d.portalAt = t;
+  if (d.raid && t < d.until && event.kind !== 'raid') return; // never interrupt a raid shot
+  const shot = (kind: Director['kind'], hold: number) => {
+    d.kind = kind; d.actorId = event.actorId; d.targetId = event.targetId ?? '';
+    d.raid = event.kind === 'raid'; d.start = t; d.hold = hold; d.acquired = false; d.recut = false; d.offFor = 0;
+    d.until = t + 3.2; // acquisition window; the hold starts once the subjects are in frame
+  };
+  if (event.kind === 'chat' && !event.targetId) {
+    // untargeted chat: gentle push-in on the speaker, rate-limited
+    if (t - d.lastPush < 8 || (d.kind !== 'none' && t < d.until)) return;
+    shot('speaker', 5); d.lastPush = t; d.cutPending = false;
+    return;
+  }
+  // coalesce bursts: one transition per window (raids may pre-empt after 1 s, others after 3.5 s)
+  if (event.kind !== 'join' && t - d.lastCut < (event.kind === 'raid' ? 1 : 3.5)) return;
+  if (event.kind === 'join' && t - d.lastCut < 0.8) return; // joins always get their portal shot (bursts: once per 0.8 s)
+  const isPortal = event.kind === 'raid' || event.kind === 'join';
+  let kind: Director['kind'] = isPortal ? 'portal' : 'actor';
+  if (!isPortal && event.targetId && event.targetId !== event.actorId) {
+    const a = store.getResident(event.actorId), b = store.getResident(event.targetId);
+    if (a && b && Math.hypot(a.location.x - b.location.x, a.location.z - b.location.z) <= TWO_SHOT_MAX_SEP) kind = 'two';
+    else if (b && (event.kind === 'gift' || !a)) { kind = 'actor'; shot(kind, 6); d.actorId = event.targetId; d.targetId = ''; d.lastCut = t; d.cutPending = true; return; }
+  }
+  shot(kind, event.kind === 'raid' ? 9 : 6);
+  d.lastCut = t;
+  d.cutPending = true;
 }
 
 /** Front three-quarter framing solver (shared by follow + director actor shots). */
@@ -133,7 +179,11 @@ interface Framer {
 const newFramer = (): Framer => ({ pos: new THREE.Vector3(), prev: new THREE.Vector3(), vel: new THREE.Vector3(), heading: 0, rel: 0.62, yaw: 0, init: false, level: 0, hS: 0, dS: 0, sincePick: 0 });
 const PICK: PickedPose = { x: 0, y: 0, z: 0, yaw: 0, rel: 0.62, level: 0 };
 
-function frame(f: Framer, tx: number, tz: number, dt: number, dist: number, height: number, lookY: number, outPos: THREE.Vector3, outLook: THREE.Vector3, snap: boolean) {
+/**
+ * `facing`: the rendered avatar's yaw (NaN when unknown). A standing / idle subject is framed from the
+ * side it faces (residents turn to their partner), so single-actor shots read front three-quarter.
+ */
+function frame(f: Framer, tx: number, tz: number, dt: number, dist: number, height: number, lookY: number, outPos: THREE.Vector3, outLook: THREE.Vector3, snap: boolean, facing = NaN) {
   if (!f.init || snap) { f.pos.set(tx, 0, tz); f.prev.copy(f.pos); f.vel.set(0, 0, 0); f.init = true; f.hS = height; f.dS = dist; f.level = 0; }
   f.prev.copy(f.pos);
   const k = snap ? 1 : 1 - Math.exp(-dt * 3);
@@ -149,6 +199,7 @@ function frame(f: Framer, tx: number, tz: number, dt: number, dist: number, heig
     // seated: face the subject from the front (seat facing) instead of their last walking heading
     const seat = findSeatNear(f.pos.x, f.pos.z, 0.7);
     if (seat) f.heading = snap ? seat.seat.facing : angleLerp(f.heading, seat.seat.facing, 1 - Math.exp(-dt * 2));
+    else if (Number.isFinite(facing)) f.heading = snap ? facing : angleLerp(f.heading, facing, 1 - Math.exp(-dt * 1.2));
   }
   const ly = lookY;
   const headY = lookY + 0.45;
@@ -297,66 +348,35 @@ function orbitShot(o: OrbitState, dt: number, speed: number, dist: number, h: nu
 
 /* ----------------------------------------------------------------- rig */
 
-/** Fixed overlay viewing direction. Bounds include labels, gestures, feet and interpolation lag. */
+/** Fixed overlay viewing direction (steady fit). */
 const OVERLAY_BACK = new THREE.Vector3(0, 0.58, 1).normalize();
-const WORLD_UP = new THREE.Vector3(0, 1, 0);
+/** Every fitted point stays inside NDC ±0.82 (9 % frame margin). */
 const OVERLAY_SAFE_NDC = 0.82;
+/** Overlay event shots: subjects ≈ 24 % of the frame height at most (≈ 170 px at 720p), lower angle. */
+const OVERLAY_SHOT_MIN_DEPTH = 9.5;
+const OVERLAY_SHOT_ELEV = 0.36;
+const OVERLAY_MAX_POINTS = 4096;
+/** Steady envelope per resident: ±0.7 m (gestures, nameplate width), feet to nameplate top. */
+const STEADY_HALF = 0.7, STEADY_TOP = 2.9;
+/** Event-shot envelope: closer camera → smaller nameplate in metres. */
+const SHOT_HALF = 0.55, SHOT_TOP = 2.4;
 
-function includeResidents(
-  box: THREE.Box3,
-  residents: readonly ResidentProfile[],
-  point: THREE.Vector3,
-) {
-  for (const resident of residents) {
-    const { x, z } = resident.location;
-    if (!Number.isFinite(x) || !Number.isFinite(z)) continue;
-    // Renderer residents are grounded at y=0. Their labels/animated hands sit above their bodies.
-    box.expandByPoint(point.set(x - 1.25, -0.35, z - 1.25));
-    box.expandByPoint(point.set(x + 1.25, 3.4, z + 1.25));
+function pushBox(buf: Float64Array, n: number, x0: number, y0: number, z0: number, x1: number, y1: number, z1: number): number {
+  if (n + 8 > OVERLAY_MAX_POINTS) return n;
+  for (let m = 0; m < 8; m++) {
+    const o = (n + m) * 3;
+    buf[o] = m & 1 ? x1 : x0; buf[o + 1] = m & 2 ? y1 : y0; buf[o + 2] = m & 4 ? z1 : z0;
   }
+  return n + 8;
 }
 
-/**
- * Exact perspective fit for the eight corners of an AABB, including their depth.
- * In camera basis a corner q has depth D-q.z, so D >= q.z + |q.x| / tan(hfov/2),
- * and likewise for y. Reserving NDC +/-0.82 leaves an additional 9% frame margin.
- */
-export function overlayFitDistance(
-  box: THREE.Box3,
-  center: THREE.Vector3,
-  backward: THREE.Vector3,
-  camera: THREE.PerspectiveCamera,
-  right: THREE.Vector3,
-  up: THREE.Vector3,
-  point: THREE.Vector3,
-): number {
-  right.crossVectors(WORLD_UP, backward).normalize();
-  if (right.lengthSq() < 0.5) right.set(1, 0, 0);
-  up.crossVectors(backward, right).normalize();
-  const tanV = Math.tan(THREE.MathUtils.degToRad(camera.getEffectiveFOV()) / 2);
-  const tanH = tanV * Math.max(0.1, camera.aspect);
-  let distance = 8;
-  for (let mask = 0; mask < 8; mask++) {
-    point
-      .set(
-        mask & 1 ? box.max.x : box.min.x,
-        mask & 2 ? box.max.y : box.min.y,
-        mask & 4 ? box.max.z : box.min.z,
-      )
-      .sub(center);
-    const towardCamera = point.dot(backward);
-    distance = Math.max(
-      distance,
-      towardCamera + Math.abs(point.dot(right)) / (tanH * OVERLAY_SAFE_NDC),
-      towardCamera + Math.abs(point.dot(up)) / (tanV * OVERLAY_SAFE_NDC),
-      towardCamera + camera.near + 0.5,
-    );
-  }
-  return distance;
-}
-
-export function CameraRig({ mode, selectedResidentId, transparent = false, quality = 'high' }: { mode: RigMode; selectedResidentId?: string; transparent?: boolean; quality?: 'low' | 'high' }) {
-  const camera = useThree(s => s.camera) as THREE.PerspectiveCamera;
+export function CameraRig({ mode, selectedResidentId, transparent = false, quality = 'high', overlayEventShots = true }: {
+  mode: RigMode; selectedResidentId?: string; transparent?: boolean; quality?: 'low' | 'high';
+  /** Overlay only: short directed shots that exact-fit an event's subjects (default true; false = static fit). */
+  overlayEventShots?: boolean;
+}) {
+  const camera = useThree(st => st.camera) as THREE.PerspectiveCamera;
+  const scene = useThree(st => st.scene);
   const store = useSceneStore();
   const kit = useKit();
   const look = useRef(new THREE.Vector3(4.2, 2.0, 0.6));
@@ -370,41 +390,61 @@ export function CameraRig({ mode, selectedResidentId, transparent = false, quali
     estAt: -1e9, estNext: 25, estCount: 0, blockedFor: 0, rise: 0, riseT: 0,
     cut: new THREE.Vector3(), cutWant: 0, cutR0: 0.35, cutR1: 0.95,
     shotPos: new THREE.Vector3(), shotLook: new THREE.Vector3(), head: new THREE.Vector3(), outFor: 0,
+    subA: new THREE.Vector3(), subB: new THREE.Vector3(), hasA: false, hasB: false,
+    two: { x: 0, y: 0, z: 0, yaw: 0, rel: 1, level: 0, dist: 8 } as PickedPose & { dist: number },
+    twoMid: new THREE.Vector3(), twoAt: 0, twoNeed: 0,
+    lookS: new THREE.Vector3(), shotKey: -1,
   }), []);
   const cine = useMemo(() => ({
     pos: new THREE.CatmullRomCurve3(CINE_POS.map(p => new THREE.Vector3(...p)), true, 'centripetal'),
     look: new THREE.CatmullRomCurve3(CINE_LOOK.map(p => new THREE.Vector3(...p)), true, 'centripetal'),
     u: 0,
   }), []);
-  const overlay = useMemo(() => ({ bounds: new THREE.Box3(), point: new THREE.Vector3(), right: new THREE.Vector3(), up: new THREE.Vector3(), back: new THREE.Vector3(), sphere: new THREE.Sphere() }), []);
-  const director = useRef<Director>({ kind: 'none', actorId: '', until: 0, lastCut: -1e9, lastPush: -1e9, cutPending: false, raid: false });
+  const ov = useMemo(() => ({
+    pts: new Float64Array(OVERLAY_MAX_POINTS * 3), n: 0,
+    sub: new Float64Array(64 * 3 * 8), sn: 0,
+    fit: { x: 0, y: 0, z: 0, depth: 0 } as ViewFit,
+    back: new THREE.Vector3(), shotBack: new THREE.Vector3(), tmp: new THREE.Vector3(),
+    sphere: new THREE.Sphere(), box: new THREE.Box3(), shotOn: false, shotKey: -1,
+  }), []);
+  const groups = useMemo(() => ({ map: new Map<string, THREE.Object3D>(), miss: new Map<string, number>() }), []);
+  const director = useRef<Director>({
+    kind: 'none', actorId: '', targetId: '', until: 0, start: 0, hold: 6, acquired: false, recut: false, offFor: 0,
+    lastCut: -1e9, lastPush: -1e9, cutPending: false, raid: false, portalAt: -1e9, queue: [],
+  });
 
   useEffect(() => { s.follow.init = false; }, [selectedResidentId, s]);
 
-  // Event director: cut to what matters (viewer/twitch/demo events only, never simulation chatter).
+  // Event director: queue what matters (viewer/twitch/demo events only, never simulation chatter); the
+  // render loop accepts them on the render clock.
   useEffect(() => store.onEvent(({ event }) => {
     if (event.source === 'simulation' || !DIRECTED_KINDS.has(event.kind)) return;
-    const d = director.current;
-    const now = performance.now() / 1000;
-    if (d.raid && now < d.until && event.kind !== 'raid') return; // never interrupt a raid shot
-    if (event.kind === 'chat' && !event.targetId) {
-      // untargeted chat: gentle push-in on the speaker, rate-limited
-      if (now - d.lastPush < 8 || (d.kind !== 'none' && now < d.until)) return;
-      d.kind = 'speaker'; d.actorId = event.actorId; d.raid = false;
-      d.until = now + 5; d.lastPush = now; d.cutPending = false;
-      return;
-    }
-    // coalesce bursts: one transition per window (raids may pre-empt after 1 s, others after 3.5 s)
-    if (event.kind !== 'join' && now - d.lastCut < (event.kind === 'raid' ? 1 : 3.5)) return;
-    if (event.kind === 'join' && now - d.lastCut < 0.8) return; // joins always get their portal shot (bursts: once per 0.8 s)
-    const isPortal = event.kind === 'raid' || event.kind === 'join';
-    d.kind = isPortal ? 'portal' : 'actor';
-    d.actorId = event.actorId;
-    d.raid = event.kind === 'raid';
-    d.until = now + (event.kind === 'raid' ? 9 : 6);
-    d.lastCut = now;
-    d.cutPending = true;
+    const q = director.current.queue;
+    if (q.length < 32) q.push(event);
   }), [store]);
+
+  /** Rendered avatar group (`resident:<id>` in ResidentsLayer); misses are retried at most every 0.5 s. */
+  const groupOf = (id: string, t: number): THREE.Object3D | undefined => {
+    const g = groups.map.get(id);
+    if (g && g.parent) return g;
+    if (g) groups.map.delete(id);
+    const missAt = groups.miss.get(id);
+    if (missAt !== undefined && t - missAt < 0.5) return undefined;
+    const found = scene.getObjectByName(`resident:${id}`);
+    if (found) { groups.map.set(id, found); groups.miss.delete(id); } else groups.miss.set(id, t);
+    return found;
+  };
+  /** Where the resident is drawn (falls back to the snapshot); returns the rendered yaw or NaN. */
+  const subjectAt = (id: string, t: number, out: THREE.Vector3): { ok: boolean; yaw: number } => {
+    const g = groupOf(id, t);
+    if (g) { g.getWorldPosition(out); out.y = 0; return { ok: true, yaw: g.rotation.y }; }
+    const r = store.getResident(id);
+    if (!r) return { ok: false, yaw: NaN };
+    out.set(r.location.x, 0, r.location.z);
+    const p = store.previous?.residents.find(q => q.id === id);
+    const mx = p ? r.location.x - p.location.x : 0, mz = p ? r.location.z - p.location.z : 0;
+    return { ok: true, yaw: mx * mx + mz * mz > 0.04 ? Math.atan2(mx, mz) : NaN };
+  };
 
   useFrame((state, rawDt) => {
     const dt = Math.min(rawDt, 1);
@@ -428,42 +468,164 @@ export function CameraRig({ mode, selectedResidentId, transparent = false, quali
     }
     let snap = false;
     let rate = 1.4;
+    let lookRate = 0;
     const d = director.current;
-    const now = performance.now() / 1000;
+    for (let i = 0; i < d.queue.length; i++) acceptEvent(d, d.queue[i]!, t, store);
+    d.queue.length = 0;
     // densest resident group (shared by neighborhood bias, street and cinematic)
     if (s.clusterAt < 0 || t - s.clusterAt > 1.5) {
       s.clusterAt = t;
       if (densestCluster(store, s.cluster) && !s.clusterInit) { s.clusterS.copy(s.cluster); s.clusterInit = true; }
     }
     if (s.clusterInit) s.clusterS.lerp(s.cluster, 1 - Math.exp(-dt * 0.5));
-    const directable = mode !== 'overlay';
-    const directed = directable && d.kind !== 'none' && now < d.until;
-    if (directed) {
+    const overlayMode = mode === 'overlay';
+    const directable = !overlayMode || overlayEventShots;
+    const directed = directable && d.kind !== 'none' && t < d.until;
+    if (!directed && d.kind !== 'none' && t >= d.until) d.kind = 'none';
+    // subjects of the current shot (rendered positions)
+    s.hasA = false; s.hasB = false;
+    let facingA = NaN;
+    if (directed && d.kind !== 'portal') {
+      const a = subjectAt(d.actorId, t, s.subA); s.hasA = a.ok; facingA = a.yaw;
+      if (d.kind === 'two') {
+        s.hasB = subjectAt(d.targetId, t, s.subB).ok;
+        if (!s.hasB) d.kind = 'actor';
+      }
+      if (!s.hasA) { if (s.hasB) { s.subA.copy(s.subB); s.hasA = true; s.hasB = false; d.kind = 'actor'; } else d.until = 0; }
+    }
+    const shotOn = directed && d.until > 0;
+    if (shotOn && !overlayMode) {
       snap = d.cutPending;
       d.cutPending = false;
+      lookRate = 4.5; // centre the subject quickly; the position glides
       if (d.kind === 'portal') {
-        const p = PORTAL_POS;
-        const age = d.until - now;
+        const age = d.until - t;
         if (snap || s.shotPos.lengthSq() === 0) portalPose(d.raid, s.shotPos, s.shotLook);
         s.pos.copy(s.shotPos); s.pos.x += Math.sin(age * 0.12) * 0.6;
         s.look.copy(s.shotLook);
-        void p;
         rate = 2.2;
-      } else {
-        const r = store.getResident(d.actorId);
-        if (!r) d.until = 0;
-        else if (d.kind === 'speaker') {
-          frame(s.actor, r.location.x, r.location.z, dt, 5.4, mode === 'street' ? 1.8 : 2.5, 1.3, s.pos, s.look, false);
+      } else if (d.kind === 'two') {
+        // TWO-SHOT: perpendicular to the actor–target axis, both inside the central 60 %
+        const street = mode === 'street';
+        const height = street ? 1.9 : 3.0, minDist = street ? 5.6 : 7.0, headY = 1.55;
+        const mx = (s.subA.x + s.subB.x) / 2, mz = (s.subA.z + s.subB.z) / 2;
+        if (snap) s.twoMid.set(mx, 0, mz); else s.twoMid.lerp(s.lookS.set(mx, 0, mz), 1 - Math.exp(-dt * 3));
+        const sep = s.subA.distanceTo(s.subB);
+        const need = Math.max(minDist, (sep / 2 + 0.45) / (0.6 * 0.6825));
+        let repick = snap;
+        if (!repick && t - s.twoAt > 0.5) {
+          s.twoAt = t;
+          const cx = s.twoMid.x + Math.sin(s.two.yaw) * s.two.dist, cz = s.twoMid.z + Math.cos(s.two.yaw) * s.two.dist;
+          repick = need > s.two.dist * 1.08 || !poseClean(cx, s.two.y, cz, s.subA.x, headY, s.subA.z) || !poseClean(cx, s.two.y, cz, s.subB.x, headY, s.subB.z);
+        }
+        if (repick) {
+          s.twoAt = t;
+          // prefer the side nearer the current camera (less disorienting), then the other
+          const axis = Math.atan2(s.subB.x - s.subA.x, s.subB.z - s.subA.z);
+          const px = mx + Math.sin(axis + Math.PI / 2), pz = mz + Math.cos(axis + Math.PI / 2);
+          const nx = mx + Math.sin(axis - Math.PI / 2), nz = mz + Math.cos(axis - Math.PI / 2);
+          const pref = Math.hypot(camera.position.x - px, camera.position.z - pz) <= Math.hypot(camera.position.x - nx, camera.position.z - nz) ? 1 : -1;
+          if (!pickTwoShot(s.subA.x, s.subA.z, s.subB.x, s.subB.z, headY, height, minDist, pref, s.two)) {
+            // no clean two-shot: front three-quarter on the actor, who faces the target
+            d.kind = 'actor'; d.cutPending = true; d.targetId = '';
+          } else if (!snap) { d.cutPending = true; } // a re-pick is a cut, never a swing through the scene
+          s.twoMid.set(mx, 0, mz);
+        }
+        s.pos.set(s.twoMid.x + Math.sin(s.two.yaw) * s.two.dist, s.two.y, s.twoMid.z + Math.cos(s.two.yaw) * s.two.dist);
+        s.look.set(s.twoMid.x, 1.1, s.twoMid.z);
+        rate = 2.2;
+      }
+      if (d.kind === 'actor' || d.kind === 'speaker') {
+        // new subject: start from the front three-quarter of the way the avatar faces
+        if (snap || s.shotKey !== d.start) { s.shotKey = d.start; s.actor.rel = 0.62; if (snap) s.actor.init = false; if (Number.isFinite(facingA)) s.actor.heading = facingA; }
+        if (d.kind === 'speaker') {
+          frame(s.actor, s.subA.x, s.subA.z, dt, 5.4, mode === 'street' ? 1.8 : 2.5, 1.3, s.pos, s.look, snap, facingA);
           rate = 1.6;
         } else {
-          frame(s.actor, r.location.x, r.location.z, dt, mode === 'street' ? 5.2 : 7.2, mode === 'street' ? 1.9 : 3.3, 1.15, s.pos, s.look, snap);
+          frame(s.actor, s.subA.x, s.subA.z, dt, mode === 'street' ? 5.2 : 7.2, mode === 'street' ? 1.9 : 3.3, 1.15, s.pos, s.look, snap, facingA);
           rate = 2.2;
         }
       }
-      if (d.until === 0) poseFor(mode === 'street' ? 'street' : 'neighborhood', t, s.pos, s.look);
+    } else if (overlayMode) {
+      // ---- OBS overlay: steady exact fit of every rendered resident; event shots fit only the subjects
+      const rs = store.current.residents;
+      let n = 0;
+      const pts = ov.pts;
+      for (let i = 0; i < rs.length; i++) {
+        const r = rs[i]!;
+        const { x, z } = r.location;
+        if (!Number.isFinite(x) || !Number.isFinite(z)) continue;
+        const g = groupOf(r.id, t);
+        if (g && !g.visible) continue; // not drawn by the renderer
+        n = pushBox(pts, n, x - STEADY_HALF, 0, z - STEADY_HALF, x + STEADY_HALF, STEADY_TOP, z + STEADY_HALF);
+        if (g) { g.getWorldPosition(ov.tmp); n = pushBox(pts, n, ov.tmp.x - STEADY_HALF, 0, ov.tmp.z - STEADY_HALF, ov.tmp.x + STEADY_HALF, STEADY_TOP, ov.tmp.z + STEADY_HALF); }
+        else {
+          const p = store.previous?.residents.find(q => q.id === r.id);
+          if (p) n = pushBox(pts, n, p.location.x - STEADY_HALF, 0, p.location.z - STEADY_HALF, p.location.x + STEADY_HALF, STEADY_TOP, p.location.z + STEADY_HALF);
+        }
+      }
+      // the portal only while it matters: a recent raid / join, or residents at the portal
+      let nearPortal = t - d.portalAt < 14;
+      for (let i = 0; i < rs.length && !nearPortal; i++) nearPortal = Math.hypot(rs[i]!.location.x - PORTAL_POS.x, rs[i]!.location.z - PORTAL_POS.z) < 7;
+      if (nearPortal || n === 0) n = pushBox(pts, n, PORTAL_POS.x - 3.1, 0, PORTAL_POS.z - 0.9, PORTAL_POS.x + 3.1, 5.6, PORTAL_POS.z + 0.9);
+      ov.n = n;
+      const tanV = Math.tan(THREE.MathUtils.degToRad(camera.getEffectiveFOV()) / 2);
+      const aspect = camera.aspect || 16 / 9;
+      // event subjects
+      ov.sn = 0;
+      if (shotOn) {
+        const sub = ov.sub;
+        let sn = 0;
+        if (d.kind === 'portal') {
+          sn = pushBox(sub, sn, PORTAL_POS.x - 3.1, 0, PORTAL_POS.z - 0.9, PORTAL_POS.x + 3.1, 5.6, PORTAL_POS.z + 0.9);
+          if (d.raid || d.kind === 'portal') {
+            // arriving visitors: everyone within 9 m of the portal (rendered position)
+            for (let i = 0; i < rs.length && sn + 8 <= 64 * 8; i++) {
+              const r = rs[i]!;
+              if (Math.hypot(r.location.x - PORTAL_POS.x, r.location.z - PORTAL_POS.z) > 9) continue;
+              const g = groupOf(r.id, t);
+              if (g && !g.visible) continue;
+              const q = g ? g.getWorldPosition(ov.tmp) : ov.tmp.set(r.location.x, 0, r.location.z);
+              sn = pushBox(sub, sn, q.x - SHOT_HALF, 0, q.z - SHOT_HALF, q.x + SHOT_HALF, SHOT_TOP, q.z + SHOT_HALF);
+            }
+          }
+          ov.shotBack.set(0, Math.sin(0.3), Math.cos(0.3));
+        } else {
+          sn = pushBox(sub, sn, s.subA.x - SHOT_HALF, 0, s.subA.z - SHOT_HALF, s.subA.x + SHOT_HALF, SHOT_TOP, s.subA.z + SHOT_HALF);
+          const ra = store.getResident(d.actorId);
+          if (ra && d.kind !== 'two') sn = pushBox(sub, sn, ra.location.x - SHOT_HALF, 0, ra.location.z - SHOT_HALF, ra.location.x + SHOT_HALF, SHOT_TOP, ra.location.z + SHOT_HALF);
+          let yaw = 0;
+          if (d.kind === 'two' && s.hasB) {
+            sn = pushBox(sub, sn, s.subB.x - SHOT_HALF, 0, s.subB.z - SHOT_HALF, s.subB.x + SHOT_HALF, SHOT_TOP, s.subB.z + SHOT_HALF);
+            const axis = Math.atan2(s.subB.x - s.subA.x, s.subB.z - s.subA.z);
+            const y1 = axis + Math.PI / 2, y2 = axis - Math.PI / 2;
+            yaw = Math.cos(y1) >= Math.cos(y2) ? y1 : y2; // the side facing the usual overlay view
+          } else if (Number.isFinite(facingA)) yaw = facingA;  // front of the actor
+          yaw = Math.atan2(Math.sin(yaw), Math.cos(yaw));
+          yaw = Math.max(-0.9, Math.min(0.9, yaw));
+          if (ov.shotKey !== d.start) ov.shotBack.set(Math.sin(yaw) * Math.cos(OVERLAY_SHOT_ELEV), Math.sin(OVERLAY_SHOT_ELEV), Math.cos(yaw) * Math.cos(OVERLAY_SHOT_ELEV));
+        }
+        ov.sn = sn;
+        ov.shotKey = d.start;
+        fitPointsToView(sub, sn, ov.shotBack.x, ov.shotBack.y, ov.shotBack.z, tanV, aspect, OVERLAY_SAFE_NDC, d.kind === 'portal' ? 0 : OVERLAY_SHOT_MIN_DEPTH, camera.near + 0.5, ov.fit);
+        s.pos.set(ov.fit.x, ov.fit.y, ov.fit.z);
+        s.look.copy(s.pos).addScaledVector(ov.shotBack, -Math.max(4, ov.fit.depth));
+        rate = 1.8;
+        d.cutPending = false;
+        if (!ov.shotOn) ov.shotOn = true;
+      } else {
+        if (ov.shotOn) ov.shotOn = false;
+        fitPointsToView(pts, n, OVERLAY_BACK.x, OVERLAY_BACK.y, OVERLAY_BACK.z, tanV, aspect, OVERLAY_SAFE_NDC, 0, camera.near + 0.5, ov.fit);
+        s.pos.set(ov.fit.x, ov.fit.y, ov.fit.z);
+        s.look.copy(s.pos).addScaledVector(OVERLAY_BACK, -Math.max(4, ov.fit.depth));
+        rate = d.kind === 'none' && t - d.start < d.hold + 6 ? 1.0 : 1.4;
+      }
     } else if (mode === 'follow') {
       const r = selectedResidentId ? store.getResident(selectedResidentId) : undefined;
-      if (r) frame(s.follow, r.location.x, r.location.z, dt, 6.8, 3.1, 1.15, s.pos, s.look, false);
+      if (r && selectedResidentId) {
+        const f = subjectAt(selectedResidentId, t, s.subA);
+        frame(s.follow, f.ok ? s.subA.x : r.location.x, f.ok ? s.subA.z : r.location.z, dt, 6.8, 3.1, 1.15, s.pos, s.look, false, f.yaw);
+      }
       else if (transparent) overlayPose(store, s.overlay, camera, t, dt, s.pos, s.look);
       else poseFor('neighborhood', t, s.pos, s.look);
       rate = 2.4;
@@ -475,20 +637,12 @@ export function CameraRig({ mode, selectedResidentId, transparent = false, quali
       s.look.set(-Math.sin(a) * 14, 6, -Math.cos(a) * 14);
       rate = 3;
     } else if (mode === 'cinematic' && s.clusterInit) {
-      // slow orbit around the liveliest group; down-angle capped at ~35°
+      // slow orbit around the liveliest group; down-angle capped at ~35°. On the stage: a low, closer
+      // orbit that looks UNDER the string-light span (never down through it).
       const onStage = Math.hypot(s.clusterS.x - STAGE_POS.x, s.clusterS.z - STAGE_POS.z) < 3.15;
-      const dist = onStage ? 9.4 : 12, h = onStage ? 7.6 : 6.2;
+      const dist = onStage ? 6.6 : 12, h = onStage ? 2.05 : 6.2;
       orbitShot(s, dt, 0.07, dist, h, 1.1);
       rate = 0.9;
-    } else if (mode === 'overlay') {
-      overlay.bounds.makeEmpty();
-      includeResidents(overlay.bounds, store.current.residents, overlay.point);
-      if (store.previous) includeResidents(overlay.bounds, store.previous.residents, overlay.point);
-      overlay.bounds.expandByPoint(overlay.point.set(PORTAL_POS.x - 3, -0.35, PORTAL_POS.z - 1));
-      overlay.bounds.expandByPoint(overlay.point.set(PORTAL_POS.x + 3, 7, PORTAL_POS.z + 1));
-      overlay.bounds.getCenter(s.look);
-      const distance = overlayFitDistance(overlay.bounds, s.look, OVERLAY_BACK, camera, overlay.right, overlay.up, overlay.point);
-      s.pos.copy(s.look).addScaledVector(OVERLAY_BACK, distance);
     } else if (mode === 'cinematic') {
       cine.u = (cine.u + dt / 120) % 1;
       cine.pos.getPointAt(cine.u, s.pos);
@@ -506,12 +660,11 @@ export function CameraRig({ mode, selectedResidentId, transparent = false, quali
         s.pos.x += bx * 0.6; s.pos.z += bz * 0.6;
       }
     }
-    // See-through cone (WebGL): dissolve props between the camera and the subject in close shots.
+    // See-through cone (WebGL): only for wide / drifting shots. Close event shots pick clean poses instead
+    // (the dither reads as a glitch up close).
     let cutWant = 0;
-    if (directed && d.kind === 'portal') { s.cut.set(PORTAL_POS.x, 1.7, PORTAL_POS.z + 2.8); cutWant = 1; s.cutR0 = 0.4; s.cutR1 = 1.3; }
-    else if (directed && d.until > 0) { s.cut.set(s.actor.pos.x, 1.25, s.actor.pos.z); cutWant = 1; s.cutR0 = 0.35; s.cutR1 = 0.95; }
-    else if (!directed && mode === 'follow' && selectedResidentId && s.follow.init) { s.cut.set(s.follow.pos.x, 1.25, s.follow.pos.z); cutWant = 1; s.cutR0 = 0.35; s.cutR1 = 0.95; }
-    else if (!directed && (mode === 'street' || (mode === 'cinematic' && t - s.estAt >= 8)) && s.clusterInit) { s.cut.set(s.clusterS.x, 1.15, s.clusterS.z); cutWant = 1; s.cutR0 = 0.3; s.cutR1 = mode === 'street' ? 0.85 : 1.1; }
+    if (!shotOn && mode === 'follow' && selectedResidentId && s.follow.init) { s.cut.set(s.follow.pos.x, 1.25, s.follow.pos.z); cutWant = 1; s.cutR0 = 0.35; s.cutR1 = 0.95; }
+    else if (!shotOn && (mode === 'street' || (mode === 'cinematic' && t - s.estAt >= 8)) && s.clusterInit) { s.cut.set(s.clusterS.x, 1.15, s.clusterS.z); cutWant = 1; s.cutR0 = 0.3; s.cutR1 = mode === 'street' ? 0.85 : 1.1; }
     if (first.current || snap) {
       camera.position.copy(s.pos);
       look.current.copy(s.look);
@@ -519,22 +672,53 @@ export function CameraRig({ mode, selectedResidentId, transparent = false, quali
     } else {
       const k = 1 - Math.exp(-dt * rate);
       camera.position.lerp(s.pos, k);
-      look.current.lerp(s.look, k);
+      look.current.lerp(s.look, lookRate > 0 ? 1 - Math.exp(-dt * lookRate) : k);
     }
-    if (mode === 'overlay') {
-      overlay.back.copy(camera.position).sub(look.current);
-      const currentDistance = overlay.back.length();
-      if (currentDistance > 0.001) overlay.back.multiplyScalar(1 / currentDistance); else overlay.back.copy(OVERLAY_BACK);
-      const safeDistance = overlayFitDistance(overlay.bounds, look.current, overlay.back, camera, overlay.right, overlay.up, overlay.point);
-      if (safeDistance > currentDistance) camera.position.copy(look.current).addScaledVector(overlay.back, safeDistance);
-      overlay.bounds.getBoundingSphere(overlay.sphere);
-      const farNeeded = camera.position.distanceTo(overlay.sphere.center) + overlay.sphere.radius + 10;
-      if (camera.far < farNeeded) { camera.far = farNeeded; camera.updateProjectionMatrix(); }
+    if (overlayMode) {
+      // Guarantee: nothing fitted leaves NDC ±0.82 — the steady set when no shot runs, the subjects during a shot.
+      const tanV = Math.tan(THREE.MathUtils.degToRad(camera.getEffectiveFOV()) / 2);
+      ov.back.copy(camera.position).sub(look.current);
+      if (ov.back.lengthSq() < 1e-6) ov.back.copy(OVERLAY_BACK); else ov.back.normalize();
+      const usePts = shotOn ? ov.sub : ov.pts, useN = shotOn ? ov.sn : ov.n;
+      const push = pushBackToFit(usePts, useN, camera.position.x, camera.position.y, camera.position.z, ov.back.x, ov.back.y, ov.back.z, tanV, camera.aspect || 16 / 9, OVERLAY_SAFE_NDC, camera.near + 0.5);
+      if (push > 0) camera.position.addScaledVector(ov.back, push);
+      // hold starts once the glide has (nearly) arrived
+      if (shotOn && !d.acquired && (camera.position.distanceTo(s.pos) < 0.12 * Math.max(4, ov.fit.depth) || t - d.start > 2.6)) { d.acquired = true; d.until = t + d.hold; }
+      ov.box.makeEmpty();
+      for (let i = 0; i < ov.n; i++) ov.box.expandByPoint(ov.tmp.set(ov.pts[i * 3]!, ov.pts[i * 3 + 1]!, ov.pts[i * 3 + 2]!));
+      if (!ov.box.isEmpty()) {
+        ov.box.getBoundingSphere(ov.sphere);
+        const farNeeded = camera.position.distanceTo(ov.sphere.center) + ov.sphere.radius + 10;
+        if (camera.far < farNeeded) { camera.far = farNeeded; camera.updateProjectionMatrix(); }
+      }
     }
-    if (mode !== 'overlay') pushOutOfBuildings(camera.position);
+    if (!overlayMode) pushOutOfBuildings(camera.position);
     camera.lookAt(look.current);
+    // Directed shots (world view): hold from acquisition; subjects must stay inside the central 60 %.
+    if (shotOn && !overlayMode) {
+      camera.updateMatrixWorld();
+      let inFrame = true, central = true;
+      const check = (x: number, y: number, z: number) => {
+        s.head.set(x, y, z).project(camera);
+        if (s.head.z > 1 || Math.abs(s.head.x) > 0.8 || Math.abs(s.head.y) > 0.88) inFrame = false;
+        if (s.head.z > 1 || Math.abs(s.head.x) > 0.6 || Math.abs(s.head.y) > 0.75) central = false;
+      };
+      if (d.kind === 'portal') check(PORTAL_POS.x, 1.4, PORTAL_POS.z + 2.6);
+      else {
+        if (s.hasA) { check(s.subA.x, 1.5, s.subA.z); check(s.subA.x, 0.3, s.subA.z); }
+        if (d.kind === 'two' && s.hasB) { check(s.subB.x, 1.5, s.subB.z); check(s.subB.x, 0.3, s.subB.z); }
+      }
+      if (!d.acquired) {
+        if (inFrame) { d.acquired = true; d.until = t + d.hold; }
+        else if (!d.recut && t - d.start > 1.4) { d.recut = true; d.cutPending = true; }
+        else if (t - d.start > 3) d.until = t; // never acquired: give up rather than hold an empty shot
+      } else {
+        d.offFor = central ? 0 : d.offFor + dt;
+        if (d.offFor > 0.6) { d.offFor = 0; d.cutPending = true; }
+      }
+    }
     // follow: the subject's head must stay inside the frame (≥ 10 % margin), else re-pick + cut
-    if (mode === 'follow' && !directed && selectedResidentId && s.follow.init) {
+    if (mode === 'follow' && !shotOn && selectedResidentId && s.follow.init) {
       camera.updateMatrixWorld();
       s.head.set(s.follow.pos.x, 1.75, s.follow.pos.z).project(camera);
       const out = s.head.z > 1 || Math.abs(s.head.x) > 0.8 || Math.abs(s.head.y) > 0.8;
@@ -552,7 +736,7 @@ export function CameraRig({ mode, selectedResidentId, transparent = false, quali
     u.uCutA.value.copy(camera.position);
     if (snap || u.uCutOn.value < 0.01) u.uCutB.value.copy(s.cut); else u.uCutB.value.lerp(s.cut, Math.min(1, dt * 6));
     u.uCutR.value.set(s.cutR0, s.cutR1);
-    u.uCutOn.value += (cutWant - u.uCutOn.value) * Math.min(1, dt * 3.5);
+    u.uCutOn.value += (cutWant - u.uCutOn.value) * Math.min(1, dt * (cutWant ? 3.5 : 6));
   });
 
   if (mode !== 'orbit') return null;

@@ -46,6 +46,10 @@ export interface Action {
   /** Agent this resident is walking over to socialise with. */
   seekingId?: string;
   hop?: { center: Vec2; radius: number; next: number; poiId: string };
+  /** A night's sleep at home (runs until the personal wake-up time; no satiation, no distress wake-ups). */
+  night?: boolean;
+  /** Sim time this action started (night sleep: used by the night watch). */
+  since?: number;
   onArrive?: (w: World, a: Agent) => void;
   onDone?: (w: World, a: Agent) => void;
 }
@@ -87,8 +91,12 @@ export interface Agent {
   lastReplyAt: number;
   /** Sim time a low-need state (lonely / tired / bored) was last shown. */
   moodShownAt: number;
-  /** Personal bedtime in game hours (20–23.5); tiredness ramps up after it. */
+  /** Personal bedtime in game hours (≈ 21:15–23:45, from the id); sleepiness ramps up shortly before it. */
   bedtime: number;
+  /** Sim time until which this resident may stay up past bedtime (restless spell, fresh arrival, viewer activity). */
+  awakeUntil: number;
+  /** Night index of this resident's last restless spell (one per night at most). */
+  restlessNight?: number;
 }
 
 export type EncounterKind = 'greet' | 'chat' | 'compliment' | 'gift' | 'befriend' | 'bicker' | 'makeup';
@@ -137,6 +145,11 @@ export interface WorldFacts {
   lastWelcomeAt: number;
   lastGiftAt: number;
   lastMutterAt: number;
+  /** Rate limits for the night routine's spoken lines (goodnight / good morning / can't sleep). */
+  lastNightLineAt?: number;
+  lastMorningLineAt?: number;
+  /** Sim time the night watch may next send a restless sleeper out (keeps a small night shift up). */
+  nextRestlessAt?: number;
   /** Crowd info of the latest raid (shared by its celebrate + arrival events). */
   raidCrowd?: { visitors: number; amount: number; channel: string };
 }

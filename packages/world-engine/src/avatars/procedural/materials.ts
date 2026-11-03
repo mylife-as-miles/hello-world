@@ -22,7 +22,9 @@ export const FINISH_PBR: Record<Exclude<Finish, 'baked' | 'lens'>, [number, numb
  * while skin, cloth, hair, leather and metal keep their own response.
  */
 function bakedMaterial(): THREE.MeshStandardMaterial {
-  const m = new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 1, metalness: 0, side: THREE.DoubleSide });
+  // roughness 0.72 is only the fallback where onBeforeCompile is ignored (WebGPU node materials): an average of the
+  // fabric/skin/hair finishes instead of fully matte. WebGL reads the per-vertex value below.
+  const m = new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.72, metalness: 0, side: THREE.DoubleSide });
   m.onBeforeCompile = (sh) => {
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nattribute vec3 pbr;\nvarying vec3 vPbr;')

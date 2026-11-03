@@ -206,3 +206,134 @@ describe('two-shot + overlay fits', () => {
     }
   });
 });
+
+import {
+  guardFraming, newTwoBeat, startTwoBeat, stepTwoBeat, TWO_BEAT, STREET_CANOPY_REACH, projectNdc,
+} from './cameraPose';
+
+describe('two-beat event shot (gift / greet with a far target)', () => {
+  it('opens on the actor, follows the approach, cuts to the two-shot in range and holds it once both are in frame', () => {
+    const b = newTwoBeat();
+    // giver 24 m away jogging at 3 m/s; the target waits
+    expect(startTwoBeat(b, 0, 24)).toBe('actor');
+    const phases: string[] = [];
+    let twoAt = NaN, doneAt = NaN;
+    for (let t = 0.1; t < 20; t += 0.1) {
+      const sep = Math.max(1.1, 24 - 3 * t);
+      const ph = stepTwoBeat(b, t, sep, t - (Number.isNaN(twoAt) ? 1e9 : twoAt) > 0.6); // in frame 0.6 s after the cut
+      phases.push(ph);
+      if (ph === 'two' && Number.isNaN(twoAt)) { twoAt = t; expect(sep).toBeLessThanOrEqual(TWO_BEAT.range); expect(b.wide).toBe(false); }
+      if (ph === 'done') { doneAt = t; break; }
+    }
+    expect(twoAt).toBeGreaterThanOrEqual(TWO_BEAT.minActor);   // the giver is on screen first
+    expect(doneAt - (twoAt + 0.6)).toBeGreaterThanOrEqual(1.5); // pair held ≥ 1.5 s after both are in frame
+  });
+
+  it('a pair that never gets close still ends on a wide two-shot (never on one of them alone)', () => {
+    const b = newTwoBeat();
+    startTwoBeat(b, 0, 22);
+    let ph = 'actor', t = 0;
+    while (ph === 'actor' && t < 20) { t += 0.1; ph = stepTwoBeat(b, t, 22, false); }
+    expect(ph).toBe('two');
+    expect(b.wide).toBe(true);
+    expect(t).toBeLessThanOrEqual(TWO_BEAT.minActor + 0.5 + TWO_BEAT.stall + 0.11); // stalled → wide two-shot
+    // they meet during the wide shot → tighten
+    stepTwoBeat(b, t + 0.1, 3, true);
+    expect(b.wide).toBe(false);
+  });
+
+  it('a pair already within range opens straight on the two-shot; it gives up if never in frame', () => {
+    const b = newTwoBeat();
+    expect(startTwoBeat(b, 5, 4)).toBe('two');
+    expect(stepTwoBeat(b, 5 + TWO_BEAT.giveUp - 0.1, 4, false)).toBe('two');
+    expect(stepTwoBeat(b, 5 + TWO_BEAT.giveUp + 0.01, 4, false)).toBe('done');
+  });
+});
+
+describe('follow framing guard', () => {
+  const tanV = Math.tan(THREE.MathUtils.degToRad(21));
+  const check = (pos: { x: number; y: number; z: number }, look: { x: number; y: number; z: number }, sx: number, sz: number) => {
+    const c = cam(pos.x, pos.y, pos.z, look.x, look.y, look.z);
+    for (const y of [0.05, 1.75]) {
+      const p = ndc(c, sx, y, sz);
+      expect(p.z).toBeLessThan(1);
+      expect(Math.abs(p.x)).toBeLessThanOrEqual(0.8);
+      expect(Math.abs(p.y)).toBeLessThanOrEqual(0.8);
+    }
+  };
+  it('projectNdc matches three.js projection', () => {
+    const c = cam(3, 4, 9, 0, 1, 0);
+    const o = { x: 0, y: 0, z: 0 };
+    for (const [x, y, z] of [[0, 0, 0], [1, 1.7, -1], [-2, 0.3, 2]] as const) {
+      projectNdc({ x: 3, y: 4, z: 9 }, { x: 0, y: 1, z: 0 }, x, y, z, tanV, 16 / 9, o);
+      const p = ndc(c, x, y, z);
+      expect(o.x).toBeCloseTo(p.x, 4); expect(o.y).toBeCloseTo(p.y, 4);
+    }
+  });
+  it('re-aims a look-ahead pose that lost the seated subject (K-follow-seated) and keeps head + feet inside ±0.8', () => {
+    // camera 6.8 m out at 3.1 m, but the look-ahead aims 5 m beside the subject: the body leaves the frame
+    const pos = { x: 6.8, y: 3.1, z: 0 }, look = { x: 0, y: 1.15, z: 5 };
+    const before = projectNdc(pos, look, 0, 0.05, 0, tanV, 16 / 9, { x: 0, y: 0, z: 0 });
+    expect(Math.abs(before.x)).toBeGreaterThan(0.8);
+    expect(guardFraming(pos, look, 0, 0, 1.75, tanV, 16 / 9)).toBeGreaterThan(0);
+    check(pos, look, 0, 0);
+  });
+  it('pulls back a pose too close to fit the body and enforces the minimum down-angle', () => {
+    const pos = { x: 1.2, y: 1.2, z: 0.2 }, look = { x: 0, y: 1.1, z: 0 };
+    expect(guardFraming(pos, look, 0, 0, 1.75, tanV, 16 / 9, 0.8, THREE.MathUtils.degToRad(16))).toBe(2);
+    check(pos, look, 0, 0);
+    const hd = Math.hypot(pos.x, pos.z);
+    expect((pos.y - 1.085) / hd).toBeGreaterThanOrEqual(Math.tan(THREE.MathUtils.degToRad(16)) - 1e-9);
+    // an already good pose is untouched
+    const p2 = { x: 0, y: 3.1, z: 6.8 }, l2 = { x: 0, y: 1.15, z: 0 };
+    expect(guardFraming(p2, l2, 0, 0, 1.75, tanV, 16 / 9)).toBe(0);
+    expect(p2).toEqual({ x: 0, y: 3.1, z: 6.8 });
+  });
+  it('a high camera looking down past a near wall still counts the wall (K-follow-later)', () => {
+    setCameraProps(town.occluders);
+    const arcade = BUILDINGS.find(b => b.kind === 'arcade')!;
+    const c = Math.cos(arcade.rotation), s = Math.sin(arcade.rotation);
+    const w = (lx: number, lz: number) => ({ x: arcade.position.x + lx * c + lz * s, z: arcade.position.z - lx * s + lz * c });
+    const subj = w(2.4, arcade.depth / 2 + 1.4);
+    const camP = w(arcade.width / 2 + 2.6, arcade.depth / 2 + 7.5);
+    expect(wallCoverage(camP.x, 8.1, camP.z, subj.x, subj.z)).toBeGreaterThan(WALL_COVERAGE_MAX);
+  });
+});
+
+describe('street canopy + overlay band', () => {
+  it('rejects a planter tree 5 m from an eye-level street lens (K-street) only with the street reach', () => {
+    setCameraProps([{ x: -3.6, z: -7.6, r: 0.93, h: 2.67 }]);
+    // K-street camera (0.1, 1.9, -4.1) looking towards the café side
+    expect(lensClear(0.1, 1.9, -4.1, -6, -10)).toBe(true);
+    expect(lensClear(0.1, 1.9, -4.1, -6, -10, STREET_CANOPY_REACH)).toBe(false);
+    // a thin lamp post at the same spot is not a canopy
+    setCameraProps([{ x: -3.6, z: -7.6, r: 0.3, h: 4.1 }]);
+    expect(lensClear(0.1, 1.9, -4.1, -6, -10, STREET_CANOPY_REACH)).toBe(true);
+  });
+
+  it('band fit keeps every point between −0.82 and the band top (top safe area for bubbles); pushBack honours it', () => {
+    const pts: number[] = [];
+    const box = (x: number, z: number) => { for (let m = 0; m < 8; m++) pts.push(m & 1 ? x + 0.55 : x - 0.55, m & 2 ? 2.4 : 0, m & 4 ? z + 0.55 : z - 0.55); };
+    box(2, 1); box(5, -1);
+    const el = 0.26, yaw = 0.5, top = 0.42;
+    const b = new THREE.Vector3(Math.sin(yaw) * Math.cos(el), Math.sin(el), Math.cos(yaw) * Math.cos(el));
+    const tanV = Math.tan(THREE.MathUtils.degToRad(21));
+    const fit: ViewFit = { x: 0, y: 0, z: 0, depth: 0 };
+    for (const minDepth of [0, 9.5]) {
+      fitPointsToView(pts, pts.length / 3, b.x, b.y, b.z, tanV, 16 / 9, 0.82, minDepth, 0.6, fit, top);
+      const c = new THREE.PerspectiveCamera(42, 16 / 9, 0.1, 500);
+      c.position.set(fit.x, fit.y, fit.z); c.lookAt(fit.x - b.x, fit.y - b.y, fit.z - b.z); c.updateMatrixWorld();
+      let hi = -Infinity;
+      for (let i = 0; i < pts.length; i += 3) {
+        const p = ndc(c, pts[i]!, pts[i + 1]!, pts[i + 2]!);
+        expect(Math.abs(p.x)).toBeLessThanOrEqual(0.8201);
+        expect(p.y).toBeGreaterThanOrEqual(-0.8201);
+        expect(p.y).toBeLessThanOrEqual(top + 1e-3);
+        hi = Math.max(hi, p.y);
+      }
+      if (minDepth === 0) expect(hi).toBeGreaterThan(top - 0.05); // tight
+      // nothing to push for the exact fit
+      expect(pushBackToFit(pts, pts.length / 3, fit.x, fit.y, fit.z, b.x, b.y, b.z, tanV, 16 / 9, 0.82, 0.6, top)).toBeLessThan(1e-6);
+    }
+  });
+});

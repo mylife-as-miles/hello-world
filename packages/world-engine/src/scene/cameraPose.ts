@@ -251,23 +251,29 @@ export const LENS_TAN_H = Math.tan((21 * Math.PI) / 180) * (16 / 9) + 0.08;
  * third) — tall props (≥ 1.2 m) within 3.2 m, low ones (planter pots, fences, ≥ 0.6 m) within 2.2 m —
  * unless the camera is well above them. A prop that close fills a large part of the frame.
  */
-export function lensClear(ax: number, ay: number, az: number, bx: number, bz: number): boolean {
+export function lensClear(ax: number, ay: number, az: number, bx: number, bz: number, reachWide = 3.2): boolean {
   const dx = bx - ax, dz = bz - az;
   const D = Math.hypot(dx, dz) || 1;
   const fx = dx / D, fz = dz / D;
   for (let i = 0; i < EXTRA.length; i++) {
     const o = EXTRA[i]!;
     if (o.canopy || o.h < 0.6 || ay > o.h + 2.2) continue;
-    const reach = o.h >= 1.2 ? 3.2 : 2.2;
+    // wide props (tree / planter canopies, r ≥ 0.8) spread well past their footprint radius
+    const wide = o.h >= 2.4 && o.r >= 0.8;
+    const reach = wide ? Math.max(3.2, reachWide) : o.h >= 1.2 ? 3.2 : 2.2;
+    const rr = wide ? o.r + 0.6 : o.r;
     const ox = o.x - ax, oz = o.z - az;
-    const dist = Math.hypot(ox, oz) - o.r;
+    const dist = Math.hypot(ox, oz) - rr;
     if (dist > reach) continue;
     const f = ox * fx + oz * fz;
-    if (f < -o.r) continue; // fully behind the lens
-    if (Math.abs(ox * fz - oz * fx) - o.r < Math.max(0.05, f) * LENS_TAN_H + 0.15) return false;
+    if (f < -rr) continue; // fully behind the lens
+    if (Math.abs(ox * fz - oz * fx) - rr < Math.max(0.05, f) * LENS_TAN_H + 0.15) return false;
   }
   return true;
 }
+
+/** Street (eye-level) lens reach for wide canopies: a planter tree 5 m away still fills half the frame. */
+export const STREET_CANOPY_REACH = 6.5;
 
 /**
  * Fraction of the frame width covered by building walls (and the portal) standing between the camera
@@ -281,9 +287,11 @@ export function wallCoverage(ax: number, ay: number, az: number, bx: number, bz:
   const fx = dx / D, fz = dz / D;
   const T = LENS_TAN_H;
   let worst = 0;
+  // frame bottom (pitch towards the subject's chest minus the half vertical fov): a wall top below it is out of frame
+  const bottom = Math.atan2(1.1 - ay, D) - (21 * Math.PI) / 180;
   for (let i = 0; i < OCCLUDERS.length; i++) {
     const o = OCCLUDERS[i]!;
-    if (o.kind !== 'box' || ay > o.h + 1.5) continue;
+    if (o.kind !== 'box') continue;
     const hw = o.hw - 0.45, hd = o.hd - 0.45; // real wall footprint (occluders carry a margin)
     if (Math.hypot(o.x - ax, o.z - az) > Math.hypot(hw, hd) + 9) continue;
     let lo = Infinity, hi = -Infinity, any = false;
@@ -298,6 +306,7 @@ export function wallCoverage(ax: number, ay: number, az: number, bx: number, bz:
       if (Math.hypot(ox, oz) > 9) continue;
       const f = ox * fx + oz * fz;
       if (f > D + 0.3 || f <= 0.15) continue; // behind the subject (backdrop) or behind the lens
+      if (Math.atan2(o.h - ay, f) < bottom) continue; // wall top below the frame (camera well above it)
       const lat = ox * fz - oz * fx; // screen-right is negative here; only the extent matters
       const x = lat / f;
       if (x < lo) lo = x; if (x > hi) hi = x;
@@ -380,12 +389,12 @@ export function pickFramingPose(
  */
 export function pickTwoShot(
   ax: number, az: number, bx: number, bz: number, headY: number, height: number, minDist: number,
-  prefSide: number, out: PickedPose & { dist: number }, tanH = LENS_TAN_H - 0.08,
+  prefSide: number, out: PickedPose & { dist: number }, tanH = LENS_TAN_H - 0.08, frac = 0.6,
 ): boolean {
   const mx = (ax + bx) / 2, mz = (az + bz) / 2;
   const sep = Math.hypot(bx - ax, bz - az);
   const axis = Math.atan2(bx - ax, bz - az);
-  const need = (sep / 2 + 0.45) / (0.6 * tanH);
+  const need = (sep / 2 + 0.45) / (frac * tanH);
   const base = Math.max(minDist, need);
   const side0 = prefSide < 0 ? -1 : 1;
   for (let step = 0; step < POSE_RISE.length * 2; step++) {
@@ -431,22 +440,26 @@ export interface ViewFit { x: number; y: number; z: number; depth: number }
 export function fitPointsToView(
   pts: ArrayLike<number>, n: number, bx: number, by: number, bz: number,
   tanV: number, aspect: number, ndc: number, minDepth: number, nearPad: number, out: ViewFit,
+  /** top of the vertical band (NDC, default `ndc`): lower keeps a top safe area free for speech bubbles */
+  ndcTop = ndc,
 ): ViewFit {
   // basis: right = normalize(up × back), up' = back × right
   let rx = bz, rz = -bx; const rl = Math.hypot(rx, rz) || 1; rx /= rl; rz /= rl;
   const ux = by * rz, uy = bz * rx - bx * rz, uz = -by * rx;
-  const kV = ndc * tanV, kH = ndc * tanV * Math.max(0.1, aspect);
+  const kV = ndc * tanV, kT = ndcTop * tanV, kH = ndc * tanV * Math.max(0.1, aspect);
   let A = -Infinity, B = Infinity, Au = -Infinity, Bu = Infinity, bMax = -Infinity, bMin = Infinity;
   for (let i = 0; i < n; i++) {
     const x = pts[i * 3]!, y = pts[i * 3 + 1]!, z = pts[i * 3 + 2]!;
     const pr = x * rx + z * rz, pu = x * ux + y * uy + z * uz, pb = x * bx + y * by + z * bz;
     A = Math.max(A, pr + kH * pb); B = Math.min(B, pr - kH * pb);
-    Au = Math.max(Au, pu + kV * pb); Bu = Math.min(Bu, pu - kV * pb);
+    // band: −kV·depth ≤ (p − C)·u ≤ kT·depth
+    Au = Math.max(Au, pu + kT * pb); Bu = Math.min(Bu, pu - kV * pb);
     bMax = Math.max(bMax, pb); bMin = Math.min(bMin, pb);
   }
   if (n === 0) { out.x = 0; out.y = 0; out.z = 0; out.depth = 0; return out; }
-  const cb = Math.max((A - B) / (2 * kH), (Au - Bu) / (2 * kV), bMax + nearPad, (bMax + bMin) / 2 + minDepth);
-  const cr = (A + B) / 2, cu = (Au + Bu) / 2;
+  const cb = Math.max((A - B) / (2 * kH), (Au - Bu) / (kT + kV), bMax + nearPad, (bMax + bMin) / 2 + minDepth);
+  // up: midpoint of the feasible interval [Au − kT·cb, Bu + kV·cb]
+  const cr = (A + B) / 2, cu = (Au + Bu) / 2 + (kV - kT) * cb / 2;
   out.x = cr * rx + cu * ux + cb * bx;
   out.y = cu * uy + cb * by;
   out.z = cr * rz + cu * uz + cb * bz;
@@ -460,20 +473,113 @@ export function fitPointsToView(
  */
 export function pushBackToFit(
   pts: ArrayLike<number>, n: number, cx: number, cy: number, cz: number, bx: number, by: number, bz: number,
-  tanV: number, aspect: number, ndc: number, nearPad: number,
+  tanV: number, aspect: number, ndc: number, nearPad: number, ndcTop = ndc,
 ): number {
   let rx = bz, rz = -bx; const rl = Math.hypot(rx, rz) || 1; rx /= rl; rz /= rl;
   const ux = by * rz, uy = bz * rx - bx * rz, uz = -by * rx;
-  const kV = ndc * tanV, kH = ndc * tanV * Math.max(0.1, aspect);
+  const kV = ndc * tanV, kT = ndcTop * tanV, kH = ndc * tanV * Math.max(0.1, aspect);
   let s = 0;
   for (let i = 0; i < n; i++) {
     const px = pts[i * 3]! - cx, py = pts[i * 3 + 1]! - cy, pz = pts[i * 3 + 2]! - cz;
     const depth = -(px * bx + py * by + pz * bz);
-    const lr = Math.abs(px * rx + pz * rz), lu = Math.abs(px * ux + py * uy + pz * uz);
-    s = Math.max(s, lr / kH - depth, lu / kV - depth, nearPad - depth);
+    const lr = Math.abs(px * rx + pz * rz), lu = px * ux + py * uy + pz * uz;
+    s = Math.max(s, lr / kH - depth, (lu > 0 ? lu / kT : -lu / kV) - depth, nearPad - depth);
   }
   return s;
 }
 
 /** Projected height (px) of a vertical segment of `h` metres at camera depth `depth` (viewport `vpH` px, vertical fov tangent tanV). */
 export const projectedPx = (h: number, depth: number, tanV: number, vpH: number) => (h / (2 * depth * tanV)) * vpH;
+
+/* ------------------------------------------------------ two-beat event shots */
+
+/**
+ * Two-beat shot for targeted events (gift / social / wave): open on the actor (front three-quarter),
+ * follow the approach, cut to a two-shot as soon as the pair is within `range` (after at least `minActor`
+ * s on the actor, so the giver always registers), and hold it `hold` s once both are in frame. A pair that
+ * never gets close (no progress for `stall` s, or `maxApproach` s elapsed) still ends on a two-shot — a
+ * wide one (`wide`) that keeps both in frame. A pair already within range opens straight on the two-shot.
+ * Pure and allocation-free: the rig feeds the rendered separation and an in-frame flag every frame.
+ */
+export type BeatPhase = 'actor' | 'two' | 'done';
+export interface TwoBeat { phase: BeatPhase; start: number; phaseAt: number; inFrameAt: number; bestSep: number; progressAt: number; wide: boolean }
+export const TWO_BEAT = { range: 10, minActor: 1.5, maxApproach: 7.5, stall: 2.2, hold: 2.4, giveUp: 4 } as const;
+export const newTwoBeat = (): TwoBeat => ({ phase: 'done', start: 0, phaseAt: 0, inFrameAt: NaN, bestSep: Infinity, progressAt: 0, wide: false });
+
+export function startTwoBeat(b: TwoBeat, t: number, sep: number): BeatPhase {
+  b.start = t; b.phaseAt = t; b.inFrameAt = NaN; b.bestSep = sep; b.progressAt = t; b.wide = false;
+  b.phase = sep <= TWO_BEAT.range ? 'two' : 'actor';
+  return b.phase;
+}
+
+export function stepTwoBeat(b: TwoBeat, t: number, sep: number, bothInFrame: boolean): BeatPhase {
+  if (b.phase === 'actor') {
+    if (sep < b.bestSep - 0.4) { b.bestSep = sep; b.progressAt = t; }
+    const age = t - b.phaseAt;
+    const close = sep <= TWO_BEAT.range;
+    if ((close && age >= TWO_BEAT.minActor) || age >= TWO_BEAT.maxApproach || (age >= TWO_BEAT.minActor + 0.5 && t - b.progressAt >= TWO_BEAT.stall)) {
+      b.phase = 'two'; b.phaseAt = t; b.inFrameAt = NaN; b.wide = !close;
+    }
+    return b.phase;
+  }
+  if (b.phase === 'two') {
+    if (b.wide && sep <= TWO_BEAT.range) b.wide = false; // they met during the wide shot: tighten
+    if (bothInFrame && Number.isNaN(b.inFrameAt)) b.inFrameAt = t;
+    if (!Number.isNaN(b.inFrameAt) ? t - b.inFrameAt >= TWO_BEAT.hold : t - b.phaseAt >= TWO_BEAT.giveUp) b.phase = 'done';
+  }
+  return b.phase;
+}
+
+/* ------------------------------------------------------------ framing guard */
+
+export interface V3 { x: number; y: number; z: number }
+
+/** NDC of point p for a camera at c looking at l (vertical half-fov tangent tanV); out.z = depth (≤ 0 behind). */
+export function projectNdc(c: V3, l: V3, px: number, py: number, pz: number, tanV: number, aspect: number, out: V3): V3 {
+  let fx = l.x - c.x, fy = l.y - c.y, fz = l.z - c.z;
+  const fl = Math.hypot(fx, fy, fz) || 1; fx /= fl; fy /= fl; fz /= fl;
+  // right = f × up(0,1,0) = (−fz, 0, fx); up' = right × f
+  let rx = -fz, rz = fx; const rl = Math.hypot(rx, rz) || 1; rx /= rl; rz /= rl;
+  const ux = -rz * fy, uy = rz * fx - rx * fz, uz = rx * fy;
+  const dx = px - c.x, dy = py - c.y, dz = pz - c.z;
+  const depth = dx * fx + dy * fy + dz * fz;
+  const d = Math.max(1e-4, depth);
+  out.x = (dx * rx + dz * rz) / (d * tanV * aspect);
+  out.y = (dx * ux + dy * uy + dz * uz) / (d * tanV);
+  out.z = depth;
+  return out;
+}
+
+const _g = { x: 0, y: 0, z: 0 };
+const ndcOut = (c: V3, l: V3, sx: number, y: number, sz: number, tanV: number, aspect: number, lim: number) => {
+  projectNdc(c, l, sx, y, sz, tanV, aspect, _g);
+  return _g.z < 0.5 || Math.abs(_g.x) > lim || Math.abs(_g.y) > lim;
+};
+
+/**
+ * Follow framing guard: project the subject's head and feet from the solved pose (pos → look); when
+ * either falls outside ±`lim` NDC, aim at the subject itself (drop the look-ahead), then pull back /
+ * raise until both are inside. Also enforces a minimum down-angle (seated subjects behind bench backs,
+ * signs, low walls). Mutates pos/look. Returns 0 = untouched, 1 = re-aimed, 2 = re-aimed + moved.
+ */
+export function guardFraming(
+  pos: V3, look: V3, sx: number, sz: number, headY: number, tanV: number, aspect: number,
+  lim = 0.8, minDown = (12 * Math.PI) / 180,
+): number {
+  let code = 0;
+  const midY = Math.min(1.1, headY * 0.62);
+  // minimum down-angle towards the subject
+  const hd = Math.hypot(pos.x - sx, pos.z - sz) || 1e-3;
+  if ((pos.y - midY) / hd < Math.tan(minDown)) { pos.y = midY + hd * Math.tan(minDown); code = 2; }
+  const bad = () => ndcOut(pos, look, sx, headY, sz, tanV, aspect, lim) || ndcOut(pos, look, sx, 0.05, sz, tanV, aspect, lim);
+  if (!bad()) return code;
+  look.x = sx; look.y = midY; look.z = sz; code = Math.max(code, 1);
+  for (let i = 0; i < 6 && bad(); i++) {
+    // too big in frame (or behind the lens): pull back along the horizontal ray, keep the down-angle
+    let dx = pos.x - sx, dz = pos.z - sz; const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l;
+    const nl = Math.max(l * 1.25, 2.5);
+    pos.x = sx + dx * nl; pos.z = sz + dz * nl; pos.y = midY + (pos.y - midY) * (nl / l);
+    code = 2;
+  }
+  return code;
+}

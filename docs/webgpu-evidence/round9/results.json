@@ -1,0 +1,57 @@
+{
+  "base": "http://localhost:3011",
+  "softwareAdapterRequested": true,
+  "startedAt": "2026-11-03T03:07:39.896Z",
+  "checks": [
+    {
+      "name": "Actual WebGPU backend renders a nonblank 3D world",
+      "diag": {
+        "engine": "three.js r187 webgpu",
+        "renderer": "webgpu",
+        "rendererRequested": "webgpu",
+        "rendererFallback": ""
+      },
+      "pixels": {
+        "width": 539,
+        "height": 611,
+        "clear": 0,
+        "visible": 329329,
+        "total": 329329,
+        "colors": 31792
+      }
+    },
+    {
+      "name": "Actual WebGPU character studio renders a nonblank avatar preview",
+      "diag": {
+        "engine": "three.js r187 webgpu",
+        "renderer": "webgpu",
+        "rendererRequested": "webgpu",
+        "rendererFallback": ""
+      },
+      "pixels": {
+        "width": 488,
+        "height": 501,
+        "clear": 0,
+        "visible": 244488,
+        "total": 244488,
+        "colors": 5394
+      }
+    },
+    {
+      "name": "Actual WebGPU overlay preserves nonblank transparent content",
+      "pixels": {
+        "width": 960,
+        "height": 640,
+        "clear": 554566,
+        "visible": 59834,
+        "total": 614400,
+        "colors": 3077
+      }
+    }
+  ],
+  "pageErrors": [],
+  "pageErrorStacks": [],
+  "consoleErrors": [],
+  "passed": true,
+  "finishedAt": "2026-11-03T03:08:32.629Z"
+}

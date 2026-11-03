@@ -1,0 +1,52 @@
+{
+  "startedAt": "2026-11-03T02:57:57.478Z",
+  "engineEntry": "/workspace/hello-world/packages/world-engine/src/runtime/index.ts",
+  "checks": [
+    {
+      "name": "Real engine runtime imports in Node without browser globals",
+      "passed": true
+    },
+    {
+      "name": "Real engine joins preserve stable identity, customized appearance and selected personality",
+      "passed": true
+    },
+    {
+      "name": "Real social action creates friendship and a saved memory",
+      "passed": true,
+      "detail": {
+        "friendship": 70.9,
+        "memories": 1
+      }
+    },
+    {
+      "name": "Chat, gesture, gift, weather, celebration, raid and appearance events enter real immutable snapshots",
+      "passed": true
+    },
+    {
+      "name": "Stable-ID full-character save updates appearance/personality while preserving friendship and memories",
+      "passed": true
+    },
+    {
+      "name": "Actual SnapshotStore roundtrip restores real resident, personality, relationship memory and weather",
+      "passed": true
+    },
+    {
+      "name": "Real simulation advances while its Node runtime is running",
+      "passed": true
+    },
+    {
+      "name": "Two real HTTP/WebSocket sessions receive the same actual-engine resident with server-bound identity",
+      "passed": true
+    },
+    {
+      "name": "Real-engine server permissions, relationship memory and labeled Director demo events work across sessions",
+      "passed": true
+    },
+    {
+      "name": "Actual engine, saved social memory and signed viewer identity survive a real server restart",
+      "passed": true
+    }
+  ],
+  "passed": true,
+  "finishedAt": "2026-11-03T02:57:59.778Z"
+}

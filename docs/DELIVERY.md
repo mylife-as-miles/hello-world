@@ -42,3 +42,14 @@ Exact Twitch OAuth callback:
 `https://hello-world-miles-society.myles4miles.chatgpt.site/api/twitch/callback`
 
 The generated webhook and encryption secrets are configured server-side. `TWITCH_CLIENT_ID` and `TWITCH_CLIENT_SECRET` still require private configuration and broadcaster consent. All owner APIs retain private Sites identity checks. The public relay exposes no Director APIs.
+
+
+## Current round-9 release — 2026-11-03
+
+Verified engine `12d73f6` is integrated into main. Unfinished round-10 `ac0b9a4` remains on its existing branches. Integration fix `661cd57` preserves WebGPU support for photoreal hair; final TypeScript, 149 tests and both web/Sites production builds pass. The full round-9 browser flow passed 15 checks, the real-runtime suite passed 10 checks and all 111 hosted assertions passed. Actual software WebGPU world, creator and overlay rendering passed after the fix with zero browser errors.
+
+Fresh production-build screenshots: [world](screenshots/round9/world-neighborhood.png), [Director Studio](screenshots/round9/director-studio.png), [transparent overlay](screenshots/round9/obs-overlay.png), [creator](screenshots/round9/avatar-creator.png). These were captured on a local production server; a signed-in hosted browser session and native OBS remain unverified. See the [round-9 QA record](QA.md) for exact revisions and retained limitations.
+
+The final renderer fix was published successfully to the same private Site at 03:10:56 UTC, Sites version 4, preserving runtime environment revision 2 and the existing D1 world. [Native deployment result](evidence/sites-round9-deployment.json). OAuth and EventSub callback URLs remain unchanged.
+
+Production HTTP verification confirms `/`, `/world`, `/director` and `/overlay` return the current built entry; the served JavaScript bytes match the local Sites artifact exactly. Identity-less service access to the owner API returns 401 as intended. [HTTP evidence](evidence/sites-round9-http.json).

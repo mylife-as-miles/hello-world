@@ -137,3 +137,24 @@ Actual production screenshots and JSON were saved at `/tmp/hello-world-qa/final-
 ## Repeatable browser verification
 
 Run `pnpm test:browser` against a running app. The default full flow includes actual creation, a changed preset, social/chat actions, reload persistence, Director controls and overlay alpha. Provide `QA_DIRECTOR_KEY` for a protected server; `QA_REQUIRE_VIEWER=true` verifies that the first session has viewer-only permissions. `QA_DIRECTOR_ONLY=true` explicitly selects the focused follow-up scope. `QA_SKIP_OPTIONAL_SCREENSHOTS=true` omits optional images while preserving the required overlay PNG/alpha check. `QA_BROWSER_PATH` selects Chromium. A complete default full-flow pass is not claimed by the focused final report.
+
+
+## Round 9 integrated release — 2026-11-03
+
+The coordinator reviewed all 120 changed files from `4b63266` to `12d73f6`; every change was inside the engine/engine QA ownership. The verified round-9 commit was fast-forwarded into main. Unfinished round-10 `ac0b9a4` was excluded. There were no contract, application or server changes in the handoff.
+
+Actual checks on the integrated source:
+
+- Workspace TypeScript passed; 108 engine + 40 server tests passed; complete production and Sites builds passed.
+- All 111 hosted assertions passed: 22 shared-world, 58 OAuth/EventSub and 31 relay security checks.
+- All 10 actual-engine/runtime acceptance checks passed, including a real server restart and stable signed identity. [Report](evidence/runtime-round9-results.json).
+- The full production-build browser flow passed 15 checks: real pointer customization/save, join, five camera modes, friendship/social memory, chat, refresh persistence, independent-session synchronization, private-key Director authorization, weather fanout, demo celebration, 390px layout, and transparent 1920×1080 overlay. Zero uncaught page errors. One console resource 404 was recorded and is retained in the report. [Browser report](screenshots/round9/browser-results.json).
+- Overlay: 1,953,850 of 2,073,600 pixels fully transparent (94.22%); all four corner alpha values were zero; visible residents were present.
+
+A genuine software WebGPU retest found a round-9 photoreal-hair render hook calling WebGL-only `state.buffers` and `colorMask`. A focused integration fix, `661cd57`, guards that hook by the actual renderer backend. A regression test checks both the preserved WebGL alpha-mask sequence and a GPU backend without WebGL APIs. Final workspace TypeScript, 109 engine + 40 server tests, web production build and Sites build passed. The final actual-WebGPU world, studio and overlay checks all pass with zero page/console errors. [Before-fix report](webgpu-evidence/round9/before-fix-results.json) · [Final report](webgpu-evidence/round9/results.json).
+
+Screenshots are fresh captures of the locally served production build with software WebGL, not a signed-in browser session on the hosted Site. Native Sites deployment and production HTTP checks are separate evidence. Native OBS, hardware performance and authenticated Twitch delivery remain unverified.
+
+Visual review: the neighborhood, Director and transparent overlay render clearly. One follow-camera capture is obstructed by playground props; the wide neighborhood capture is supplied alongside that unedited evidence. The user handoff reported a round-9 independent score of 8.04/10. No new independent critic score or 9/10 claim is made here.
+
+[World screenshot](screenshots/round9/world-neighborhood.png) · [Director screenshot](screenshots/round9/director-studio.png) · [Overlay screenshot](screenshots/round9/obs-overlay.png) · [Creator screenshot](screenshots/round9/avatar-creator.png).

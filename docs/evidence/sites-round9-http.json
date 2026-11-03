@@ -1,0 +1,45 @@
+{
+  "origin": "https://hello-world-miles-society.myles4miles.chatgpt.site",
+  "source": "661cd579138e1aa5146703fe3926ee3864ca7f54",
+  "checks": [
+    {
+      "path": "/",
+      "status": 200,
+      "type": "text/html",
+      "bytes": 622,
+      "referencesBuiltEntry": true
+    },
+    {
+      "path": "/world",
+      "status": 200,
+      "type": "text/html",
+      "bytes": 622,
+      "referencesBuiltEntry": true
+    },
+    {
+      "path": "/director",
+      "status": 200,
+      "type": "text/html",
+      "bytes": 622,
+      "referencesBuiltEntry": true
+    },
+    {
+      "path": "/overlay?camera=neighborhood",
+      "status": 200,
+      "type": "text/html",
+      "bytes": 622,
+      "referencesBuiltEntry": true
+    },
+    {
+      "path": "/api/status",
+      "status": 401
+    },
+    {
+      "path": "/assets/index-DVqid7P2.js",
+      "status": 200,
+      "type": "text/javascript",
+      "bytes": 2074705,
+      "matchesBuiltAsset": true
+    }
+  ]
+}

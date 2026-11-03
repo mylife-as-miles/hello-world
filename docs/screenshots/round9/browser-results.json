@@ -1,0 +1,105 @@
+{
+  "startedAt": "2026-11-03T02:56:12.175Z",
+  "base": "http://localhost:3011",
+  "checks": [
+    {
+      "name": "First browser session has viewer-only permissions",
+      "passed": true
+    },
+    {
+      "name": "Landing and authoritative 3D world load",
+      "passed": true,
+      "residents": 13,
+      "mode": "demo"
+    },
+    {
+      "name": "Creator has a usable host height and a loaded 3D avatar rig",
+      "passed": true,
+      "height": 630
+    },
+    {
+      "name": "Distinctive creator outfit selection reaches authoritative appearance",
+      "passed": true,
+      "outfitColor": "#4aa3df"
+    },
+    {
+      "name": "Viewer joins through the actual 3D avatar creator",
+      "passed": true,
+      "residentId": "viewer:29cfcdca3cf4f280a65058a923dc0dbb"
+    },
+    {
+      "name": "All five camera modes accept changes without runtime errors",
+      "passed": true
+    },
+    {
+      "name": "Viewer social interaction creates a relationship",
+      "passed": true,
+      "targetId": "seed:nova",
+      "friendship": 68.5
+    },
+    {
+      "name": "Viewer chat enters the shared event runtime",
+      "passed": true
+    },
+    {
+      "name": "Resident appearance and relationship survive browser reload",
+      "passed": true
+    },
+    {
+      "name": "Independent browser context receives the same resident and relationship",
+      "passed": true,
+      "connectedSessions": 1
+    },
+    {
+      "name": "Authenticated Director weather reaches independent sessions",
+      "passed": true,
+      "from": "sunny",
+      "to": "snow"
+    },
+    {
+      "name": "Director demo celebration uses shared normalized events",
+      "passed": true
+    },
+    {
+      "name": "Phone layout fits a 390px viewport",
+      "passed": true
+    },
+    {
+      "name": "OBS route has hidden chrome, rendered content and real composited alpha",
+      "passed": true,
+      "alpha": {
+        "width": 1920,
+        "height": 1080,
+        "clear": 1953850,
+        "opaque": 39166,
+        "translucent": 80584,
+        "total": 2073600,
+        "corners": [
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "No uncaught browser runtime errors across tested routes",
+      "passed": true
+    }
+  ],
+  "pageErrors": [],
+  "consoleErrors": [
+    "Failed to load resource: the server responded with a status of 404 (Not Found)"
+  ],
+  "screenshots": [
+    "landing-desktop.png",
+    "avatar-creator.png",
+    "world-resident.png",
+    "director-studio.png",
+    "world-mobile.png",
+    "obs-overlay.png"
+  ],
+  "scope": "Full browser flow",
+  "finishedAt": "2026-11-03T03:01:43.635Z",
+  "passed": true
+}

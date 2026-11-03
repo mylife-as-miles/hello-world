@@ -60,3 +60,10 @@ The portable repository script preserves the successfully executed renderer chec
 - [WebGPU secure contexts and browser API](https://developer.mozilla.org/en-US/docs/Web/API/WebGPU_API)
 
 The screenshots and reports above are actual renderer evidence. Native OBS integration and hardware-driver performance still require testing on the target streaming machine.
+
+
+## Round-9 integration regression — 2026-11-03
+
+The initial actual-WebGPU run rendered nonblank pixels but raised repeated exceptions: a new photoreal-hair draw hook accessed WebGL's `renderer.state.buffers` on the real GPU backend. Commit `661cd57` limits that alpha-write workaround to WebGL. The regression test exercises the actual photoreal mesh hooks with a backend lacking WebGL state and confirms that legacy alpha masking still runs on WebGL.
+
+After the fix, world, studio and overlay all render through the actual software WebGPU backend, with no page or console errors. World: 31,792 sampled colors. Studio: 5,394. Overlay: 554,566 clear and 59,834 visible pixels of 614,400. [Final measurements](webgpu-evidence/round9/results.json). [Initial failure and stacks](webgpu-evidence/round9/before-fix-results.json). Hardware performance and native OBS WebGPU remain unverified.

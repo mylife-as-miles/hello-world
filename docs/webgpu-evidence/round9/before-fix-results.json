@@ -1,0 +1,153 @@
+{
+  "base": "http://localhost:3011",
+  "softwareAdapterRequested": true,
+  "startedAt": "2026-11-03T03:03:56.206Z",
+  "checks": [
+    {
+      "name": "Actual WebGPU backend renders a nonblank 3D world",
+      "diag": {
+        "engine": "three.js r187 webgpu",
+        "renderer": "webgpu",
+        "rendererRequested": "webgpu",
+        "rendererFallback": ""
+      },
+      "pixels": {
+        "width": 539,
+        "height": 611,
+        "clear": 0,
+        "visible": 329329,
+        "total": 329329,
+        "colors": 24381
+      }
+    },
+    {
+      "name": "Actual WebGPU character studio renders a nonblank avatar preview",
+      "diag": {
+        "engine": "three.js r187 webgpu",
+        "renderer": "webgpu",
+        "rendererRequested": "webgpu",
+        "rendererFallback": ""
+      },
+      "pixels": {
+        "width": 488,
+        "height": 501,
+        "clear": 0,
+        "visible": 244488,
+        "total": 244488,
+        "colors": 3123
+      }
+    },
+    {
+      "name": "Actual WebGPU overlay preserves nonblank transparent content",
+      "pixels": {
+        "width": 960,
+        "height": 640,
+        "clear": 576457,
+        "visible": 37943,
+        "total": 614400,
+        "colors": 2194
+      }
+    }
+  ],
+  "pageErrors": [
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')",
+    "Cannot read properties of undefined (reading 'buffers')"
+  ],
+  "pageErrorStacks": [
+    {
+      "url": "http://localhost:3011/world?renderer=webgpu&quality=low",
+      "stack": "TypeError: Cannot read properties of undefined (reading 'buffers')\n    at n.onBeforeRender (http://localhost:3011/assets/index-jYcATRqf.js:5234:101697)\n    at YP.renderObject (http://localhost:3011/assets/three.webgpu-Bv6pIKF0.js:43:21280)\n    at YP._renderObjects (http://localhost:3011/assets/three.webgpu-Bv6pIKF0.js:43:19356)\n    at YP._renderScene (http://localhost:3011/assets/three.webgpu-Bv6pIKF0.js:43:7466)\n    at YP.render (http://localhost:3011/assets/three.webgpu-Bv6pIKF0.js:43:1795)\n    at c.render (http://localhost:3011/assets/index-jYcATRqf.js:5155:10655)\n    at S4 (http://localhost:3011/assets/index-jYcATRqf.js:4245:14132)\n    at GN (http://localhost:3011/assets/index-jYcATRqf.js:4245:14520)"
+    },
+    {
+      "url": "http://localhost:3011/world?renderer=webgpu&quality=low",
+      "stack": "TypeError: Cannot read properties of undefined (reading 'buffers')\n    at n.onBeforeRender (http://localhost:3011/assets/index-jYcATRqf.js:5234:101697)\n    at YP.renderObject (http://localhost:3011/assets/three.webgpu-Bv6pIKF0.js:43:21280)\n    at YP._renderObjects (http://localhost:3011/assets/three.webgpu-Bv6pIKF0.js:43:19356)\n    at YP._renderScene (http://localhost:3011/assets/three.webgpu-Bv6pIKF0.js:43:7466)\n    at YP.render (http://localhost:3011/assets/three.webgpu-Bv6pIKF0.js:43:1795)\n    at c.render (http://localhost:3011/assets/index-jYcATRqf.js:5155:10655)\n    at S4 (http://localhost:3011/assets/index-jYcATRqf.js:4245:14132)\n    at GN (http://localhost:3011/assets/index-jYcATRqf.js:4245:14520)"
+    },
+    {
+      "url": "http://localhost:3011/world?renderer=webgpu&quality=low",
+      "stack": "TypeError: Cannot read properties of undefined (reading 'buffers')\n    at n.onBeforeRender (http://localhost:3011/assets/index-jYcATRqf.js:5234:101697)\n    at YP.renderObject (http://localhost:3011/assets/three.webgpu-Bv6pIKF0.js:43:21280)\n    at YP._renderObjects (http://localhost:3011/assets/three.webgpu-Bv6pIKF0.js:43:19356)\n    at YP._renderScene (http://localhost:3011/assets/three.webgpu-Bv6pIKF0.js:43:7466)\n    at YP.render (http://localhost:3011/assets/three.webgpu-Bv6pIKF0.js:43:1795)\n    at c.render (http://localhost:3011/assets/index-jYcATRqf.js:5155:10655)\n    at S4 (http://localhost:3011/assets/index-jYcATRqf.js:4245:14132)\n    at GN (http://localhost:3011/assets/index-jYcATRqf.js:4245:14520)"
+    },
+    {
+      "url": "http://localhost:3011/world?renderer=webgpu&quality=low",
+      "stack": "TypeError: Cannot read properties of undefined (reading 'buffers')\n    at n.onBeforeRender (http://localhost:3011/assets/index-jYcATRqf.js:5234:101697)\n    at YP.renderObject (http://localhost:3011/assets/three.webgpu-Bv6pIKF0.js:43:21280)\n    at YP._renderObjects (http://localhost:3011/assets/three.webgpu-Bv6pIKF0.js:43:19356)\n    at YP._renderScene (http://localhost:3011/assets/three.webgpu-Bv6pIKF0.js:43:7466)\n    at YP.render (http://localhost:3011/assets/three.webgpu-Bv6pIKF0.js:43:1795)\n    at c.render (http://localhost:3011/assets/index-jYcATRqf.js:5155:10655)\n    at S4 (http://localhost:3011/assets/index-jYcATRqf.js:4245:14132)\n    at GN (http://localhost:3011/assets/index-jYcATRqf.js:4245:14520)"
+    },
+    {
+      "url": "http://localhost:3011/world?renderer=webgpu&quality=low",
+      "stack": "TypeError: Cannot read properties of undefined (reading 'buffers')\n    at n.onBeforeRender (http://localhost:3011/assets/index-jYcATRqf.js:5234:101697)\n    at YP.renderObject (http://localhost:3011/assets/three.webgpu-Bv6pIKF0.js:43:21280)\n    at YP._renderObjects (http://localhost:3011/assets/three.webgpu-Bv6pIKF0.js:43:19356)\n    at YP._renderScene (http://localhost:3011/assets/three.webgpu-Bv6pIKF0.js:43:7466)\n    at YP.render (http://localhost:3011/assets/three.webgpu-Bv6pIKF0.js:43:1795)\n    at c.render (http://localhost:3011/assets/index-jYcATRqf.js:5155:10655)\n    at S4 (http://localhost:3011/assets/index-jYcATRqf.js:4245:14132)\n    at GN (http://localhost:3011/assets/index-jYcATRqf.js:4245:14520)"
+    }
+  ],
+  "consoleErrors": [],
+  "passed": false,
+  "finishedAt": "2026-11-03T03:04:18.198Z"
+}

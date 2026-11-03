@@ -1,0 +1,13 @@
+{
+  "source": "12d73f6",
+  "base": "http://localhost:3011",
+  "pageErrors": [],
+  "startedAt": "2026-11-03T03:02:10.338Z",
+  "canvas": {
+    "width": 1440,
+    "height": 900,
+    "engine": "three.js r187",
+    "renderer": "webgl"
+  },
+  "finishedAt": "2026-11-03T03:02:41.049Z"
+}

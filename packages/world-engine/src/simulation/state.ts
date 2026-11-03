@@ -9,6 +9,7 @@ import { sanitizeText } from '../runtime/validate';
 import type { Rng } from './rng';
 import type { Temperament } from './personality';
 import type { DialogueProvider } from './dialogue';
+import type { Approach } from './approach';
 
 export interface Needs { energy: number; social: number; fun: number }
 export const NEED_KEYS = ['energy', 'social', 'fun'] as const;
@@ -99,6 +100,8 @@ export interface Agent {
   restlessNight?: number;
   /** Night index this resident last took part in (went to bed, or — night owls — was up through it). Mornings only continue such a night. */
   nightSeen?: number;
+  /** Sim time of this resident's last viewer-originated event (the night watch never sends an active viewer to bed). */
+  viewerAt?: number;
 }
 
 export type EncounterKind = 'greet' | 'chat' | 'compliment' | 'gift' | 'befriend' | 'bicker' | 'makeup';
@@ -110,6 +113,8 @@ export interface PlannedLine {
   payload?: WorldEventPayload;
   speakerActivity?: string;
   listenerActivity?: string;
+  /** Part of a conversation topic whose claim is re-checked when spoken ('line' = the claim, 'reply' = its answer). */
+  topic?: 'line' | 'reply';
 }
 
 export interface Encounter {
@@ -130,6 +135,8 @@ export interface Encounter {
   thing?: string;
   item?: string;
   autonomous: boolean;
+  /** Is the planned topic still true (e.g. the dancer it mentions is still dancing)? Checked when it is spoken. */
+  topicCheck?: (w: World) => boolean;
 }
 
 export interface ScheduledTask { at: number; seq: number; run: (w: World) => void }
@@ -140,7 +147,7 @@ export interface WorldFacts {
   raidAt: number;
   raidChannel: string;
   confettiAt: number;
-  newcomer: { name: string; at: number } | null;
+  newcomer: { name: string; at: number; id?: string } | null;
   lastGrumbleAt: number;
   lastAmbientAt: number;
   lastChatReplyAt: number;
@@ -182,6 +189,9 @@ export interface World {
   /** seatKey → agent id. */
   seats: Map<string, string>;
   encounters: Map<number, Encounter>;
+  /** Viewer events walking over to their target (approach.ts). */
+  approaches: Map<number, Approach>;
+  nextApproachId: number;
   scheduled: ScheduledTask[];
   out: WorldEvent[];
   rng: Rng;

@@ -31,7 +31,7 @@ export interface ActionDef {
 }
 
 const no = () => false;
-const dancerAt = (w: World, p: PoiDef, self: Agent) => [...w.agents.values()].find(o => o !== self && o.action?.type === 'dance' && o.action.poiId === p.id && o.action.phase === 'perform');
+export const dancerAt = (w: World, p: PoiDef, self: Agent) => [...w.agents.values()].find(o => o !== self && o.action?.type === 'dance' && o.action.poiId === p.id && o.action.phase === 'perform');
 
 export const ACTION_DEFS: ActionDef[] = [
   { type: 'wander', affordance: 'wander', kinds: ['plaza', 'park', 'garden'], effects: { energy: -0.05, social: 0.03, fun: 0.28 }, duration: [14, 26], base: 0.2,
@@ -104,7 +104,7 @@ function weatherFactor(type: ActionType, p: PoiDef, w: World, t: Temperament): n
 function timeFactor(type: ActionType, p: PoiDef, c: WorldClock, t: Temperament, visitor: boolean): number {
   const h = c.hours, owl = t.nightOwl > 0.5, night = c.period === 'night';
   // Quiet hours: locals who are up do calm things (benches, stars, books, a café nightcap). Raid crowds party on.
-  if (deepNight(h) && !visitor) return nightCalmFactor(type, p.kind, owl);
+  if (deepNight(h) && !visitor) return nightCalmFactor(type, p.kind, owl, h);
   switch (type) {
     case 'drink': return h >= 6 && h < 11 ? 1.6 : night ? 0.8 : 1;
     case 'eat': return (h >= 11.5 && h < 14) || (h >= 18 && h < 20.5) ? 1.6 : 1;
@@ -331,6 +331,8 @@ export function startChoice(w: World, a: Agent, choice: Choice, c: WorldClock, p
     spot = { x: s.seat.x, z: s.seat.z };
   } else spot = pickSpot(w, p, a, def.groundSit(p));
   const remaining = w.rng.range(def.duration[0], def.duration[1], 'dur', a.id);
+  // "watching Kiki dance" names the dancer: behavior.ts drops the watch as soon as that stops being true.
+  const watched = def.type === 'watch' && p.kind === 'stage' ? dancerAt(w, p, a) : undefined;
   // Nobody jogs across town in the quiet hours (raid crowds excepted).
   const run = forceRun || (dist(a, spot) > 26 && (a.temperament.speed > 1.05 || a.needs.energy > 80) && (a.visitor || !deepNight(c.hours)));
   interrupt(w, a);
@@ -340,6 +342,7 @@ export function startChoice(w: World, a: Agent, choice: Choice, c: WorldClock, p
     speed: run ? RUN_SPEED : WALK_SPEED * a.temperament.speed, priority, travelTimeout: 60,
     anchored: !!seatKey || def.type === 'sleep',
     ...(def.type === 'wander' ? { hop: { center: p.position, radius: p.radius, next: w.simTime + w.rng.range(4, 7, 'hop', a.id), poiId: p.id } } : {}),
+    ...(watched ? { partnerId: watched.id } : {}),
   });
   a.lastPoiId = p.id;
   a.lastType = def.type;

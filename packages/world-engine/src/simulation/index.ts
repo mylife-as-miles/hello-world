@@ -27,6 +27,7 @@ import { seedWorld } from './seed';
 import { directSocial, updateEncounters } from './social';
 import { round, runScheduled, tickFor, emit, type Agent, type World } from './state';
 import { separate } from './movement';
+import { updateApproaches } from './approach';
 import type { CreateSimulation, Simulation, SimulationExport } from './types';
 import type { DialogueProvider } from './dialogue';
 
@@ -55,6 +56,8 @@ function createWorld(opts: Parameters<CreateSimulation>[0]): World {
     giftAt: new Map(),
     seats: new Map(),
     encounters: new Map(),
+    approaches: new Map(),
+    nextApproachId: 1,
     scheduled: [],
     out: [],
     rng: createRng(opts.worldId),
@@ -183,6 +186,7 @@ function substep(w: World, h: number): void {
     if (!w.agents.has(a.id)) continue;
     updateAgent(w, a, h, clock);
   }
+  updateApproaches(w);
   nightWatch(w, clock);
   updateEncounters(w);
   directSocial(w);

@@ -8,7 +8,7 @@ import { hashString } from '../avatars/catalog';
 import { mix32 } from './rng';
 import { hasConflict } from './personality';
 import { cancelEncounter, clearAction, gesture, goThen, interrupt, startAction } from './actions';
-import { complimentThing, GIFT_ITEMS, lines, memoryLine, pickTopic, placeVars, requestExtraLine, withArticle } from './dialogue';
+import { complimentThing, fallbackTopic, GIFT_ITEMS, lines, memoryLine, pickTopic, placeVars, requestExtraLine, withArticle } from './dialogue';
 import { meetingPoint, WALK_SPEED } from './movement';
 import { bump, feel, isSleeping, urgency } from './needs';
 import { atPlace, homeFor, nearestPoi, spotAround } from './places';
@@ -32,7 +32,7 @@ export function socialAvailable(w: World, a: Agent): boolean {
 function seated(a: Agent): boolean { return !!a.action?.seatKey && a.action.phase === 'perform'; }
 
 function planLines(w: World, kind: EncounterKind, A: Agent, B: Agent, positive: boolean, place: PoiDef, at: string)
-  : { lines: PlannedLine[]; topicLabel: string; quote: string; thing?: string; item?: string } {
+  : { lines: PlannedLine[]; topicLabel: string; quote: string; thing?: string; item?: string; topicCheck?: (w: World) => boolean } {
   const rel = getRel(w, A.id, B.id);
   const friendship = rel?.friendship ?? 45;
   const varsA = placeVars(w, A, B, at, { home: homeFor(A.id).name });
@@ -44,7 +44,8 @@ function planLines(w: World, kind: EncounterKind, A: Agent, B: Agent, positive: 
     out.push({ speaker: 'b', kind: 'social', text: lines.introReply(w, B, positive, varsB), payload: { action: 'greet', sentiment } });
     if (positive && w.rng.chance(0.55, 'greet-more', A.id)) {
       const topic = pickTopic({ w, speaker: A, listener: B, place, friendship, memories: [], vars: varsA });
-      out.push({ speaker: 'a', kind: 'chat', text: topic.line, payload: { sentiment: 'positive' } });
+      out.push({ speaker: 'a', kind: 'chat', text: topic.line, payload: { sentiment: 'positive' }, topic: 'line' });
+      return { lines: out, topicLabel: 'meeting', quote: out[1]!.text, ...(topic.check ? { topicCheck: topic.check } : {}) };
     }
     return { lines: out, topicLabel: 'meeting', quote: out[1]!.text };
   }
@@ -92,9 +93,9 @@ function planLines(w: World, kind: EncounterKind, A: Agent, B: Agent, positive: 
   const extra = (w.rng.chance(0.75, 'chat-len', A.id) ? 1 : 0) + (w.rng.chance(0.5 * Math.min(1.4, (A.temperament.sociability + B.temperament.sociability) / 2), 'chat-len2', B.id) ? 1 : 0);
   const memories = getRel(w, A.id, B.id)?.memories ?? [];
   const topic = pickTopic({ w, speaker: A, listener: B, place, friendship, memories, vars: varsA });
-  if (extra >= 1) out.push({ speaker: 'a', kind: 'chat', text: topic.line, payload: { sentiment: 'positive' }, ...(topic.joke ? { listenerActivity: `laughing with ${A.displayName}` } : {}) });
-  if (extra >= 2) out.push({ speaker: 'b', kind: 'chat', text: topic.reply, payload: { sentiment: 'positive' } });
-  return { lines: out, topicLabel: topic.label, quote: extra >= 1 ? topic.line : out[1]!.text };
+  if (extra >= 1) out.push({ speaker: 'a', kind: 'chat', text: topic.line, payload: { sentiment: 'positive' }, topic: 'line', ...(topic.joke ? { listenerActivity: `laughing with ${A.displayName}` } : {}) });
+  if (extra >= 2) out.push({ speaker: 'b', kind: 'chat', text: topic.reply, payload: { sentiment: 'positive' }, topic: 'reply' });
+  return { lines: out, topicLabel: extra >= 1 || !topic.check ? topic.label : 'the day', quote: extra >= 1 ? topic.line : out[1]!.text, ...(extra >= 1 && topic.check ? { topicCheck: topic.check } : {}) };
 }
 
 /** Start a face-to-face exchange: A walks to ~1.2 m from B, then they talk. */
@@ -114,6 +115,7 @@ export function startEncounter(w: World, A: Agent, B: Agent, kind: EncounterKind
     id, kind, a: A.id, b: B.id, phase: 'approach', lines: planned.lines, index: 0, nextAt: 0, endAt: Infinity,
     startedAt: w.simTime, positive, placeAt: at, topicLabel: planned.topicLabel, quote: planned.quote,
     ...(planned.thing ? { thing: planned.thing } : {}), ...(planned.item ? { item: planned.item } : {}), autonomous,
+    ...(planned.topicCheck ? { topicCheck: planned.topicCheck } : {}),
   };
   w.encounters.set(id, enc);
   const meet = meetingPoint(B, A, 1.2, `${A.id}|${B.id}|${id}`);
@@ -129,7 +131,21 @@ export function startEncounter(w: World, A: Agent, B: Agent, kind: EncounterKind
   return enc;
 }
 
+/** A planned topic that is no longer true (the dancer stopped, the newcomer left) is swapped for an always-true one. */
+function reground(w: World, enc: Encounter, line: PlannedLine, A: Agent, B: Agent): void {
+  if (line.topic !== 'line' || !enc.topicCheck || enc.topicCheck(w)) return;
+  const old = line.text;
+  const alt = fallbackTopic(w, A, placeVars(w, A, B, enc.placeAt));
+  line.text = alt.line;
+  line.listenerActivity = undefined;
+  for (const l of enc.lines) if (l.topic === 'reply') l.text = alt.reply;
+  if (enc.quote === old) enc.quote = alt.line;
+  if (enc.kind !== 'greet') enc.topicLabel = alt.label;
+  delete enc.topicCheck;
+}
+
 function speak(w: World, enc: Encounter, line: PlannedLine, A: Agent, B: Agent): void {
+  reground(w, enc, line, A, B);
   const speaker = line.speaker === 'a' ? A : B;
   const listener = line.speaker === 'a' ? B : A;
   if (speaker.action) speaker.action.activity = line.speakerActivity ?? `chatting with ${listener.displayName}`;
@@ -343,7 +359,7 @@ function newcomerHello(w: World, a: Agent): void {
     if (d < bd) { bd = d; local = o; }
     if (d < fd && !bedBound(w, o, h) && o.action?.type !== 'converse') { fd = d; far = o; }
   }
-  w.facts.newcomer = { name: a.displayName, at: w.simTime };
+  w.facts.newcomer = { name: a.displayName, at: w.simTime, id: a.id };
   if ((!local && !far) || w.simTime - w.facts.lastWelcomeAt < 4) return;
   w.facts.lastWelcomeAt = w.simTime;
   const L = (local ?? far)!;

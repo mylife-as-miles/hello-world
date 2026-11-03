@@ -96,13 +96,17 @@ export const nightSleeper = (a: Agent): boolean => a.action?.type === 'sleep' &&
  */
 export function nightDanceOk(a: Agent, h: number): boolean {
   if (a.visitor) return true;
+  // 01:00–05:00 the few who are up keep to calm spots (benches, stars, books, a café nightcap).
+  if (capHours(h)) return false;
   if (deepNight(h)) return isOwl(a) && a.needs.energy >= 50;
   if (h >= 21) return a.needs.energy >= 40;
   return true;
 }
 
 /** Calm-night multipliers (23:00–05:00): benches, stargazing, reading, a café nightcap — not frisbee or dancing. */
-export function nightCalmFactor(type: Action['type'], kind: string, owl: boolean): number {
+export function nightCalmFactor(type: Action['type'], kind: string, owl: boolean, h = 0): number {
+  // The small hours (01–05) are calm for everyone, night owls included: no arcade, no dancing.
+  if (capHours(h) && (type === 'play' || type === 'dance')) return 0.02;
   switch (type) {
     case 'sit': return 1.7;
     case 'admire': return 1.9;
@@ -118,9 +122,23 @@ export function nightCalmFactor(type: Action['type'], kind: string, owl: boolean
   }
 }
 
-/** Night shift size: how many non-owl locals the night watch keeps up during the quiet hours. */
+/** Night shift size: how many non-owl locals the night watch keeps up during the quiet hours (legacy; see nightAwakeRange). */
 export function nightShiftSize(locals: number): number {
   return locals >= 20 ? 3 : locals >= 6 ? 2 : locals >= 3 ? 1 : 0;
+}
+
+/** 01:00–05:00: the deep quiet hours, when the TOTAL number of locals awake is capped. */
+export function capHours(h: number): boolean {
+  return h >= 1 && h < 5;
+}
+
+/**
+ * How many locals are up in the small hours, night owls INCLUDED: never fewer than `min` (a live stream never looks
+ * deserted), never more than `max` (≈ 2–3 for a normal town). Viewer-driven residents are never sent to bed.
+ */
+export function nightAwakeRange(locals: number): { min: number; max: number } {
+  const min = locals >= 4 ? 2 : locals >= 2 ? 1 : 0;
+  return { min, max: Math.max(min, Math.min(3, locals - 1)) };
 }
 
 /** A sleeping spot on the porch of the resident's home: a tidy row along the house front, never on a seat. */

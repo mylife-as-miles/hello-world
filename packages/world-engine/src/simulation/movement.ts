@@ -70,6 +70,15 @@ export function planPath(from: Vec2, to: Vec2): Vec2[] {
   return out;
 }
 
+/** Hurrying toward someone: straight across open ground (around the fountain) unless a building is in the way. */
+export function planDirectPath(from: Vec2, to: Vec2): Vec2[] {
+  if (dist(from, to) < 0.03) return [];
+  if (segmentHitsBuilding(from, to)) return planPath(from, to);
+  const out: Vec2[] = [];
+  pushWithDetour(from, to, out);
+  return out;
+}
+
 export function pathLength(from: Vec2, path: Vec2[]): number {
   let len = 0;
   let cur = from;

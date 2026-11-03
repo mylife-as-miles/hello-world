@@ -5,7 +5,7 @@
  * events (never state changes).
  */
 import type { Weather } from '@hello-world/contracts';
-import type { PoiDef } from '../world/layout';
+import { POIS, type PoiDef } from '../world/layout';
 import { worldClock, type WorldClock } from '../world/time';
 import { cleanText, type Agent, type World } from './state';
 import { distressNeed } from './needs';
@@ -276,8 +276,13 @@ const TRAIT_TOPICS: Partial<Record<string, TopicDef>> = {
 };
 const RAID_TOPIC: TopicDef = { id: 'raid', label: 'the raid', lines: ['Did you see the raiders come through the portal? So many new faces!', 'That raid from {channel} was amazing!'], replies: ['Best day ever.', 'I already made three new friends.'] };
 const CONFETTI_TOPIC: TopicDef = { id: 'confetti', label: 'the confetti', lines: ['Who keeps launching confetti? I love them.', 'There’s confetti in my hair. Worth it.'], replies: ['Confetti is a lifestyle.', 'Keep it!'], joke: true };
-const NEWCOMER_TOPIC: TopicDef = { id: 'newcomer', label: 'the new neighbor', lines: ['Have you met {newcomer} yet? They just moved in.', '{newcomer} just arrived through the portal!'], replies: ['Not yet! Let’s say hi.', 'The more the merrier.'] };
-const DANCER_TOPIC: TopicDef = { id: 'dancer', label: 'the dance stage', lines: ['{dancer} is tearing up the stage!', 'Have you seen {dancer} dance? Wow.'], replies: ['Those moves!', 'We should join!'] };
+const NEWCOMER_TOPIC: TopicDef = { id: 'newcomer', label: 'the new neighbor', lines: ['Have you met {newcomer} yet? They just moved in.', 'There’s a new face in town: {newcomer}!'], replies: ['Not yet! Let’s say hi.', 'The more the merrier.'] };
+/** Only within ~an hour of the arrival (and while they are still in town). */
+const ARRIVAL_TOPIC: TopicDef = { id: 'arrival', label: 'the new neighbor', lines: ['{newcomer} just arrived through the portal!', 'Did you see {newcomer} come through the portal?'], replies: ['Not yet! Let’s say hi.', 'The more the merrier.'] };
+/** Only while {dancer} is dancing ON the Dance Stage right now (re-checked when spoken). */
+const STAGE_DANCER_TOPIC: TopicDef = { id: 'dancer', label: 'the dance stage', lines: ['{dancer} is tearing up the stage!', 'Look at {dancer} go on the Dance Stage!'], replies: ['Those moves!', 'We should join!'] };
+/** Only while {dancer} is dancing somewhere right now (re-checked when spoken). */
+const DANCER_TOPIC: TopicDef = { id: 'dancer-any', label: 'dance moves', lines: ['Have you seen {dancer} dance? Wow.', '{dancer} is dancing again! Love the energy.'], replies: ['Those moves!', 'We should join!'] };
 const MEMORY_TAILS: Bank = ['Good times.', 'Still makes me smile.', 'Classic us.', 'Never forget.', 'We should do that again.'];
 const MEMORY_REPLIES: Bank = ['How could I forget!', 'Ha! Legendary.', 'Best day.', 'You still owe me for that one.'];
 
@@ -414,7 +419,28 @@ const BEFRIEND_MILESTONE: Bank = ['{name}, I think we’re officially friends no
 // ---------------------------------------------------------------------------
 // Builders
 // ---------------------------------------------------------------------------
-export interface Topic { id: string; label: string; line: string; reply: string; joke: boolean }
+export interface Topic {
+  id: string; label: string; line: string; reply: string; joke: boolean;
+  /** Present for topics that claim something about the world right now (who is dancing where, who just arrived). */
+  check?: (w: World) => boolean;
+}
+
+const STAGE = POIS.find(p => p.kind === 'stage');
+/** Dancing right now (a perform-phase dance, not walking over to one). */
+export function dancingNow(a: Agent | undefined): boolean {
+  return !!a && !a.leaving && a.action?.phase === 'perform' && (a.action.type === 'dance' || a.activity.startsWith('dancing'));
+}
+/** Dancing on (or right at the edge of) the Dance Stage right now. */
+export function dancingOnStage(a: Agent | undefined): boolean {
+  return dancingNow(a) && !!STAGE && Math.hypot(a!.x - STAGE.position.x, a!.z - STAGE.position.z) <= STAGE.radius + 1.5;
+}
+
+/** A topic that is always true (the weather or the time of day) — the stand-in when a planned topic went stale. */
+export function fallbackTopic(w: World, speaker: Agent, vars: Vars): Topic {
+  const clock = worldClock(w.simTime);
+  const t = w.weather !== 'sunny' || hasFresh(w, `topic:${WEATHER_TOPICS[w.weather].id}`, WEATHER_TOPICS[w.weather].lines) ? WEATHER_TOPICS[w.weather] : TIME_TOPICS[clock.period];
+  return heTopic(t, w, speaker, vars);
+}
 
 export interface TopicContext {
   w: World;
@@ -449,12 +475,28 @@ export function pickTopic(ctx: TopicContext): Topic {
   }
   if (w.simTime - w.facts.raidAt < 200 && w.facts.raidChannel) cands.push({ w: fresh(RAID_TOPIC, 1.6), make: () => heTopic(RAID_TOPIC, w, speaker, vars) });
   if (w.simTime - w.facts.confettiAt < 90) cands.push({ w: fresh(CONFETTI_TOPIC, 1.2), make: () => heTopic(CONFETTI_TOPIC, w, speaker, vars) });
+  // Grounded happenings: only about people who are still here and doing it right now (re-checked when spoken).
   const nc = w.facts.newcomer;
-  if (nc && w.simTime - nc.at < 240 && nc.name !== speaker.displayName && nc.name !== listener.displayName) {
-    cands.push({ w: fresh(NEWCOMER_TOPIC, 1.2), make: () => heTopic(NEWCOMER_TOPIC, w, speaker, { ...vars, newcomer: nc.name }) });
+  const ncAgent = nc ? (nc.id ? w.agents.get(nc.id) : [...w.agents.values()].find(o => o.displayName === nc.name)) : undefined;
+  if (nc && ncAgent && !ncAgent.leaving && w.simTime - nc.at < 240 && ncAgent !== speaker && ncAgent !== listener) {
+    const id = ncAgent.id;
+    const here = (w2: World) => { const o = w2.agents.get(id); return !!o && !o.leaving; };
+    const t = w.simTime - nc.at < 60 ? ARRIVAL_TOPIC : NEWCOMER_TOPIC;
+    cands.push({ w: fresh(t, 1.2), make: () => ({ ...heTopic(t, w, speaker, { ...vars, newcomer: ncAgent.displayName }), check: here }) });
   }
-  const dancer = [...w.agents.values()].find(o => o !== speaker && o !== listener && o.activity.startsWith('dancing'));
-  if (dancer) cands.push({ w: fresh(DANCER_TOPIC, 0.9), make: () => heTopic(DANCER_TOPIC, w, speaker, { ...vars, dancer: dancer.displayName }) });
+  let onStage: Agent | undefined, elsewhere: Agent | undefined;
+  for (const o of w.agents.values()) {
+    if (o === speaker || o === listener || !dancingNow(o)) continue;
+    if (!onStage && dancingOnStage(o)) onStage = o;
+    else elsewhere ??= o;
+  }
+  if (onStage) {
+    const id = onStage.id, name = onStage.displayName;
+    cands.push({ w: fresh(STAGE_DANCER_TOPIC, 0.9), make: () => ({ ...heTopic(STAGE_DANCER_TOPIC, w, speaker, { ...vars, dancer: name }), check: w2 => dancingOnStage(w2.agents.get(id)) }) });
+  } else if (elsewhere) {
+    const id = elsewhere.id, name = elsewhere.displayName;
+    cands.push({ w: fresh(DANCER_TOPIC, 0.7), make: () => ({ ...heTopic(DANCER_TOPIC, w, speaker, { ...vars, dancer: name }), check: w2 => dancingNow(w2.agents.get(id)) }) });
+  }
   cands.push({ w: fresh(WEATHER_TOPICS[w.weather], w.weather === 'sunny' ? 0.55 : 1.4), make: () => heTopic(WEATHER_TOPICS[w.weather], w, speaker, vars) });
   const pt = PLACE_TOPICS[place.kind];
   if (pt) cands.push({ w: fresh(pt, 0.9), make: () => heTopic(pt, w, speaker, vars) });

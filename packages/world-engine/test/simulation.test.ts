@@ -498,26 +498,38 @@ describe('simulation: contract events', () => {
     tick(60);
   });
 
-  it('gift: the giver runs over first; memory + friendship only land on arrival', () => {
+  // Round 9: Mochi (café seat) and Bram (Pond Bench) are ~23 m apart (~24.5 m once both stand up) — more ground than one
+  // runner covers inside the approach cap's 7.5 s planning window — so Bram now runs toward Mochi and they meet halfway
+  // ('waving at Mochi' at dispatch encoded the old giver-runs-the-whole-way behaviour), and the hand-over must land
+  // inside the 9 s cap at ≤ 2 m (was: whenever the giver arrived, < 2.5 m).
+  it('gift: a far pair runs toward each other and meets halfway; memory + friendship only land on the hand-over', () => {
     const { rt, c, tick } = runtime();
     const rel = () => rt.getSnapshot().relationships.find(r => r.residentA === 'seed:bram' && r.residentB === 'seed:mochi')!;
     const before = rel();
+    const pos = (id: string) => rt.getSnapshot().residents.find(r => r.id === id)!.location;
+    const m0 = pos('seed:mochi'), b0 = pos('seed:bram');
+    const sep0 = Math.hypot(m0.x - b0.x, m0.z - b0.z);
+    expect(sep0).toBeGreaterThan(20);
     rt.dispatch(ev('gift', 'seed:mochi', 'Mochi', { targetId: 'seed:bram', payload: { item: 'rose' } }, c.now()));
     let snap = rt.getSnapshot();
     expect(snap.residents.find(r => r.id === 'seed:mochi')!.activity).toBe('running to Bram');
-    expect(snap.residents.find(r => r.id === 'seed:bram')!.activity).toBe('waving at Mochi');
+    expect(snap.residents.find(r => r.id === 'seed:bram')!.activity).toBe('running to Mochi');
     expect(rel().friendship).toBe(before.friendship);
     expect(rel().memories).toEqual(before.memories);
     let arrivedAt = -1;
     for (let i = 0; i < 80 && arrivedAt < 0; i++) {
       tick(1);
       snap = rt.getSnapshot();
-      if (rel().memories.length !== before.memories.length) arrivedAt = i;
-      else expect(snap.residents.find(r => r.id === 'seed:mochi')!.activity).toMatch(/^running to Bram$/);
+      if (rel().memories.length !== before.memories.length) arrivedAt = i + 1;
+      else expect(snap.residents.find(r => r.id === 'seed:mochi')!.activity).toMatch(/^(running to Bram|waving at Bram)$/);
     }
     expect(arrivedAt).toBeGreaterThan(3);
+    expect(arrivedAt * 0.5).toBeLessThanOrEqual(9.5); // timely payoff for the stream
     const mochi = snap.residents.find(r => r.id === 'seed:mochi')!, bram = snap.residents.find(r => r.id === 'seed:bram')!;
-    expect(Math.hypot(mochi.location.x - bram.location.x, mochi.location.z - bram.location.z)).toBeLessThan(2.5);
+    expect(Math.hypot(mochi.location.x - bram.location.x, mochi.location.z - bram.location.z)).toBeLessThan(2);
+    // Met roughly halfway: both covered a good share of the distance.
+    expect(Math.hypot(mochi.location.x - m0.x, mochi.location.z - m0.z)).toBeGreaterThan(sep0 * 0.3);
+    expect(Math.hypot(bram.location.x - b0.x, bram.location.z - b0.z)).toBeGreaterThan(sep0 * 0.3);
     expect(rel().friendship - before.friendship).toBeGreaterThanOrEqual(8 * 0.5);
     expect(rel().memories[rel().memories.length - 1]).toMatch(/Mochi .*(Bram.*a rose|a rose.*Bram)/);
     expect(bram.activity).toBe('thanking Mochi');
@@ -741,10 +753,18 @@ describe('simulation: night routine', () => {
     expect(sleeper).toBeTruthy();
     c.advance(2000);
     rt.dispatch(ev('social', 'tw:moth', 'Moth', { targetId: sleeper.id, payload: { action: 'greet' } }, c.now()));
+    // Round 9: the sleeper's porch is > 5 m away, so Moth first walks / jogs over (it used to "greet" from across town
+    // and write the memory at once); the memory lands on arrival, within the 9 s approach cap.
+    const relOf = () => rt.getSnapshot().relationships.find(r => [r.residentA, r.residentB].sort().join('|') === [sleeper.id, 'tw:moth'].sort().join('|'));
+    const asleepMemory = () => !!relOf()?.memories.some(m => /(tiptoed past a sleeping|tried to wake|fast asleep)/.test(m));
+    expect(rt.getSnapshot().residents.find(r => r.id === 'tw:moth')!.activity).toMatch(new RegExp(`^(walking|running) to ${sleeper.displayName}$`));
+    let waited = 0;
+    while (!asleepMemory() && waited < 20) { tick(1); waited++; }
     const s2 = rt.getSnapshot();
-    const rel = s2.relationships.find(r => [r.residentA, r.residentB].sort().join('|') === [sleeper.id, 'tw:moth'].sort().join('|'))!;
-    expect(rel.memories.some(m => /(tiptoed past a sleeping|tried to wake|fast asleep)/.test(m))).toBe(true);
+    expect(asleepMemory()).toBe(true);
+    expect(waited * 0.5).toBeLessThanOrEqual(9.5);
     expect(asleep(s2.residents.find(r => r.id === sleeper.id)!)).toBe(true);
+    expect(s2.eventHistory.some(e => e.source === 'simulation' && e.actorId === sleeper.id && e.targetId === 'tw:moth')).toBe(false);
     // A gift wakes them up smiling; afterwards they go back to bed.
     c.advance(3000);
     rt.dispatch(ev('gift', 'tw:moth', 'Moth', { targetId: sleeper.id, payload: { item: 'moon cake' } }, c.now()));
@@ -752,7 +772,9 @@ describe('simulation: night routine', () => {
     for (let i = 0; i < 240 && !backToBed; i++) {
       tick(1);
       const s = rt.getSnapshot();
-      thanked ||= s.eventHistory.some(e => e.source === 'simulation' && e.actorId === sleeper.id && e.payload?.reaction === 'thanks');
+      // (round 9) only Moth's thanks counts: the hand-over now happens on arrival, and an older 'thanks' by the same
+      // resident (an autonomous gift earlier in the day) used to satisfy this check before the gift even landed.
+      thanked ||= s.eventHistory.some(e => e.source === 'simulation' && e.actorId === sleeper.id && e.targetId === 'tw:moth' && e.payload?.reaction === 'thanks');
       const r = s.residents.find(x => x.id === sleeper.id)!;
       if (thanked && /^(walking home to|sleeping at)/.test(r.activity)) backToBed = true;
     }
@@ -790,5 +812,159 @@ describe('simulation: night routine', () => {
     const after = rt2.getSnapshot().residents;
     const still = sleepers.filter(s => { const r = after.find(x => x.id === s.id)!; return asleep(r) && Math.hypot(r.location.x - s.location.x, r.location.z - s.location.z) < 0.5; });
     expect(still.length).toBeGreaterThanOrEqual(sleepers.length - 1);
+  });
+});
+
+describe('simulation: targeted viewer events meet in person, grounded lines, thin night watch (round 9)', () => {
+  const hourOf = (simTime: number) => (simTime / 60 + 8) % 24;
+  const d2 = (a: { location: { x: number; z: number } }, b: { location: { x: number; z: number } }) => Math.hypot(a.location.x - b.location.x, a.location.z - b.location.z);
+  /** Bram and Nova alone on an open east–west line (z = -12) `sep` metres apart. */
+  function pair(sep: number) {
+    const { rt: base } = runtime();
+    const snap = JSON.parse(JSON.stringify(base.getSnapshot())) as WorldSnapshot;
+    snap.residents = snap.residents.filter(r => r.id === 'seed:bram' || r.id === 'seed:nova');
+    for (const r of snap.residents) r.activity = 'admiring Willow Park';
+    snap.residents.find(r => r.id === 'seed:bram')!.location = { x: -31, y: 0, z: -12, zone: 'park' };
+    snap.residents.find(r => r.id === 'seed:nova')!.location = { x: -31 + sep, y: 0, z: -12, zone: 'park' };
+    snap.eventHistory = [];
+    const r = runtime({ initialSnapshot: snap });
+    const get = (id: string) => r.rt.getSnapshot().residents.find(x => x.id === id)!;
+    const rel = () => r.rt.getSnapshot().relationships.find(x => x.residentA === 'seed:bram' && x.residentB === 'seed:nova');
+    return { ...r, get, rel };
+  }
+  /** Dispatch, then tick until the target's payoff event; returns seconds, the pair's distance then, and the start positions. */
+  function untilPayoff(p: ReturnType<typeof pair>, e: WorldEvent, isPayoff: (x: WorldEvent) => boolean) {
+    const a0 = p.get('seed:bram').location, b0 = p.get('seed:nova').location;
+    p.rt.dispatch(e);
+    const start = { actor: p.get('seed:bram').activity, target: p.get('seed:nova').activity, early: p.rt.getSnapshot().eventHistory.some(isPayoff) };
+    let secs = 0;
+    while (!p.rt.getSnapshot().eventHistory.some(isPayoff) && secs < 30) { p.tick(1); secs += 0.5; }
+    const A = p.get('seed:bram'), B = p.get('seed:nova');
+    return { secs, d: d2(A, B), start, movedA: Math.hypot(A.location.x - a0.x, A.location.z - a0.z), movedB: Math.hypot(B.location.x - b0.x, B.location.z - b0.z) };
+  }
+  const replyTo = (action: string) => (x: WorldEvent) => x.source === 'simulation' && x.actorId === 'seed:nova' && x.targetId === 'seed:bram' && x.payload?.action === action;
+  const thanks = (x: WorldEvent) => x.source === 'simulation' && x.actorId === 'seed:nova' && x.targetId === 'seed:bram' && x.payload?.reaction === 'thanks';
+
+  it('greet: the actor walks (≤ 12 m) or jogs (> 12 m) over, greets within ~2 m, and memory + friendship land on arrival — within the cap', () => {
+    for (const [sep, travel] of [[8, /^(walking|running) to Nova$/], [18, /^running to Nova$/]] as const) {
+      const p = pair(sep);
+      const f0 = p.rel()?.friendship;
+      const r = untilPayoff(p, ev('social', 'seed:bram', 'Bram', { targetId: 'seed:nova', payload: { action: 'greet' } }, p.c.now()), replyTo('greet'));
+      expect(r.start.early).toBe(false); // nothing is said across the distance
+      expect(r.start.actor).toMatch(travel);
+      expect(r.start.target).toBe('waving at Bram'); // the target stops and turns to the actor
+      expect(r.secs).toBeGreaterThan(1);
+      expect(r.secs).toBeLessThanOrEqual(9.5);
+      expect(r.d).toBeLessThanOrEqual(2);
+      expect(p.rel()!.memories.some(m => /Bram .*Nova/.test(m))).toBe(true);
+      if (f0 !== undefined) expect(p.rel()!.friendship).not.toBe(f0);
+    }
+    // Within ~5 m the greeting still happens on the spot.
+    const near = pair(4);
+    const r = untilPayoff(near, ev('social', 'seed:bram', 'Bram', { targetId: 'seed:nova', payload: { action: 'greet' } }, near.c.now()), replyTo('greet'));
+    expect(r.start.early).toBe(true);
+    expect(r.secs).toBe(0);
+  });
+
+  it('gift: handed over within ~2 m on arrival (thanks + friendship + memory), within the cap', () => {
+    for (const sep of [6, 14, 22]) {
+      const p = pair(sep);
+      const r = untilPayoff(p, ev('gift', 'seed:bram', 'Bram', { targetId: 'seed:nova', payload: { item: 'tulip' } }, p.c.now()), thanks);
+      expect(r.start.early).toBe(false);
+      expect(r.start.actor).toMatch(/^(walking|running) to Nova$/);
+      expect(r.secs).toBeLessThanOrEqual(9.5);
+      expect(r.d).toBeLessThanOrEqual(2);
+      const rel = p.rel()!;
+      expect(rel.friendship).toBeGreaterThanOrEqual(48);
+      expect(rel.memories[rel.memories.length - 1]).toMatch(/Bram .*(Nova.*a tulip|a tulip.*Nova)/);
+      expect(p.get('seed:nova').activity).toBe('thanking Bram');
+    }
+  });
+
+  it('very far pairs (> 25 m) run toward each other and meet halfway; beyond reach the cap still delivers the payoff', () => {
+    const p = pair(40);
+    const r = untilPayoff(p, ev('social', 'seed:bram', 'Bram', { targetId: 'seed:nova', payload: { action: 'compliment' } }, p.c.now()), replyTo('compliment'));
+    expect(r.start.actor).toBe('running to Nova');
+    expect(r.start.target).toBe('running to Bram');
+    expect(r.secs).toBeLessThanOrEqual(9.5);
+    expect(r.d).toBeLessThanOrEqual(2);
+    expect(r.movedA).toBeGreaterThan(40 * 0.35);
+    expect(r.movedB).toBeGreaterThan(40 * 0.35);
+    expect(p.rel()!.memories.length).toBeGreaterThan(0);
+    // 62 m apart: no way to meet in 9 s — the compliment lands at the cap, at the reached distance, with its memory.
+    const far = pair(62);
+    const r2 = untilPayoff(far, ev('social', 'seed:bram', 'Bram', { targetId: 'seed:nova', payload: { action: 'befriend' } }, far.c.now()), replyTo('befriend'));
+    expect(r2.secs).toBeGreaterThanOrEqual(8.5);
+    expect(r2.secs).toBeLessThanOrEqual(9.5);
+    expect(r2.d).toBeLessThan(62 - 30); // they still closed most of the gap
+    expect(far.rel()!.memories.length).toBeGreaterThan(0);
+  });
+
+  it('wave stays a distance wave: the actor stays put and the target notices and answers', () => {
+    const p = pair(20);
+    const a0 = p.get('seed:bram').location;
+    p.rt.dispatch(ev('wave', 'seed:bram', 'Bram', { targetId: 'seed:nova' }, p.c.now()));
+    expect(p.get('seed:bram').activity).toBe('waving at Nova');
+    p.tick(3);
+    const answer = p.rt.getSnapshot().eventHistory.find(x => x.source === 'simulation' && x.actorId === 'seed:nova' && x.targetId === 'seed:bram');
+    expect(answer).toBeTruthy();
+    if (answer!.kind === 'wave') expect(p.get('seed:nova').activity).toBe('waving at Bram');
+    const a1 = p.get('seed:bram').location;
+    expect(Math.hypot(a1.x - a0.x, a1.z - a0.z)).toBeLessThan(0.5);
+  });
+
+  it('over 24 game hours, lines about who is dancing / just arrived are true when spoken, and "watching X dance" is never stale', () => {
+    const { rt, c, tick } = runtime({ worldId: 'grounded-world' });
+    const seen = new Set(rt.getSnapshot().eventHistory.map(e => e.id));
+    const bad: string[] = [];
+    let claims = 0;
+    for (let i = 0; i < 2 * 1440; i++) {
+      if (i === 200) rt.dispatch(ev('join', 'tw:sprout', 'Sprout', {}, c.now())); // a newcomer to talk about
+      tick(1);
+      const s = rt.getSnapshot();
+      const byName = new Map(s.residents.map(r => [r.displayName, r]));
+      const onStage = (r: { location: { x: number; z: number } }) => Math.hypot(r.location.x - 7.5, r.location.z - 7) <= 4.2;
+      for (const e of s.eventHistory) {
+        if (seen.has(e.id)) continue;
+        seen.add(e.id);
+        const text = e.text ?? '';
+        let m = /^(.+) is tearing up the stage!$/.exec(text) ?? /^Look at (.+) go on the Dance Stage!$/.exec(text);
+        if (m) { claims++; const d = byName.get(m[1]!); if (!d || !d.activity.startsWith('dancing') || !onStage(d)) bad.push(`${hourOf(s.simulationTime).toFixed(2)} ${text} | ${d?.activity}`); }
+        m = /^Have you seen (.+) dance\? Wow\.$/.exec(text) ?? /^(.+) is dancing again! Love the energy\.$/.exec(text);
+        if (m) { claims++; const d = byName.get(m[1]!); if (!d || !d.activity.startsWith('dancing')) bad.push(`${hourOf(s.simulationTime).toFixed(2)} ${text} | ${d?.activity}`); }
+        m = /^Have you met (.+) yet\?/.exec(text) ?? /^(.+) just arrived through the portal!$/.exec(text) ?? /^There’s a new face in town: (.+)!$/.exec(text) ?? /^Did you see (.+) come through the portal\?$/.exec(text);
+        if (m) { claims++; if (!byName.has(m[1]!)) bad.push(`${text} | gone`); }
+      }
+      if (i % 2) continue;
+      for (const r of s.residents) {
+        const w = /^watching (.+) dance$/.exec(r.activity);
+        if (!w) continue;
+        claims++;
+        const d = byName.get(w[1]!);
+        if (!d || !d.activity.startsWith('dancing')) bad.push(`${hourOf(s.simulationTime).toFixed(2)} ${r.displayName} ${r.activity} | ${d?.activity}`);
+      }
+    }
+    expect(bad).toEqual([]);
+    expect(claims).toBeGreaterThan(0);
+  });
+
+  it('01:00–05:00: 2–3 locals awake in total (night owls included), all at calm spots', () => {
+    const { rt, tick } = runtime();
+    const byHour = new Map<number, { min: number; max: number }>();
+    const loud: string[] = [];
+    for (let i = 1; i <= 2 * 2880; i++) {
+      tick(1);
+      if (i % 2) continue;
+      const s = rt.getSnapshot();
+      const h = hourOf(s.simulationTime);
+      if (!(h >= 1 && h < 5)) continue;
+      const awake = s.residents.filter(r => !r.id.startsWith('raid:') && !r.activity.startsWith('sleeping'));
+      const b = byHour.get(Math.floor(h)) ?? { min: Infinity, max: 0 };
+      byHour.set(Math.floor(h), { min: Math.min(b.min, awake.length), max: Math.max(b.max, awake.length) });
+      for (const r of awake) if (/^(dancing|playing|running)/.test(r.activity)) loud.push(`${h.toFixed(2)} ${r.displayName} ${r.activity}`);
+    }
+    expect([...byHour.keys()].sort()).toEqual([1, 2, 3, 4]);
+    for (const { min, max } of byHour.values()) { expect(max).toBeLessThanOrEqual(3); expect(min).toBeGreaterThanOrEqual(2); }
+    expect(loud).toEqual([]);
   });
 });

@@ -9,13 +9,14 @@ import { POIS, SPAWN_POINT } from '../world/layout';
 import { worldClock } from '../world/time';
 import { gesture, goThen, interrupt, removeAgent, scoreChoices, startAction, startChoice } from './actions';
 import { complimentThing, lines, memoryLine, placeVars, requestExtraLine, withArticle } from './dialogue';
-import { meetingPoint, WALK_SPEED } from './movement';
+import { WALK_SPEED } from './movement';
 import { baseBedtime } from './night';
 import { bump, feel, isSleeping } from './needs';
 import { compatibility, defaultPersonality, temperamentFor } from './personality';
 import { arrivalSpot, atPlace, homeFor, nearestPoi, pickSpot, poi, portalSpot, pushOut, spotAround } from './places';
 import { addMemory, adjustFriendship, getRel, pairKey, reactsPositively } from './relationships';
 import { startEncounter } from './social';
+import { approachThen, flushApproachesOf } from './approach';
 import { cleanText, dist, emit, schedule, type Agent, type World } from './state';
 
 export const VISITOR_BASES = ['vrm-polybot', 'vrm-astrodisco', 'vrm-coffee', 'vrm-chill'] as const;
@@ -96,6 +97,7 @@ export function joinResident(w: World, id: string, name: string, payload: WorldE
     joinedAt: Math.floor(w.now), lastActiveAt: Math.floor(w.now),
   });
   a.needsWelcome = true;
+  a.viewerAt = w.simTime;
   // A fresh arrival explores for about an hour before following the night routine (joins at 2 AM still get to look around).
   a.awakeUntil = w.simTime + 75;
   w.agents.set(id, a);
@@ -126,6 +128,7 @@ function actorOf(w: World, e: WorldEvent, autoJoin: boolean): Agent | null {
       if (e.actorDisplayName && e.actorDisplayName !== a.displayName && e.kind !== 'raid') a.displayName = cleanText(e.actorDisplayName, 40) || a.displayName;
       // An active viewer's resident stays up a little while after acting (night routine resumes afterwards).
       a.awakeUntil = Math.max(a.awakeUntil, w.simTime + 20);
+      a.viewerAt = w.simTime;
     }
     return a;
   }
@@ -154,6 +157,8 @@ const busyWithEvent = (a: Agent) => !!a.action && a.action.priority >= 2;
 const sent = (p: boolean) => (p ? 'positive' : 'negative');
 
 export function handleEvent(w: World, e: WorldEvent): void {
+  // A newer viewer event for a resident who is still walking over to someone settles that one first.
+  if (e.source !== 'simulation') flushApproachesOf(w, e.actorId);
   switch (e.kind) {
     case 'join': joinResident(w, e.actorId, e.actorDisplayName, e.payload, true); break;
     case 'chat': onChat(w, e); break;
@@ -252,11 +257,11 @@ function onGift(w: World, e: WorldEvent): void {
   const rawItem = typeof e.payload?.item === 'string' && e.payload.item.trim() ? cleanText(e.payload.item, 32) : 'flowers';
   const item = withArticle(rawItem);
   if (!t) { gesture(w, a, `gifting ${item}`, 3); return; }
-  const targetId = t.id;
-  // The hand-over (friendship, memory, thanks) happens only when the giver is actually there.
-  const handOver = (w2: World, giver: Agent) => {
-    const T = w2.agents.get(targetId);
-    if (!T || T.leaving) return;
+  // The hand-over (friendship, memory, thanks) happens only when the giver is actually there
+  // (≤ ~2 m, or wherever the giver got to when the approach cap ran out).
+  const handOver = (w2: World, giver: Agent, T: Agent | undefined, own: boolean) => {
+    if (!T || T.leaving) { if (own) gesture(w2, giver, `gifting ${item}`, 3); return; }
+    if (own) gesture(w2, giver, `gifting ${item} to ${T.displayName}`, 3);
     const woken = isSleeping(T);
     const at = atPlace(nearestPoi(T.x, T.z));
     interrupt(w2, T);
@@ -270,16 +275,8 @@ function onGift(w: World, e: WorldEvent): void {
     w2.facts.lastGiftAt = w2.simTime;
     emit(w2, 'chat', T, { target: giver, text: lines.thanks(w2, T, woken, placeVars(w2, T, giver, at, { item })), payload: { reaction: 'thanks', sentiment: 'positive', item: rawItem } });
   };
-  const d = dist(a, t);
-  if (d > 2.5) {
-    const far = d > 10;
-    // The recipient notices and waits while the giver comes over (no memory / friendship change yet).
-    if (!t.leaving && !isSleeping(t)) gesture(w, t, `waving at ${a.displayName}`, Math.min(25, d / (far ? 3 : 1.3) + 4), { priority: 2 });
-    goThen(w, a, meetingPoint(t, a, 1.1, `${a.id}|gift`), `${far ? 'running' : 'walking'} to ${t.displayName}`, `gifting ${item} to ${t.displayName}`, 3, { run: far, onArrive: handOver });
-  } else {
-    gesture(w, a, `gifting ${item} to ${t.displayName}`, 3);
-    handOver(w, a);
-  }
+  // A gift is always handed over in person: anything beyond arm's reach (2.5 m) is walked / jogged over first.
+  if (!approachThen(w, a, t, handOver, 2.5)) handOver(w, a, t, true);
 }
 
 function onSocial(w: World, e: WorldEvent): void {
@@ -287,29 +284,38 @@ function onSocial(w: World, e: WorldEvent): void {
   if (!a || a.leaving) return;
   const action = e.payload?.action ?? 'greet';
   const t = targetOf(w, e, a);
+  // Farther than ~5 m: walk / jog over (or meet halfway) and do it face to face — within the approach cap.
+  if (t && approachThen(w, a, t, (w2, A, T, own) => performSocial(w2, A, T, action, own))) return;
+  performSocial(w, a, t ?? undefined, action, true);
+}
+
+/** The social action itself (on the spot, or once the actor has walked over). `own`: the actor may be animated. */
+function performSocial(w: World, a: Agent, t: Agent | undefined, action: NonNullable<WorldEventPayload['action']>, own: boolean): void {
   const at = atPlace(nearestPoi((t ?? a).x, (t ?? a).z));
+  const pose = (activity: string, seconds: number, effects?: Agent['needs']) => { if (own) gesture(w, a, activity, seconds, effects ? { effects } : {}); };
   if (action === 'celebrate') {
-    gesture(w, a, t ? `celebrating with ${t.displayName}` : 'celebrating', 5, { effects: { energy: -0.1, social: 0.6, fun: 1.2 } });
-    for (const o of [...w.agents.values()].filter(o => o !== a && awake(o) && !busyWithEvent(o) && dist(o, a) < 10).slice(0, 5)) {
+    pose(t ? `celebrating with ${t.displayName}` : 'celebrating', 5, { energy: -0.1, social: 0.6, fun: 1.2 });
+    for (const o of [...w.agents.values()].filter(o => o !== a && o !== t && awake(o) && !busyWithEvent(o) && dist(o, a) < 10).slice(0, 5)) {
       gesture(w, o, `cheering for ${a.displayName}`, 4, { priority: 1, effects: { energy: 0, social: 0.5, fun: 1 } });
     }
     if (t && awake(t)) {
+      gesture(w, t, `celebrating with ${a.displayName}`, 4, { priority: 2, effects: { energy: 0, social: 0.5, fun: 1 } });
       emit(w, 'social', t, { target: a, text: lines.celebrateReply(w, t, placeVars(w, t, a, at)), payload: { action: 'celebrate', sentiment: 'positive' } });
       adjustFriendship(w, a, t, 3);
     }
     return;
   }
-  if (!t) { gesture(w, a, 'waving hello', 3); return; }
+  if (!t) { pose('waving hello', 3); return; }
   const verb = action === 'compliment' ? 'complimenting' : action === 'befriend' ? 'befriending' : 'greeting';
-  gesture(w, a, `${verb} ${t.displayName}`, 3, { effects: { energy: 0, social: 1, fun: 0.3 } });
+  pose(`${verb} ${t.displayName}`, 3, { energy: 0, social: 1, fun: 0.3 });
   if (!awake(t)) { if (t.leaving) return; addMemory(w, a, t, memoryLine(w, 'asleep', true, { a: a.displayName, b: t.displayName, at })); return; }
   const va = placeVars(w, t, a, at);
   if (action === 'befriend') {
     const rel = getRel(w, a.id, t.id);
     const compat = compatibility(a.temperament, t.temperament, a.personality, t.personality) + ((rel?.friendship ?? 45) - 50) / 100 + t.mood * 0.1;
     const yes = compat >= 0.45;
-    if (!busyWithEvent(t) || true) gesture(w, t, yes ? `celebrating with ${a.displayName}` : 'thinking', 4, { priority: 2 });
-    if (yes) gesture(w, a, `celebrating with ${t.displayName}`, 4);
+    gesture(w, t, yes ? `celebrating with ${a.displayName}` : 'thinking', 4, { priority: 2 });
+    if (yes) pose(`celebrating with ${t.displayName}`, 4);
     emit(w, 'social', t, { target: a, text: lines.befriendReply(w, t, yes, va), payload: { action: 'befriend', sentiment: sent(yes) } });
     adjustFriendship(w, a, t, yes ? w.rng.range(15, 25, 'befriend', t.id) : 3);
     addMemory(w, a, t, memoryLine(w, yes ? 'friends' : 'declined', yes, { a: a.displayName, b: t.displayName, at }));
@@ -324,8 +330,6 @@ function onSocial(w: World, e: WorldEvent): void {
   emit(w, positive && kind === 'compliment' ? 'chat' : 'social', t, { target: a, text, payload: { action: kind, sentiment: sent(positive) } });
   const delta = positive ? (kind === 'compliment' ? w.rng.range(5, 10, 'soc', t.id) : w.rng.range(4, 8, 'soc', t.id)) : -w.rng.range(2, 4, 'soc', t.id);
   adjustFriendship(w, a, t, delta);
-  const tail = positive ? w.rng.pick(kind === 'compliment' ? ['blushed', 'beamed', 'did a little twirl'] : ['beamed', 'waved back', 'smiled from ear to ear'], 'soc-tail', t.id) : w.rng.pick(['just grunted', 'looked away', 'was not in the mood'], 'soc-tail', t.id);
-  void tail;
   addMemory(w, a, t, memoryLine(w, kind === 'compliment' ? 'compliment' : 'greet', positive, { a: a.displayName, b: t.displayName, at, thing: complimentThing(w, t) }));
   feel(t, positive ? 0.25 : -0.1);
   bump(t, { social: positive ? 5 : 1 });

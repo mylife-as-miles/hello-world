@@ -3,19 +3,33 @@
  * need effects), wander hops, and choosing what to do next.
  */
 import type { WorldClock } from '../world/time';
-import { cancelEncounter, clearAction, gesture, goThen, interrupt, removeAgent, scoreChoices, socializeCandidate, startAction, startChoice, startNightSleep, startSocialize } from './actions';
+import { cancelEncounter, clearAction, dancerAt, gesture, goThen, interrupt, removeAgent, scoreChoices, socializeCandidate, startAction, startChoice, startNightSleep, startSocialize } from './actions';
 import { lines, placeVars } from './dialogue';
 import { moveAlong, planPath, STROLL_SPEED, WALK_SPEED } from './movement';
-import { applyEffects, distressNeed, fixes, lowestNeed, primaryNeed, type NeedKey } from './needs';
+import { applyEffects, distressNeed, fixes, isSleeping, lowestNeed, primaryNeed, type NeedKey } from './needs';
 import { worldClock } from '../world/time';
 import { atPlace, freeSeat, nearestPoi, pickSpot, placeName, poi, portalSpot, spotAround } from './places';
 import { POIS, type PoiDef } from '../world/layout';
-import { bedBound, bedtimeOf, deepNight, hoursUntil, isOwl, nightDanceOk, nightIndex, nightShiftSize, nightSleeper, nightSleepHours, wakeOf } from './night';
+import { bedBound, bedtimeOf, deepNight, hoursUntil, isOwl, nightAwakeRange, nightDanceOk, nightIndex, nightSleeper, nightSleepHours, wakeOf } from './night';
 import { hashUnit } from './rng';
 import { startWelcomeWalk } from './social';
-import { dist, emit, type Agent, type World } from './state';
+import { dist, emit, type Action, type Agent, type World } from './state';
 
 const TRAVEL_COST = { energy: -0.03, social: 0, fun: 0 };
+
+/** "watching {X} dance" must stay true: once X stops dancing on that stage, switch to another dancer or stop watching. */
+function watchStale(w: World, a: Agent, act: Action): boolean {
+  if (act.type !== 'watch' || !act.partnerId || !act.poiId) return false;
+  const p = poi(act.poiId);
+  const d = w.agents.get(act.partnerId);
+  if (d && d.action?.type === 'dance' && d.action.poiId === p.id && d.action.phase === 'perform') return false;
+  const other = dancerAt(w, p, a);
+  if (!other) return true;
+  act.partnerId = other.id;
+  act.activity = `watching ${other.displayName} dance`;
+  if (act.phase === 'perform') a.activity = act.activity;
+  return false;
+}
 
 export function updateAgent(w: World, a: Agent, dt: number, clock: WorldClock): void {
   // Raid visitors leave promptly when their stay is over (unless a viewer event is playing out).
@@ -33,6 +47,7 @@ export function updateAgent(w: World, a: Agent, dt: number, clock: WorldClock): 
     if (done) {
       act.phase = 'perform';
       if (act.spot) { a.x = act.spot.x; a.z = act.spot.z; }
+      if (watchStale(w, a, act)) { clearAction(w, a); decide(w, a, clock); return; }
       a.activity = act.activity;
       act.onArrive?.(w, a);
     } else if (act.travelTimeout <= 0) {
@@ -41,6 +56,7 @@ export function updateAgent(w: World, a: Agent, dt: number, clock: WorldClock): 
     }
     return;
   }
+  if (watchStale(w, a, act)) { clearAction(w, a); decide(w, a, clock); return; }
   applyEffects(a, act.effects, dt);
   // Distress interrupts unrelated autonomous activities so it stays visible (never a night's sleep).
   if (!a.visitor && act.priority === 0 && !act.hold && !act.distress && !act.night && act.remaining > 0.5 && w.simTime - a.moodShownAt >= 6) {
@@ -191,7 +207,8 @@ function showLowNeed(w: World, a: Agent, need: NeedKey): void {
     let place = poi('plaza');
     let bd = Infinity;
     for (const p of POIS) if (p.kind === 'plaza' || p.kind === 'park' || p.kind === 'garden') { const d = dist(a, p.position); if (d < bd) { bd = d; place = p; } }
-    const d = dur(14, 22);
+    // About as long as the other bored states, so no single distress phrase dominates.
+    const d = dur(10, 16);
     interrupt(w, a);
     startAction(w, a, {
       type: 'gesture', phase: 'travel', travelActivity: 'wandering around looking for fun', activity: 'wandering around looking for fun', poiId: place.id,
@@ -257,43 +274,69 @@ export function beginLeaving(w: World, a: Agent): void {
 }
 
 /**
- * Night watch (quiet hours 23:30–04:45): a live stream should never look deserted, so besides the night
- * owls a small shift of `nightShiftSize` neighbours stays up. When fewer are awake, the most restless
- * sleeper (rested enough, not up already tonight, not about to wake anyway) gets up for an hour or so of
- * calm night life — stargazing, a bench, a book, a café nightcap — then walks home to bed again.
+ * Night watch (quiet hours 23:30–04:45): a live stream should never look deserted, but the small hours are
+ * quiet. Night owls INCLUDED, the town keeps `nightAwakeRange` locals up (≈ 2–3): when fewer than the minimum are
+ * staying up, the most restless sleeper (rested enough, not up already tonight, not about to wake anyway) gets up
+ * for an hour or so of calm night life — stargazing, a bench, a book, a café nightcap — then walks home to bed
+ * again; nobody is woken while the cap is full. From 00:30 a surplus is sent to bed (restless sleepers first, then
+ * the least owlish owls); residents a viewer is driving are never sent to bed. Runs every substep (O(n), cheap) so a
+ * replacement gets up in the same step someone falls asleep.
  */
 export function nightWatch(w: World, clock: WorldClock): void {
   const h = clock.hours;
-  if (!(h >= 23.5 || h < 4.75) || w.simTime < (w.facts.nextRestlessAt ?? -1e9)) return;
-  w.facts.nextRestlessAt = w.simTime + 5;
+  // Until 06:00: owls turn in at dawn, so the first early risers may get up a little early to keep the town alive.
+  if (!(h >= 23.5 || h < 6)) return;
   const night = nightIndex(w.simTime);
-  let locals = 0, up = 0, owlsAsleep = 0;
-  let best: Agent | null = null;
-  let bs = -Infinity;
+  let locals = 0, up = 0;
+  const staying: Agent[] = [];
+  let best: Agent | null = null, urgent: Agent | null = null;
+  let bs = -Infinity, us = -Infinity;
   for (const a of w.agents.values()) {
     if (a.visitor || a.leaving) continue;
     locals++;
-    if (isOwl(a)) { if (!nightSleeper(a)) a.nightSeen = night; else owlsAsleep++; continue; }
-    if (!nightSleeper(a)) { up++; continue; }
-    const act = a.action!;
-    if (act.phase !== 'perform' || a.needs.energy < 50 || w.simTime - (act.since ?? w.simTime) < 50 || hoursUntil(h, wakeOf(a)) < 1.75) continue;
+    if (isOwl(a) && !nightSleeper(a)) a.nightSeen = night;
+    if (!isSleeping(a)) {
+      up++;
+      // Heading to bed (or about to: bed-bound with nothing holding them) does not count as staying up.
+      if (!nightSleeper(a) && !(bedBound(w, a, h) && !(a.action && (a.action.priority >= 1 || a.action.hold)))) staying.push(a);
+      continue;
+    }
+    if (isOwl(a) || !a.action?.night) continue;
+    const act = a.action;
+    const left = hoursUntil(h, wakeOf(a));
     const t = a.temperament;
     // Prefer someone who hasn't been up yet tonight; the restless-minded (curious, creative, chaotic, romantic, bookish) first.
     const s = hashUnit(`restless:${a.id}:${night}`) + 0.25 * (t.curiosity + t.creative - 2) + 0.2 * t.chaos + 0.15 * (t.romance - 0.8)
       + 0.1 * (t.bookish - 0.7) - 0.35 * (t.restLove - 1) - (a.restlessNight === night ? 2 : 0);
-    if (s > bs) { bs = s; best = a; }
+    if (h < 4.75 && a.needs.energy >= 50 && w.simTime - (act.since ?? w.simTime) >= 50 && left >= 1.75 && s > bs) { bs = s; best = a; }
+    // Below the minimum, anyone reasonably rested will do (after 05:00: whoever is due up soonest).
+    const early = h >= 5 && h < 12 ? 10 - left : s;
+    if (a.needs.energy >= 35 && left >= (h >= 5 && h < 12 ? 0.1 : 1) && early > us) { us = early; urgent = a; }
   }
-  // A night owl who already turned in is covered by one more restless neighbour.
-  if (!best || up >= nightShiftSize(locals) + Math.min(1, owlsAsleep)) return;
-  getUpRestless(w, best, clock, night);
-  w.facts.nextRestlessAt = w.simTime + w.rng.range(8, 16, 'restless-gap', best.id);
+  const { min, max } = nightAwakeRange(locals);
+  // Too many staying up in the small hours: the surplus heads home (restless neighbours first, then the least owlish owls).
+  if ((h >= 0.5 && h < 5) && staying.length > max) {
+    const viewerDriven = (a: Agent) => w.simTime - (a.viewerAt ?? -1e9) < 90 || (a.action?.priority ?? 0) >= 2;
+    const order = staying.filter(a => !viewerDriven(a) && !(a.action?.hold))
+      .map(a => ({ a, s: (isOwl(a) ? 10 + a.temperament.nightOwl * 2 : 0) + a.needs.energy / 100 + (a.restlessNight === night ? 0 : 1) }))
+      .sort((x, y) => x.s - y.s || (x.a.id < y.a.id ? -1 : 1));
+    for (const { a } of order.slice(0, staying.length - max)) {
+      a.awakeUntil = Math.min(a.awakeUntil, w.simTime);
+      startNightSleep(w, a, clock);
+    }
+    return;
+  }
+  if (staying.length >= min || up >= max) return;
+  const pick = best ?? urgent;
+  if (pick) getUpRestless(w, pick, clock, night, h >= 5 && h < 12);
 }
 
-function getUpRestless(w: World, a: Agent, clock: WorldClock, night: number): void {
+function getUpRestless(w: World, a: Agent, clock: WorldClock, night: number, earlyBird = false): void {
   a.restlessNight = night;
-  a.awakeUntil = w.simTime + w.rng.range(50, 90, 'restless-for', a.id);
+  // An early bird (after 05:00) simply starts the day: up until well past the wake-up time.
+  a.awakeUntil = w.simTime + (earlyBird ? hoursUntil(clock.hours, wakeOf(a)) * 60 + 30 : w.rng.range(50, 90, 'restless-for', a.id));
   interrupt(w, a);
-  if (w.simTime - (w.facts.lastNightLineAt ?? -1e9) > 20 && w.rng.chance(0.6, 'restless-say', a.id)) {
+  if (!earlyBird && w.simTime - (w.facts.lastNightLineAt ?? -1e9) > 20 && w.rng.chance(0.6, 'restless-say', a.id)) {
     w.facts.lastNightLineAt = w.simTime;
     emit(w, 'chat', a, { text: lines.restless(w, a, placeVars(w, a, null, '')), payload: { reaction: 'restless', sentiment: 'positive' } });
   }

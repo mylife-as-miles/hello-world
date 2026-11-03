@@ -254,6 +254,51 @@ Remaining:
 
 Gains are plateauing around 7.7. The remaining items are composition-heavy camera work and crowd scale.
 
+### Cycle 7 (00:03–00:17 UTC, frozen build of round-7 commit `11e48c5`): **7.7 / 10** (7.68 weighted; flat vs cycle 6)
+
+Scores: world 7.6 · creator/avatars 7.5 · simulation 7.7 · interactions 7.9 · performance 7.6 · persistence 7.8. History: 6.9 → 7.2 → 7.4 → 7.6 → 7.7 → 7.7 → 7.7.
+
+Verified at `11e48c5`:
+- Isolated worktree: tsc 0 errors, vitest **61/61**, build OK.
+- The CI workflow's four steps on a clean worktree all exited 0:
+  - `pnpm install --frozen-lockfile`
+  - `pnpm typecheck`: all 4 workspaces
+  - `pnpm test`: world-engine 61/61, server 40/40
+  - `pnpm build`: world-engine and web bundles built
+- GitHub Actions: every "Verify" job on this repository ends about 3 s after it starts without running a single step. This happens on `main`'s own pushes as well as on this branch, so the red check is not caused by the code.
+
+Draw calls at quality=low (coordinator probe, frozen build, 1280×720):
+
+| View | Draw calls | Triangles |
+| --- | ---: | ---: |
+| Default | 127 | 329k |
+| Follow | 126 | 329k |
+| Cinematic | 113–131 | 315–354k |
+| Street | 198–252 | 404–447k |
+
+The critic measured street view at 139 and 175 at other moments. A per-object attribution probe (wrapping `renderBufferDirect`) shows about 70 % of street-view calls come from detailed Townie avatars, at 27–31 calls each: one mesh per body material slot plus about 16 face meshes.
+
+Fixed (checked by the critic):
+- **Bubbles and the safe area.** No bubble covered the HUD pill or was clipped at a screen edge in any capture.
+- **Raid scale.** A 40-viewer raid brings 14 visitors (13 → 27 residents), with a portal close-up, a "+9 raiders" chip and the banner.
+- **Lamp posts.** None stands in front of a follow subject any more.
+- **Label drift.** Labels no longer drift off bodies; each plate is a child of its resident.
+
+Remaining:
+- **Most damaging: residents are tiny on the OBS overlay.** They are 20–30 px tall at 720p, and the camera never cuts in. The exact all-resident overlay fit, which keeps everyone in frame, frames the whole town, and overlay mode takes no directed shots.
+- **Event shots.**
+  - A gift shot shows the giver but not the receiver.
+  - The confetti shot shows the actor from behind.
+  - A chat push-in can leave the speaker past the frame edge for about 2 s.
+- **Props in frame.**
+  - Cinematic shots look through the stage string lights and posts, with see-through dither visible on the stage floor.
+  - A seated follow shot is about 40 % arcade wall.
+  - A planter fills the street foreground.
+- **Names through props.** Names draw through the portal, the fountain and tree canopies, and some bubbles cover names.
+- **The town barely sleeps.** Only 10–23 % of residents are asleep between 22:00 and 04:00, and some dance at 1–4 AM.
+- **Mobile creator (390×844).** The expression strip is clipped, the preview is only about 250 px tall, and 52 tap targets are under 32 px.
+- **Photoreal and Townie style clash.** Kept by design: the MetaHuman-derived bodies were an explicit product request, so they stay in the town.
+
 ## Launch film
 
 A 21.2 s, 1920×1080, 30 fps silent launch cut was made from real product renders by a separate agent pair: footage capture plus a director working from the [cinetic](https://github.com/Leonxlnx/cinetic) skill (MIT). Remotion was skipped for time and the film was assembled with ffmpeg. The film is delivered outside the repository and is not committed.

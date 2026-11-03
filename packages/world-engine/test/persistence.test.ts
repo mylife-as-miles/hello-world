@@ -33,6 +33,29 @@ describe('persistence', () => {
     });
   }
 
+  it('throttles routine saves but persists viewer actions almost immediately', async () => {
+    const inner = createMemorySnapshotStorage();
+    const saves: number[] = [];
+    const storage = { ...inner, save: async (s: Parameters<typeof inner.save>[0]) => { saves.push(s.simulationTime); await inner.save(s); } };
+    const wait = (ms: number) => new Promise(r => setTimeout(r, ms));
+    const rt = await createPersistentWorldRuntime({ worldId: 'cadence', seedResidents: true, autoTick: false, storage, saveDebounceMs: 120, eventSaveDelayMs: 10 });
+    await rt.flush();
+    const base = saves.length; // the initial save
+    // routine ticks every 10 ms for ~300 ms: a throttle (not a starving debounce) saves about every 120 ms
+    for (let i = 0; i < 30; i++) { rt.tick(); await wait(10); }
+    await wait(20);
+    const routine = saves.length - base;
+    expect(routine).toBeGreaterThanOrEqual(1);
+    expect(routine).toBeLessThanOrEqual(4);
+    // a viewer action is written within the short event delay, long before the routine interval
+    const before = saves.length;
+    rt.dispatch(join('viewer:quick', 'Quick'));
+    await wait(40);
+    expect(saves.length).toBeGreaterThan(before);
+    expect((await inner.load('cadence'))?.residents.some(r => r.id === 'viewer:quick')).toBe(true);
+    rt.dispose();
+  });
+
   it('migrateSnapshot rejects garbage and repairs out-of-range values', () => {
     expect(migrateSnapshot(null)).toBeNull();
     expect(migrateSnapshot({ schemaVersion: 99 })).toBeNull();

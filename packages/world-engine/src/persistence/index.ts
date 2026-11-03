@@ -67,8 +67,16 @@ export function createIndexedDbSnapshotStorage(dbName = 'hello-world-engine'): S
 
 export interface PersistentRuntimeOptions extends WorldEngineRuntimeOptions {
   storage?: SnapshotStorage;
-  /** Debounce between saves (ms). Default 1500. */
+  /**
+   * Minimum interval between saves of routine simulation changes (ms). Default 5000:
+   * the world ticks every 500 ms, and rewriting the whole snapshot that often is wasted work.
+   */
   saveDebounceMs?: number;
+  /**
+   * Delay before saving after a `dispatch` (viewer/server action such as join, avatar update, gift), in ms.
+   * Default 300 (never longer than `saveDebounceMs`), so deliberate changes persist almost immediately.
+   */
+  eventSaveDelayMs?: number;
 }
 
 export interface PersistentWorldRuntime extends WorldEngineRuntime {
@@ -88,23 +96,42 @@ export async function createPersistentWorldRuntime(options: PersistentRuntimeOpt
   const worldId = options.worldId ?? 'hello-neighborhood';
   const saved = options.initialSnapshot ?? await storage.load(worldId);
   const runtime = createWorldRuntime({ ...options, worldId, initialSnapshot: saved ?? undefined });
-  const debounce = options.saveDebounceMs ?? 1500;
+  const interval = Math.max(0, options.saveDebounceMs ?? 5000);
+  const eventDelay = Math.min(interval, Math.max(0, options.eventSaveDelayMs ?? 300));
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let due = Infinity;
   let pending: Promise<void> = Promise.resolve();
-  const saveNow = () => { timer = undefined; pending = pending.then(() => storage.save(runtime.getSnapshot())).catch(() => {}); };
-  const unsub = runtime.subscribe(() => { if (!timer) timer = setTimeout(saveNow, debounce); });
-  const onHide = () => { if (timer) { clearTimeout(timer); saveNow(); } };
+  const saveNow = () => {
+    if (timer) clearTimeout(timer);
+    timer = undefined; due = Infinity;
+    pending = pending.then(() => storage.save(runtime.getSnapshot())).catch(() => {});
+  };
+  /** Throttle: a pending save is only ever brought forward, never postponed (no starvation while the world ticks). */
+  const schedule = (ms: number) => {
+    const at = Date.now() + ms;
+    if (timer && at >= due) return;
+    if (timer) clearTimeout(timer);
+    due = at;
+    timer = setTimeout(saveNow, ms);
+  };
+  const unsub = runtime.subscribe(() => schedule(interval));
+  const onHide = () => { if (timer) saveNow(); };
+  const onVisibility = () => { if (typeof document !== 'undefined' && document.visibilityState === 'hidden') onHide(); };
   if (typeof window !== 'undefined') window.addEventListener('pagehide', onHide);
+  if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVisibility);
   saveNow();
   const baseDispose = runtime.dispose.bind(runtime);
+  const baseDispatch = runtime.dispatch.bind(runtime);
   return Object.assign(runtime, {
     storage,
     restored: Boolean(saved),
-    flush: async () => { if (timer) clearTimeout(timer); saveNow(); await pending; },
+    // dispatch applies the event synchronously, so the next save already contains it
+    dispatch: (event: Parameters<typeof baseDispatch>[0]) => { baseDispatch(event); schedule(eventDelay); },
+    flush: async () => { saveNow(); await pending; },
     dispose: () => {
       unsub();
       if (typeof window !== 'undefined') window.removeEventListener('pagehide', onHide);
-      if (timer) clearTimeout(timer);
+      if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisibility);
       saveNow();
       baseDispose();
     },

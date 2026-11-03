@@ -123,7 +123,11 @@ export interface FxApi {
   /** env.t at which the latest raid started (−∞ when none). */
   raidAt: number;
   emitSparkles: (origin: THREE.Vector3, count: number, palette: readonly string[], spread?: number) => void;
-  emitConfetti: (origin: THREE.Vector3, count: number) => void;
+  /**
+   * `style` 'shower' (default): launched high, hangs over the plaza (raids). 'pop': an actor-sized burst
+   * emitted ~1.5 m above the head with a gentle lift, falling around them (visible in a close shot).
+   */
+  emitConfetti: (origin: THREE.Vector3, count: number, style?: 'shower' | 'pop') => void;
 }
 
 /** Vertical cylinders the camera director avoids (lamp posts, trees, planters…), published by Town. */

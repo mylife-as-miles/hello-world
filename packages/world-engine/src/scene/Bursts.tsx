@@ -129,15 +129,26 @@ export function Bursts({ quality }: { quality: 'low' | 'high' }) {
       for (const a of [res.sOrigin, res.sVel, res.sColor, res.sInfo]) a.needsUpdate = true;
       res.sLive = Math.max(res.sLive, t + 2.7);
     };
-    kit.fx.emitConfetti = (o, count) => {
+    kit.fx.emitConfetti = (o, count, style = 'shower') => {
       const n = Math.min(count, CN);
       const t = kit.env.t;
+      const pop = style === 'pop';
       for (let i = 0; i < n; i++) {
         const j = res.cHead; res.cHead = (res.cHead + 1) % CN;
         const th = Math.random() * Math.PI * 2;
-        const sp = 1.5 + Math.random() * 3.5;
-        res.cOrigin.setXYZ(j, o.x + (Math.random() - 0.5) * 1.2, o.y + Math.random() * 0.8, o.z + (Math.random() - 0.5) * 1.2);
-        res.cVel.setXYZ(j, Math.cos(th) * sp, 2.5 + Math.random() * 4.5, Math.sin(th) * sp);
+        if (pop) {
+          // Actor burst: a soft pop just above head height that drifts out 0.5–1.7 m and flutters down
+          // around the person within ~4 s, so a tight close-up (≈150 px subject) sees it fall through frame.
+          const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * 0.7;
+          const sp = 1.0 + Math.random() * 2.4;
+          res.cOrigin.setXYZ(j, o.x + Math.cos(a) * r, o.y + Math.random() * 0.35, o.z + Math.sin(a) * r);
+          res.cVel.setXYZ(j, Math.cos(th) * sp, 0.5 + Math.random() * 1.5, Math.sin(th) * sp);
+        } else {
+          // Shower (raids): launched high over the plaza, hangs in the air for the wide shot.
+          const sp = 1.5 + Math.random() * 3.5;
+          res.cOrigin.setXYZ(j, o.x + (Math.random() - 0.5) * 1.2, o.y + Math.random() * 0.8, o.z + (Math.random() - 0.5) * 1.2);
+          res.cVel.setXYZ(j, Math.cos(th) * sp, 2.5 + Math.random() * 4.5, Math.sin(th) * sp);
+        }
         col.set(CONFETTI_COLORS[Math.floor(Math.random() * CONFETTI_COLORS.length)]!);
         res.cColor.setXYZ(j, col.r, col.g, col.b);
         res.cSpin.setXYZ(j, Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5);

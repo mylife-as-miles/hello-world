@@ -5,7 +5,7 @@
  * to the render loop; React only re-renders on structure changes. The 3D
  * content is memoised with stable callbacks so host re-renders do not cascade.
  */
-import { Component, lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Component, lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { WorldSceneProps } from '@hello-world/contracts';
@@ -13,7 +13,8 @@ import { SceneStore } from '../core/sceneStore';
 import { SceneStoreContext } from '../core/SceneContext';
 import { ResidentsLayer } from '../interactions/ResidentsLayer';
 import { ResidentInspector } from '../interactions/ResidentInspector';
-import { getPoi, POIS } from '../world/layout';
+import { findSeatNear, getPoi, type Seat } from '../world/layout';
+import { animationForVerb, parseActivityVerb } from '../world/activities';
 import { createKit, type SceneKit } from './kit';
 import { KitContext, useKit } from './context';
 import { Town } from './Town';
@@ -36,7 +37,7 @@ class WebGPUGuard extends Component<{ children: ReactNode; onFailure: () => void
 }
 
 import { EventBanner } from './EventBanner';
-import { buildOverlayProps, groundHeight } from './town';
+import { buildOverlayPropGroups, groundHeight } from './town';
 import { DowntownDistrict, districtOccupied } from './district';
 import { GeneratedTrees, PARK_TREE_PLACEMENTS, TREE_VARIANT_INDEX, type TreePlacement } from './foliage';
 import { Landscape, terrainHeightAt, FOREST_PLACEMENTS, FOREST_PLACEMENTS_LOW } from './landscape';
@@ -218,15 +219,15 @@ const WorldContent = memo(function WorldContent({
       )}
       {!transparent && <Fountain />}
       {!transparent && <StageLights />}
-      {!transparent && <WeatherFx quality={quality} />}
+      <WeatherFx quality={quality} overlay={transparent} />
       {!transparent && USE_LANDSCAPE && <Landscape quality={quality} transparent={transparent} />}
       {!transparent && <DowntownDistrict quality={quality} transparent={transparent} heightAt={DISTRICT_HEIGHT} />}
       {!transparent && (quality === 'high'
         ? <GeneratedTrees quality={quality} placements={TREES_HIGH} />
         : <GeneratedTrees quality={quality} placements={TREES_LOW} farDistance={400} />)}
       {transparent && <ShadowCatcher />}
-      {transparent && <OverlaySeating />}
-      {transparent && <OverlayContactShadows />}
+      {transparent && <OverlayStageDecal />}
+      {transparent && <OverlayFurniture store={store} />}
       <RenderStats />
       <Portal quality={quality} overlay={transparent} />
       <Bursts quality={quality} />
@@ -248,56 +249,122 @@ function ShadowCatcher() {
   return <mesh geometry={geo} material={mat} receiveShadow position={[0, 0.01, 0]} />;
 }
 
-/** Overlay mode: benches, café chairs/tables and the stage platform so nobody sits or dances on air. */
-function OverlaySeating() {
-  const kit = useKit();
-  const geo = useMemo(() => buildOverlayProps(), []);
-  useEffect(() => () => geo.dispose(), [geo]);
-  return <mesh geometry={geo} material={kit.solidKeep} castShadow receiveShadow />;
+/** Radial-gradient decal texture (sRGB); null outside the DOM. Stops: [offset 0…1, css colour]. */
+function radialTexture(stops: ReadonlyArray<readonly [number, string]>, size = 128): THREE.CanvasTexture | null {
+  if (typeof document === 'undefined') return null;
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const g = c.getContext('2d');
+  if (!g) return null;
+  const h = size / 2;
+  const grad = g.createRadialGradient(h, h, 0, h, h, h);
+  for (const [o, col] of stops) grad.addColorStop(o, col);
+  g.fillStyle = grad; g.fillRect(0, 0, size, size);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
 }
 
-/** Overlay mode: soft contact-shadow patches under the drawn benches, café furniture and stage (1 draw call). */
-function OverlayContactShadows() {
-  const ref = useRef<THREE.InstancedMesh>(null);
+/** Must match ResidentsLayer: an overlay resident with a sit/sleep activity sits on findSeatNear(location, 1.2). */
+const OVERLAY_SEAT_RADIUS = 1.2;
+/** A prop stays this long (s) after its sitter got up, so they are clear of it before it goes. */
+const OVERLAY_PROP_HOLD = 2.5;
+const easeOutBack = (k: number) => { const c1 = 1.1, c3 = c1 + 1, u = k - 1; return 1 + c3 * u * u * u + c1 * u * u; };
+
+/**
+ * Overlay mode: benches, café chairs and café tables are drawn only while someone sits (or is
+ * settling in) there, using the same rule ResidentsLayer uses to seat overlay residents (sit/sleep
+ * activity → the layout seat within 1.2 m of their location), so a seated resident always has a
+ * drawn seat under them while idle furniture never clutters the stream (and nobody standing clips
+ * into an empty café table). A prop pops in from the ground (0.3 s) as its sitter arrives and leaves
+ * 2.5 s after they go; each has a soft contact shadow. Hidden props cost no draw calls.
+ */
+function OverlayFurniture({ store }: { store: SceneStore }) {
+  const kit = useKit();
   const res = useMemo(() => {
-    const spots: Array<[number, number, number]> = [];
-    for (const poi of POIS) {
-      if (!poi.seats?.length) continue;
-      if (poi.kind === 'bench') {
-        const x = poi.seats.reduce((a, q) => a + q.x, 0) / poi.seats.length, z = poi.seats.reduce((a, q) => a + q.z, 0) / poi.seats.length;
-        spots.push([x, z, 1.25]);
-      } else if (poi.kind === 'cafe') {
-        for (let i = 0; i + 1 < poi.seats.length; i += 2) spots.push([(poi.seats[i]!.x + poi.seats[i + 1]!.x) / 2, (poi.seats[i]!.z + poi.seats[i + 1]!.z) / 2, 1.45]);
+    const groups = buildOverlayPropGroups();
+    const tex = radialTexture([[0, 'rgba(0,0,0,0.42)'], [0.55, 'rgba(0,0,0,0.22)'], [1, 'rgba(0,0,0,0)']]);
+    const blobGeo = new THREE.PlaneGeometry(2, 2);
+    blobGeo.rotateX(-Math.PI / 2);
+    const blobMat = new THREE.MeshBasicMaterial({ map: tex, color: tex ? '#ffffff' : '#000000', transparent: true, opacity: tex ? 1 : 0.2, depthWrite: false, toneMapped: false });
+    return { groups, tex, blobGeo, blobMat, k: groups.map(() => 0), lastUse: groups.map(() => -1e9), used: new Set<Seat>(), next: 0, primed: false };
+  }, []);
+  useEffect(() => () => { for (const g of res.groups) g.geometry.dispose(); res.tex?.dispose(); res.blobGeo.dispose(); res.blobMat.dispose(); }, [res]);
+  const refs = useRef<Array<THREE.Group | null>>([]);
+  useFrame((_, delta) => {
+    const t = kit.env.t;
+    const residents = store.current.residents;
+    const prime = !res.primed && residents.length > 0;
+    if (t >= res.next || prime) {
+      res.next = t + 0.2;
+      res.used.clear();
+      for (const r of residents) {
+        const fam = animationForVerb(parseActivityVerb(r.activity));
+        if (fam !== 'sit' && fam !== 'sleep') continue;
+        const found = findSeatNear(r.location.x, r.location.z, OVERLAY_SEAT_RADIUS);
+        if (found) res.used.add(found.seat);
       }
+      res.groups.forEach((g, i) => { if (g.seats.some(s => res.used.has(s))) res.lastUse[i] = t; });
     }
-    const st = getPoi('stage');
-    if (st) spots.push([st.position.x, st.position.z, 3.7]);
-    let tex: THREE.CanvasTexture | null = null;
-    if (typeof document !== 'undefined') {
-      const c = document.createElement('canvas');
-      c.width = c.height = 128;
-      const g = c.getContext('2d');
-      if (g) {
-        const grad = g.createRadialGradient(64, 64, 4, 64, 64, 64);
-        grad.addColorStop(0, 'rgba(0,0,0,0.42)'); grad.addColorStop(0.55, 'rgba(0,0,0,0.22)'); grad.addColorStop(1, 'rgba(0,0,0,0)');
-        g.fillStyle = grad; g.fillRect(0, 0, 128, 128);
-        tex = new THREE.CanvasTexture(c);
-      }
-    }
+    if (prime) res.primed = true;
+    const dt = Math.min(delta, 0.1);
+    res.groups.forEach((_, i) => {
+      const want = t - res.lastUse[i]! < OVERLAY_PROP_HOLD ? 1 : 0;
+      const cur = res.k[i]!;
+      // first resident snapshot: seated residents already have their seat (no pop on load)
+      const k = prime ? want : want > cur ? Math.min(1, cur + dt / 0.3) : Math.max(0, cur - dt / 0.25);
+      res.k[i] = k;
+      const o = refs.current[i];
+      if (!o) return;
+      o.visible = k > 0.001;
+      const s = k >= 1 ? 1 : easeOutBack(k);
+      o.scale.setScalar(Math.max(0.001, s));
+    });
+  });
+  return (
+    <group>
+      {res.groups.map((g, i) => (
+        <group key={i} name={`overlay-prop:${g.kind}`} ref={el => { refs.current[i] = el; }} position={[g.x, 0, g.z]} visible={false}>
+          <mesh geometry={g.geometry} material={kit.solidKeep} castShadow receiveShadow />
+          <mesh geometry={res.blobGeo} material={res.blobMat} position={[0, 0.015, 0]} scale={[g.shadow, 1, g.shadow]} renderOrder={-1} />
+        </group>
+      ))}
+    </group>
+  );
+}
+
+/**
+ * Overlay mode: the dance stage as a soft warm floor decal (faint fill + rim) instead of an opaque
+ * platform filling the stream frame; dancers stand on the ground there. Fades out when the camera
+ * comes close (event close-ups), where it would only smear across the frame edge. One draw call.
+ */
+function OverlayStageDecal() {
+  const res = useMemo(() => {
+    const st = getPoi('stage')?.position ?? { x: 7.5, z: 7 };
+    const tex = radialTexture([
+      [0, 'rgba(255,228,184,0.1)'], [0.72, 'rgba(255,216,164,0.12)'], [0.84, 'rgba(232,176,110,0.36)'],
+      [0.92, 'rgba(232,176,110,0.28)'], [1, 'rgba(232,176,110,0)'],
+    ], 256);
     const geo = new THREE.PlaneGeometry(2, 2);
     geo.rotateX(-Math.PI / 2);
-    const mat = new THREE.MeshBasicMaterial({ map: tex, color: tex ? '#ffffff' : '#000000', transparent: true, opacity: tex ? 1 : 0.2, depthWrite: false, toneMapped: false });
-    return { spots, tex, geo, mat };
+    const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0, depthWrite: false, toneMapped: false });
+    return { st, tex, geo, mat };
   }, []);
   useEffect(() => () => { res.tex?.dispose(); res.geo.dispose(); res.mat.dispose(); }, [res]);
-  useLayoutEffect(() => {
-    const m = ref.current;
-    if (!m) return;
-    const tmp = new THREE.Matrix4();
-    res.spots.forEach(([x, z, r], i) => m.setMatrixAt(i, tmp.makeScale(r, 1, r).setPosition(x, 0.015, z)));
-    m.instanceMatrix.needsUpdate = true;
-  }, [res]);
-  return <instancedMesh ref={ref} args={[res.geo, res.mat, res.spots.length]} frustumCulled={false} renderOrder={-1} />;
+  const ref = useRef<THREE.Mesh>(null);
+  const ndc = useMemo(() => new THREE.Vector3(), []);
+  useFrame(state => {
+    const p = state.camera.position;
+    let k = res.tex ? THREE.MathUtils.smoothstep(Math.hypot(p.x - res.st.x, p.y, p.z - res.st.z), 11, 17) : 0;
+    if (k > 0) {
+      // ...and as its centre nears the frame edge, so it is never a cropped smear in a corner
+      ndc.set(res.st.x, 0, res.st.z).project(state.camera);
+      k *= ndc.z < 1 ? THREE.MathUtils.smoothstep(1 - Math.max(Math.abs(ndc.x), Math.abs(ndc.y)), 0.05, 0.3) : 0;
+    }
+    res.mat.opacity = k;
+    if (ref.current) ref.current.visible = k > 0.01;
+  });
+  return <mesh ref={ref} geometry={res.geo} material={res.mat} position={[res.st.x, 0.012, res.st.z]} scale={[3.1, 1, 3.1]} renderOrder={-1} visible={false} />;
 }
 
 /**
@@ -342,6 +409,8 @@ function RenderStats() {
 const JOIN_COLORS = ['#b98cff', '#6ff3ff', '#ffffff', '#ffd6ff'];
 const RAID_COLORS = ['#b98cff', '#ff6fd8', '#6ff3ff', '#ffffff', '#ffd166'];
 const GIFT_COLORS = ['#ffd166', '#ff8fab', '#ffffff'];
+/** Actor confetti pops this high (m): ~1.5 m above a head, inside a tight event close-up. */
+const ACTOR_CONFETTI_Y = 3.2;
 
 function useEventReactions(kit: SceneKit, store: SceneStore) {
   useEffect(() => {
@@ -352,12 +421,13 @@ function useEventReactions(kit: SceneKit, store: SceneStore) {
       const r = store.getResident(actorId);
       return r ? v.set(r.location.x, y, r.location.z) : v.set(0, y, 0);
     };
-    const confetti = (actorId: string, y: number, n: number) => {
-      // bursts of confetti events share one shower (≤ 1 per 600 ms)
+    const confetti = (actorId: string, n: number) => {
+      // bursts of confetti events share one pop (≤ 1 per 600 ms); emitted ~1.5 m above the actor's
+      // head with a gentle lift so it falls around them inside a close event shot
       const now = kit.env.t;
       if (now - lastConfetti < 0.6) return;
       lastConfetti = now;
-      kit.fx.emitConfetti(at(actorId, y), n);
+      kit.fx.emitConfetti(at(actorId, ACTOR_CONFETTI_Y), n, 'pop');
     };
     return store.onEvent(({ event }) => {
       switch (event.kind) {
@@ -372,10 +442,10 @@ function useEventReactions(kit: SceneKit, store: SceneStore) {
           kit.fx.emitSparkles(v.set(portal.x, 1.6, portal.z + 2.2), 90, JOIN_COLORS, 0.9);
           break;
         case 'confetti':
-          confetti(event.actorId, 6, 380);
+          confetti(event.actorId, 320);
           break;
         case 'social':
-          if (event.payload?.action === 'celebrate') confetti(event.actorId, 5.5, 260);
+          if (event.payload?.action === 'celebrate') confetti(event.actorId, 230);
           break;
         case 'gift':
           kit.fx.emitSparkles(at(event.actorId, 1.6), 50, GIFT_COLORS, 0.6);

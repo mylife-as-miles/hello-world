@@ -6,7 +6,7 @@
  * Built from layout.ts (BUILDINGS, POIS, PATH_SEGMENTS, seats).
  */
 import * as THREE from 'three';
-import { BUILDINGS, POIS, PATH_SEGMENTS, PLAZA_RADIUS, getPoi, getNavNode, type BuildingDef, type Vec2 } from '../world/layout';
+import { BUILDINGS, POIS, PATH_SEGMENTS, PLAZA_RADIUS, getPoi, getNavNode, type BuildingDef, type Seat, type Vec2 } from '../world/layout';
 import { Batch, Prims, mtx, rng, noise2 } from './batch';
 
 export interface SignDef {
@@ -1053,39 +1053,51 @@ export function poiAt(x: number, z: number): string | null {
   return best?.id ?? null;
 }
 
+/** One transparent-overlay prop; its geometry is local to (x, 0, z). */
+export interface OverlayPropGroup {
+  kind: 'bench' | 'chair' | 'table';
+  x: number;
+  z: number;
+  /** Layout seats (the same objects as `POIS[].seats`) whose use brings this prop in. */
+  seats: ReadonlyArray<Seat>;
+  geometry: THREE.BufferGeometry;
+  /** Soft contact-shadow radius (m). */
+  shadow: number;
+}
+
 /**
- * Minimal props for the transparent overlay: benches, café chairs/tables and the stage
- * platform, so seated/dancing residents never hover in mid-air. Same seat heights (0.45 m).
+ * Props for the transparent overlay, one group per bench, café chair and café table (same
+ * models and 0.45 m seat height as the world), so the overlay can draw only the seats that are
+ * in use: seated residents never hover in mid-air, idle furniture never clutters the stream.
+ * The stage has no platform here (a flat decal in the scene; dancers stand on the ground there).
  */
-export function buildOverlayProps(): THREE.BufferGeometry {
+export function buildOverlayPropGroups(): OverlayPropGroup[] {
   const c: Ctx = {
     solid: new Batch(), detail: new Batch(), far: new Batch(), flat: new Batch(), glass: new Batch(), bulbs: new Batch(), seats: new Batch(),
     P: new Prims(), r: rng(7), space: new Space(), q: 0.5, lamps: [], chimneys: [], signs: [],
   };
+  const out: OverlayPropGroup[] = [];
   for (const poi of POIS) {
     if (poi.kind !== 'bench' || !poi.seats?.length) continue;
     const xs = poi.seats.map(s => s.x), zs = poi.seats.map(s => s.z);
     const cx = xs.reduce((a, b) => a + b, 0) / xs.length, cz = zs.reduce((a, b) => a + b, 0) / zs.length;
     const span = poi.seats.length > 1 ? Math.hypot(xs[0]! - xs[xs.length - 1]!, zs[0]! - zs[zs.length - 1]!) : 0;
-    addBench(c, cx, cz, poi.seats[0]!.facing, span + 0.9);
+    addBench(c, 0, 0, poi.seats[0]!.facing, span + 0.9);
+    out.push({ kind: 'bench', x: cx, z: cz, seats: poi.seats, geometry: c.seats.build(), shadow: 1.25 });
   }
   const cafe = getPoi('cafe');
   if (cafe?.seats) {
     for (let i = 0; i + 1 < cafe.seats.length; i += 2) {
       const s1 = cafe.seats[i]!, s2 = cafe.seats[i + 1]!;
-      const tx = (s1.x + s2.x) / 2, tz = (s1.z + s2.z) / 2;
-      c.seats.add(c.P.cyl(14), '#fbf7ef', mtx(tx, 0.76, tz, 0, 0.55, 0.05, 0.55));
-      c.seats.add(c.P.cyl(8), '#3d3a36', mtx(tx, 0.38, tz, 0, 0.05, 0.76, 0.05));
-      addChair(c, s1.x, s1.z, s1.facing, '#4e8f7a');
-      addChair(c, s2.x, s2.z, s2.facing, '#d9644f');
+      c.seats.add(c.P.cyl(14), '#fbf7ef', mtx(0, 0.76, 0, 0, 0.55, 0.05, 0.55));
+      c.seats.add(c.P.cyl(8), '#3d3a36', mtx(0, 0.38, 0, 0, 0.05, 0.76, 0.05));
+      out.push({ kind: 'table', x: (s1.x + s2.x) / 2, z: (s1.z + s2.z) / 2, seats: [s1, s2], geometry: c.seats.build(), shadow: 0.8 });
+      for (const [s, color] of [[s1, '#4e8f7a'], [s2, '#d9644f']] as const) {
+        addChair(c, 0, 0, s.facing, color);
+        out.push({ kind: 'chair', x: s.x, z: s.z, seats: [s], geometry: c.seats.build(), shadow: 0.55 });
+      }
     }
   }
-  const st = getPoi('stage');
-  if (st) {
-    c.seats.add(c.P.cyl(24), '#8a6a52', mtx(st.position.x, 0.18, st.position.z, 0, 2.82, 0.36, 2.82));
-    c.seats.add(c.P.cyl(24), '#e0b98d', mtx(st.position.x, 0.4, st.position.z, 0, 2.62, 0.08, 2.62));
-  }
-  const g = c.seats.build();
   c.P.dispose();
-  return g;
+  return out;
 }

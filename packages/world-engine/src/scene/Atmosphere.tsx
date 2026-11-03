@@ -47,6 +47,10 @@ const C = (h: string) => new THREE.Color(h);
 const RAIN = { topD: C('#6e7d8c'), topN: C('#1b2333'), horD: C('#a6b0b8'), horN: C('#283040'), cloudD: C('#8d97a1'), cloudN: C('#2a3140'), hsD: C('#b8c4cf'), hsN: C('#3a4560') };
 const SNOW = { topD: C('#a9b9cc'), topN: C('#202a42'), horD: C('#e2e8ee'), horN: C('#30395a'), cloudD: C('#f2f4f7'), cloudN: C('#3a4258'), hsD: C('#e8f0ff'), hsN: C('#46507a') };
 const tmpA = new THREE.Color(), tmpB = new THREE.Color();
+/** Overlay key light (towards the light): high and frontal for the overlay camera (which looks towards −Z). */
+const OVERLAY_KEY = new THREE.Vector3(0.35, 0.88, 0.32).normalize();
+/** Sunset weather on the overlay: ~31° from the front-left, so faces catch the golden light. */
+const OVERLAY_SUNSET_KEY = new THREE.Vector3(-0.42, 0.52, 0.74).normalize();
 
 export const NIGHT_LIGHTS: Array<{ pos: [number, number, number]; color: string; intensity: number; distance: number }> = [
   { pos: [0, 1.2, 0], color: '#9fe6ff', intensity: 7, distance: 9 },
@@ -145,7 +149,8 @@ export function Atmosphere({ transparent, quality, sky, cloudTint }: AtmosphereP
     sunUp.y = Math.max(sunUp.y, 0.16); sunUp.normalize();
     const dayW = smooth(0.05, 0.4, day);
     tmp.key.copy(tmp.moon).lerp(sunUp, dayW).lerp(tmp.gold, sunset).normalize();
-    if (transparent) tmp.key.set(0.35, 0.88, 0.32).normalize();
+    // Overlay: a fixed flattering key; sunset lowers it into a warm, raking golden-hour light.
+    if (transparent) tmp.key.copy(OVERLAY_KEY).lerp(OVERLAY_SUNSET_KEY, sunset * 0.85).normalize();
     env.keyDir.copy(tmp.key);
 
     const lights = Math.min(1, Math.max(0, 1 - Math.max(day, sunset * 0.55) * 1.2 + rain * 0.35 + snow * 0.12));

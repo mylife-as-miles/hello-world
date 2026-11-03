@@ -128,3 +128,29 @@ export function placeBubble(
   out.dx = bestDx; out.dy = bestDy; out.cost = best; out.softHits = bestSoft;
   return true;
 }
+
+export interface EdgePin {
+  /** Box centre (px) pinned at the safe-area edge toward the speaker. */
+  cx: number; cy: number;
+  /** Unit direction safe-area centre → speaker (screen px space). */
+  ux: number; uy: number;
+}
+
+/**
+ * Where an edge bubble (w × h px) sits for a speaker whose screen point is (sx, sy): on the ray from the
+ * safe-area centre toward the speaker, where the box first touches the safe-area border (the box stays fully
+ * inside). `inward` ∈ [0, 1) slides it back toward the centre (retries when the edge spot is taken).
+ * A speaker at the centre (degenerate ray) pins to the bottom edge. Node-safe, allocation-free.
+ */
+export function edgePin(sx: number, sy: number, w: number, h: number, area: SafeArea, inward: number, out: EdgePin): EdgePin {
+  const c0x = (area.minL + area.maxR) / 2, c0y = (area.minT + area.maxB) / 2;
+  const hx = Math.max(0, (area.maxR - area.minL - w) / 2), hy = Math.max(0, (area.maxB - area.minT - h) / 2);
+  let ux = sx - c0x, uy = sy - c0y;
+  const m = Math.hypot(ux, uy);
+  if (!(m > 1e-6)) { ux = 0; uy = 1; } else { ux /= m; uy /= m; }
+  const tx = Math.abs(ux) > 1e-9 ? hx / Math.abs(ux) : Infinity;
+  const ty = Math.abs(uy) > 1e-9 ? hy / Math.abs(uy) : Infinity;
+  const t = Math.min(tx, ty) * (1 - Math.min(0.95, Math.max(0, inward)));
+  out.cx = c0x + ux * t; out.cy = c0y + uy * t; out.ux = ux; out.uy = uy;
+  return out;
+}

@@ -19,7 +19,8 @@ import { getCameraProps, type CameraProp } from '../scene/cameraPose';
 import { AvatarAnimator, RUN_SPEED, WALK_SPEED, type GestureName } from './animation/AvatarAnimator';
 import { EmoteSystem, GiftSystem, InstancedEmoteSystem, makeBlobTexture, makeNameplateTexture, type EmoteKind } from './effects';
 import { labelSightBlocked, PORTAL_LABEL_OCCLUDERS, WORLD_LABEL_OCCLUDERS, type LabelOccluder } from './labelOcclusion';
-import { BUBBLE_GAP, overlaps, placeBubble, type BubbleSlot, type Placement, type SafeArea } from './bubbleLayout';
+import { BUBBLE_GAP, edgePin, overlaps, placeBubble, type BubbleSlot, type EdgePin, type Placement, type SafeArea } from './bubbleLayout';
+import { densestMember, raidChipCount, raidChipText } from './raidChip';
 
 /** Common surface of the sprite (high) and instanced (low) emote pools. */
 interface EmotePool {
@@ -53,8 +54,22 @@ const BUBBLE_STACK_GAP = 6;
 /** Bubble safe area: viewport inset (px); HUD/banner/inspector rects are excluded too. */
 const SAFE_MARGIN = 12;
 const MAX_OBSTACLES = 16;
-/** Labels may slide below a bubble by at most this much (px) — farther would detach them from the body. */
-const LABEL_MAX_NUDGE = 42;
+/**
+ * Labels may slide below a bubble by at most this much (px): farther would detach them from the head, so the
+ * label hides instead (labels stay within ~30 px of their own anchor above the head).
+ */
+const LABEL_MAX_NUDGE = 28;
+/**
+ * Edge bubbles: a VIEWER chat (event `source !== 'simulation'`) whose speaker is off screen, behind the camera,
+ * asleep indoors, or whose in-world bubble cannot be placed (no room / over the cap) is pinned inside the safe
+ * area at the screen edge toward the speaker: same bubble style, "Name: text", and a chevron pointing at the
+ * speaker. At most EDGE_MAX at once; the newest win, so the oldest is the first to go. Sim chatter never pins.
+ * (An on-screen speaker hidden behind scenery keeps the in-world bubble: it is drawn over the occluder with its
+ * tail on the speaker's spot, so the chat is visible and located.)
+ */
+const EDGE_MAX = 2;
+/** An edge bubble returns to its speaker only once the anchor is this far (px) inside the safe area (no flip-flop). */
+const EDGE_RETURN_MARGIN = 24;
 
 /** Label occlusion: a label becomes visible again only after this many consecutive clear checks (~20 Hz). */
 const OCCLUSION_CLEAR_CHECKS = 2;
@@ -88,6 +103,8 @@ const BLOB_CAPACITY = 64;
 const RAID_CLUSTER_RADIUS = 7;
 const RAID_CLUSTER_MIN = 3;
 const RAID_CHIP_SLOTS = 3;
+/** Members considered when picking a raid group's densest cluster (the sim spawns ≤ 16 per raid). */
+const RAID_MAX_GROUP = 32;
 /**
  * Gift hand-over: the sim emits `gift` when the giver STARTS heading over and a
  * `chat` with payload.reaction 'thanks' (actor = recipient, target = giver) on
@@ -181,6 +198,8 @@ interface BubbleLayout {
   vis: boolean; shown: boolean; placedOnce: boolean;
   /** Last written CSS values (NaN = force write). */
   wsc: number; wdx: number; wdy: number; wop: number; wx: number; wy: number;
+  /** Edge-pinned (viewer chat from an off-screen speaker); chevron element, its last angle; speaker point (client px). */
+  edge: boolean; chev: HTMLElement | null; wang: number; sx: number; sy: number;
 }
 
 /**
@@ -207,11 +226,11 @@ class BubbleHub {
     let L = this.layout.get(id);
     if (!L) {
       L = { wrap: null, el: null, w: 0, h: 0, sc: 1, dx: 0, dy: 0, dxT: 0, dyT: 0, x: 0, y: 0, cls: 2, start: now, vis: false, shown: false, placedOnce: false,
-        wsc: NaN, wdx: NaN, wdy: NaN, wop: NaN, wx: NaN, wy: NaN };
+        wsc: NaN, wdx: NaN, wdy: NaN, wop: NaN, wx: NaN, wy: NaN, edge: false, chev: null, wang: NaN, sx: 0, sy: 0 };
       this.layout.set(id, L);
     }
     L.wrap?.remove();
-    L.wrap = null; L.el = null;
+    L.wrap = null; L.el = null; L.chev = null; L.edge = false; L.wang = NaN;
     L.w = 0; L.h = 0; L.dx = 0; L.dy = 0; L.dxT = 0; L.dyT = 0; L.start = now; L.placedOnce = false;
     L.wsc = NaN; L.wdx = NaN; L.wdy = NaN; L.wop = NaN; L.wx = NaN; L.wy = NaN;
     if (this.root && typeof document !== 'undefined') {
@@ -225,10 +244,12 @@ class BubbleHub {
       nm.className = 'hw-name'; nm.textContent = name;
       const stem = document.createElement('i');
       stem.className = 'hw-stem';
-      el.append(nm, document.createTextNode(text), stem);
+      const chev = document.createElement('b');
+      chev.className = 'hw-chev';
+      el.append(nm, document.createTextNode(text), stem, chev);
       wrap.appendChild(el);
       this.root.appendChild(wrap);
-      L.wrap = wrap; L.el = el;
+      L.wrap = wrap; L.el = el; L.chev = chev;
     }
     if (this.list.indexOf(id) < 0) this.list.push(id);
     return duration;
@@ -264,7 +285,8 @@ class LodBus {
   readonly lod = new Map<string, AvatarLod>();
   subscribe(id: string, cb: (l: AvatarLod) => void): () => void {
     this.subs.set(id, cb);
-    return () => { if (this.subs.get(id) === cb) this.subs.delete(id); };
+    // Departed residents (raiders leaving, viewers evicted) drop their tier too: the map never outgrows the town.
+    return () => { if (this.subs.get(id) === cb) { this.subs.delete(id); this.lod.delete(id); } };
   }
   set(id: string, l: AvatarLod) {
     if (this.lod.get(id) === l) return;
@@ -299,6 +321,12 @@ pointer-events:none;user-select:none;animation:hw-bubble-in .32s cubic-bezier(.2
 .hw-bubble.hw-me{background:linear-gradient(180deg,#ffffff,#effffa);box-shadow:0 0 0 2.5px #5ef2c6,0 8px 26px rgba(10,20,30,.34)}
 .hw-bubble.hw-me::after{background:#effffa}
 .hw-bubble.hw-me .hw-name{color:#0d9a76}
+.hw-bubble .hw-chev{display:none;position:absolute;left:0;top:0;width:14px;height:14px;margin:-7px 0 0 -7px;background:#7a5cff;clip-path:polygon(12% 8%,96% 50%,12% 92%,36% 50%);will-change:transform}
+.hw-bubble.hw-edge::after,.hw-bubble.hw-edge .hw-stem{display:none}
+.hw-bubble.hw-edge .hw-chev{display:block}
+.hw-bubble.hw-edge .hw-name{display:inline;margin-right:5px}
+.hw-bubble.hw-edge .hw-name::after{content:':'}
+.hw-bubble.hw-me .hw-chev{background:#0d9a76}
 .hw-plates{position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:9}
 .hw-bubbles{position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:12}
 .hw-bwrap{position:absolute;left:0;top:0;transform:translate3d(-9999px,0,0);will-change:transform}
@@ -467,7 +495,7 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
     return () => { delete w.__hwHub; delete w.__hwPlates; };
   }, [hub]);
 
-  const clock = useRef({ now: 0, lodTimer: 0, bubbleTimer: 0, plateTimer: 0, bubbleCount: 0, rectAt: -1, crL: 0, crT: 0, W: 1, H: 1, nObs: 0 });
+  const clock = useRef({ now: 0, lodTimer: 0, bubbleTimer: 0, plateTimer: 0, bubbleCount: 0, rectAt: -1, crL: 0, crT: 0, W: 1, H: 1, nObs: 0, lateDt: 0, latePending: false, lateMiss: 0 });
   /** Overlay mode draws the portal only during a raid (label occluder then). */
   const raidUntil = useRef(-1);
   /** Nameplates kept by the 20 Hz declutter, in priority order (projected + finalised per frame). */
@@ -644,25 +672,37 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
   }), []);
   useEffect(() => () => { for (const ch of raidChips) { ch.tex?.dispose(); ch.mat.dispose(); } }, [raidChips]);
   const raidGroups = useMemo(() => new Map<string, ResidentHandle[]>(), []);
-  const raidChannels = useMemo(() => new Map<string, string>(), []);
+  const raidChannels = useMemo(() => new Map<string, { channel: string; amount: number; peak: number; anchor: string }>(), []);
+  const raidXs = useMemo(() => new Float32Array(RAID_MAX_GROUP), []);
+  const raidZs = useMemo(() => new Float32Array(RAID_MAX_GROUP), []);
+  const raidCluster = useMemo(() => ({ count: 0 }), []);
   const plateCands = useMemo(() => [] as PlateCand[], []);
   const plateCandPool = useMemo(() => [] as PlateCand[], []);
   const cmpCand = (a: PlateCand, b: PlateCand) => a.score - b.score;
 
-  const raidChannel = (group: string): string => {
-    let ch = raidChannels.get(group);
-    if (ch) return ch;
+  /** Per raid group: channel + announced size (from the raid event), peak avatar count, chip anchor member. */
+  const raidInfo = (group: string): { channel: string; amount: number; peak: number; anchor: string } => {
+    let info = raidChannels.get(group);
+    if (info) return info;
+    let ch = '', amount = 0;
     for (const e of store.current.eventHistory) {
       if (e.kind !== 'raid' || `raid:${safeIdPart(e.id)}` !== group) continue;
       const raw = typeof e.payload?.channel === 'string' && e.payload.channel ? e.payload.channel : e.actorDisplayName;
       ch = sanitizeBubbleText(raw).slice(0, 24);
+      amount = raidChipCount(e.payload?.amount, 0);
     }
-    ch = ch || 'a raid';
-    raidChannels.set(group, ch);
+    info = { channel: ch || 'a raid', amount, peak: 0, anchor: '' };
     if (raidChannels.size > 32) raidChannels.clear();
-    return ch;
+    raidChannels.set(group, info);
+    return info;
   };
 
+  /**
+   * Raid chips (~20 Hz): ONE chip per raid group, anchored beside its densest cluster (≥ RAID_CLUSTER_MIN
+   * members within RAID_CLUSTER_RADIUS; the anchor member is kept unless another cluster is 2+ bigger). While
+   * a group has a chip, ALL its members' own (long) nameplates fold into it (selected / viewer / speaking
+   * raiders keep theirs). The count is fixed per raid (see raidChipCount): the announced raid size.
+   */
   const updateRaidGroups = () => {
     for (const arr of raidGroups.values()) arr.length = 0;
     for (const h of registry.values()) {
@@ -677,35 +717,45 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
     }
     let slot = 0;
     for (const [key, arr] of raidGroups) {
-      if (arr.length < RAID_CLUSTER_MIN) { if (!arr.length) raidGroups.delete(key); continue; }
-      let cx = 0, cz = 0;
-      for (const h of arr) { cx += h.pos.x; cz += h.pos.z; }
-      cx /= arr.length; cz /= arr.length;
+      if (!arr.length) { raidGroups.delete(key); continue; }
+      const info = raidInfo(key);
+      if (arr.length > info.peak) info.peak = arr.length;
+      if (arr.length < RAID_CLUSTER_MIN || slot >= raidChips.length) continue;
+      let prev = -1;
+      for (let i = 0; i < arr.length && i < RAID_MAX_GROUP; i++) {
+        raidXs[i] = arr[i]!.pos.x; raidZs[i] = arr[i]!.pos.z;
+        if (arr[i]!.id === info.anchor) prev = i;
+      }
+      const m = Math.min(arr.length, RAID_MAX_GROUP);
+      const ai = densestMember(raidXs, raidZs, m, RAID_CLUSTER_RADIUS, prev, raidCluster);
+      if (ai < 0 || raidCluster.count < RAID_CLUSTER_MIN) { info.anchor = ''; continue; }
+      const a = arr[ai]!;
+      info.anchor = a.id;
       let n = 0, mx = 0, mz = 0, top = 0;
+      const r2 = RAID_CLUSTER_RADIUS * RAID_CLUSTER_RADIUS;
       for (const h of arr) {
-        if (Math.hypot(h.pos.x - cx, h.pos.z - cz) > RAID_CLUSTER_RADIUS) continue;
+        const dx = h.pos.x - a.pos.x, dz = h.pos.z - a.pos.z;
+        if (dx * dx + dz * dz > r2) continue;
         n++; mx += h.pos.x; mz += h.pos.z; top = Math.max(top, h.height);
       }
-      if (n < RAID_CLUSTER_MIN || slot >= raidChips.length) continue;
       mx /= n; mz /= n;
-      for (const h of arr) {
-        if (Math.hypot(h.pos.x - cx, h.pos.z - cz) > RAID_CLUSTER_RADIUS) continue;
-        // Individual labels only when selected / speaking / it's the viewer.
-        h.raidCollapsed = !(h.id === selectedResidentId || h.id === viewerResidentId || hub.shown.has(h.id));
-      }
+      // Every member folds into the chip; individual labels only when selected / speaking / it's the viewer.
+      for (const h of arr) h.raidCollapsed = !(h.id === selectedResidentId || h.id === viewerResidentId || hub.shown.has(h.id));
+      const text = raidChipText(raidChipCount(info.amount, info.peak), info.channel);
+      if (!text) continue;
       const chip = raidChips[slot++]!;
       chip.active = true;
-      // Beside the group (to its right on screen), at chest height, not over heads.
+      // Beside the cluster (to its right on screen), at chest height, not over heads.
       const e = camera.matrixWorld.elements;
       let rx = e[0]!, rz = e[2]!;
       const rl = Math.hypot(rx, rz) || 1; rx /= rl; rz /= rl;
       let ext = 0;
       for (const h of arr) {
-        if (Math.hypot(h.pos.x - cx, h.pos.z - cz) > RAID_CLUSTER_RADIUS) continue;
+        const dx = h.pos.x - a.pos.x, dz = h.pos.z - a.pos.z;
+        if (dx * dx + dz * dz > r2) continue;
         ext = Math.max(ext, (h.pos.x - mx) * rx + (h.pos.z - mz) * rz);
       }
       chip.pos.set(mx + rx * (ext + 1.1), Math.min(1.3, top * 0.72), mz + rz * (ext + 1.1));
-      const text = `+${n} raiders from ${raidChannel(key)}`;
       if (text !== chip.text) {
         chip.text = text;
         chip.tex?.dispose();
@@ -877,6 +927,7 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
       if (!sp) continue;
       sp.visible = !domPlates && h.plateShow;
       sp.position.y = h.plateY - (h.plateShow ? h.plateNudgePx : 0) / Math.max(1e-3, h.platePxPerM);
+      if (sp.visible) sp.updateMatrixWorld();   // runs after the renderer's scene matrix update (render-time pass)
     }
     for (let i = 0; i < raidChips.length; i++) {
       const chip = raidChips[i]!;
@@ -884,6 +935,7 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
       if (!chip.sprite.visible) continue;
       chip.sprite.position.copy(chip.pos);
       chip.sprite.position.y -= chip.nudgePx / Math.max(1e-3, chip.pxPerM);
+      chip.sprite.updateMatrixWorld();
     }
     if (domPlates) {
       for (let i = 0; i < domPlates.els.length; i++) {
@@ -914,6 +966,9 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
     const A = hub.layout.get(a)!, B = hub.layout.get(b)!;
     return A.cls !== B.cls ? A.cls - B.cls : B.start - A.start;
   };
+  /** Edge bubbles: newest first (cap), then oldest first (placement). */
+  const cmpNewest = (a: string, b: string) => hub.layout.get(b)!.start - hub.layout.get(a)!.start;
+  const cmpOldest = (a: string, b: string) => hub.layout.get(a)!.start - hub.layout.get(b)!.start;
   /** Placement order (stable, so no stacking jitter): class, then OLDEST first; later bubbles stack above. */
   const cmpPlace = (a: string, b: string) => {
     const A = hub.layout.get(a)!, B = hub.layout.get(b)!;
@@ -933,27 +988,33 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
     c.bubbleCount = 0;
     if (!list.length) return;
     const cap = overlayRef.current ? BUBBLE_MAX_VISIBLE_OVERLAY : quality === 'low' ? BUBBLE_MAX_VISIBLE_LOW : BUBBLE_MAX_VISIBLE;
-    let nc = 0;
+    let nc = 0, ne = 0;
     for (let i = 0; i < list.length; i++) {
       const id = list[i]!;
       const L = hub.layout.get(id), b = hub.active.get(id), h = registry.get(id);
       if (!L || !b) continue;
       L.vis = false; L.shown = false;
-      if (!h || !L.el || !h.visible) continue;
+      if (!h || !L.el) continue;
+      L.cls = id === viewerResidentId ? 0 : (!b.sim || id === selectedResidentId) ? 1 : 2;
+      L.start = b.start;
+      // Viewer chats (not sim chatter) that get no in-world slot below are pinned to the screen edge instead.
+      const viewerChat = !b.sim;
+      if (viewerChat && ne < edgeCands.length) edgeCands[ne++] = id;
+      if (!h.visible) continue;
       const d = h.pos.distanceTo(camera.position);
-      if (d > (id === viewerResidentId ? 70 : BUBBLE_MAX_DISTANCE)) continue;
+      if (d > (viewerChat ? 90 : BUBBLE_MAX_DISTANCE)) continue;
       _v.set(h.pos.x, h.pos.y + h.height + 0.42, h.pos.z).project(camera);
       if (_v.z > 1) continue;
       L.x = c.crL + ((_v.x + 1) / 2) * c.W; L.y = c.crT + ((1 - _v.y) / 2) * c.H;
       L.sc = Math.min(BUBBLE_MAX_SCALE, Math.max(BUBBLE_MIN_SCALE, BUBBLE_SCALE_DISTANCE / Math.max(0.5, d))) * (id === viewerResidentId ? 1.08 : 1);
       if (!L.w && L.el.offsetWidth > 0) { L.w = L.el.offsetWidth; L.h = L.el.offsetHeight; }
-      L.cls = id === viewerResidentId ? 0 : (!b.sim || id === selectedResidentId) ? 1 : 2;
-      L.start = b.start;
       L.vis = true;
       // Unplaceable (tail anchor outside the safe area, or no room above it): collapse ("Name …")
       // without taking one of the capped slots, so a placeable older bubble still shows.
-      if (L.x < c.crL + SAFE_MARGIN || L.x > c.crL + c.W - SAFE_MARGIN || L.y > c.crT + c.H
-        || L.y - (L.h || 48) * L.sc < c.crT + SAFE_MARGIN) continue;
+      // An edge-pinned bubble comes back to its speaker only once the anchor is well inside (hysteresis).
+      const mg = SAFE_MARGIN + (L.edge ? EDGE_RETURN_MARGIN : 0);
+      if (L.x < c.crL + mg || L.x > c.crL + c.W - mg || L.y > c.crT + c.H - (L.edge ? mg : 0)
+        || L.y - (L.h || 48) * L.sc < c.crT + mg) continue;
       bubbleCands[nc++] = id;
     }
     insertionSort(bubbleCands, nc, cmpSelect);
@@ -984,12 +1045,68 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
       slot.prevDx = L.placedOnce ? L.dxT : NaN; slot.prevDy = L.placedOnce ? L.dyT : NaN;
       if (n >= 16 || !placeBubble(slot, area, hardRects, nh, softRects, ns, stemRects, nStems, placement)) continue;   // no slot: collapsed
       L.shown = true; L.dxT = placement.dx; L.dyT = placement.dy;
+      if (L.edge && L.el) {
+        // Back over the speaker's head: regular look (tail + stem), re-measured once.
+        L.edge = false; L.el.classList.remove('hw-edge'); L.wang = NaN; L.placedOnce = false;
+        L.w = L.el.offsetWidth || L.w; L.h = L.el.offsetHeight || L.h;
+      }
       const o = n * 4;
       shownRects[o] = L.x + placement.dx - slot.w / 2; shownRects[o + 1] = L.x + placement.dx + slot.w / 2;
       shownRects[o + 2] = L.y + placement.dy - slot.h; shownRects[o + 3] = L.y + placement.dy;
       shownIds[n] = id;
       n++;
       if (nStems < 16) { const so = nStems * 4; stemRects[so] = L.x - 6; stemRects[so + 1] = L.x + 6; stemRects[so + 2] = L.y + placement.dy; stemRects[so + 3] = L.y + 8; nStems++; }
+    }
+    // Edge bubbles: viewer chats left without an in-world slot (speaker off screen / behind the camera / indoors /
+    // no room / over the cap). The newest EDGE_MAX win (the oldest goes first); placed oldest first, each clear of
+    // HUD rects, protected labels and every bubble placed so far, by the same slot search as in-world bubbles.
+    let nE = 0;
+    for (let i = 0; i < ne; i++) { const id = edgeCands[i]!; if (!hub.layout.get(id)!.shown) edgeCands[nE++] = id; }
+    insertionSort(edgeCands, nE, cmpNewest);
+    if (nE > EDGE_MAX) nE = EDGE_MAX;
+    insertionSort(edgeCands, nE, cmpOldest);
+    for (let i = 0; i < nE && n < 16; i++) {
+      const id = edgeCands[i]!;
+      const L = hub.layout.get(id)!, h = registry.get(id);
+      if (!h || !L.el) continue;
+      if (!L.edge) { L.edge = true; L.el.classList.add('hw-edge'); L.w = 0; L.wang = NaN; L.placedOnce = false; }
+      if (!L.w) { L.w = L.el.offsetWidth; L.h = L.el.offsetHeight; }
+      if (!L.w) continue;
+      L.sc = 1;
+      // Speaker's screen point; behind the camera the projection is mirrored, so flip it and push it far out.
+      _v.set(h.pos.x, h.pos.y + h.height * 0.9, h.pos.z).project(camera);
+      let px = _v.x, py = _v.y;
+      if (_v.z > 1) {
+        px = -px; py = -py;
+        const m = Math.hypot(px, py);
+        if (m > 1e-6) { px = (px / m) * 4; py = (py / m) * 4; } else { px = 0; py = -4; }
+      }
+      L.sx = c.crL + ((px + 1) / 2) * c.W; L.sy = c.crT + ((1 - py) / 2) * c.H;
+      let nh = 0, ns = 0;
+      for (let k = 0; k < c.nObs && nh < HARD_CAP; k++) { hardRects.set(obsRects.subarray(k * 4, k * 4 + 4), nh * 4); nh++; }
+      for (let si = 0; si < plateSelN.current; si++) {
+        const s = plateSel[si]!;
+        if (!s.on) continue;
+        if (s.prot) { if (nh < HARD_CAP) { const o = nh * 4; hardRects[o] = s.l; hardRects[o + 1] = s.r; hardRects[o + 2] = s.t; hardRects[o + 3] = s.b; nh++; } }
+        else if (ns < SOFT_CAP) { const o = ns * 4; softRects[o] = s.l; softRects[o + 1] = s.r; softRects[o + 2] = s.t; softRects[o + 3] = s.b; ns++; }
+      }
+      for (let k = 0; k < n && nh < HARD_CAP; k++) { hardRects.set(shownRects.subarray(k * 4, k * 4 + 4), nh * 4); nh++; }
+      const slot = bubbleSlot;
+      let ok = false;
+      for (let attempt = 0; attempt < 4 && !ok; attempt++) {
+        edgePin(L.sx, L.sy, L.w, L.h, area, attempt * 0.25, pin);
+        slot.ax = pin.cx; slot.ay = pin.cy + L.h / 2; slot.w = L.w; slot.h = L.h;
+        slot.maxShift = Math.min(240, c.W * 0.3);
+        slot.prevDx = L.placedOnce && attempt === 0 ? L.dxT : NaN; slot.prevDy = L.placedOnce && attempt === 0 ? L.dyT : NaN;
+        ok = placeBubble(slot, area, hardRects, nh, softRects, ns, stemRects, 0, placement);
+      }
+      if (!ok) continue;
+      L.x = slot.ax; L.y = slot.ay; L.vis = true; L.shown = true; L.dxT = placement.dx; L.dyT = placement.dy;
+      const o = n * 4;
+      shownRects[o] = L.x + placement.dx - L.w / 2; shownRects[o + 1] = L.x + placement.dx + L.w / 2;
+      shownRects[o + 2] = L.y + placement.dy - L.h; shownRects[o + 3] = L.y + placement.dy;
+      shownIds[n] = id;
+      n++;
     }
     c.bubbleCount = n;
     // Displayed offsets: ease toward the slots; snap any bubble whose eased box would touch another
@@ -1034,8 +1151,21 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
       if (!L || !b || !L.el) continue;
       const fading = c.now - b.start > b.duration - 0.5;
       const show = L.vis && L.shown && !fading;
-      if (show) { hub.shown.add(id); hub.collapsed.delete(id); }
+      // An edge-pinned bubble leaves the speaker's nameplate as it is (it is not over their head).
+      if (show && L.edge) { hub.shown.delete(id); hub.collapsed.delete(id); }
+      else if (show) { hub.shown.add(id); hub.collapsed.delete(id); }
       else { hub.shown.delete(id); if (L.vis && !fading) hub.collapsed.add(id); else hub.collapsed.delete(id); }
+      if (show && L.edge && L.chev) {
+        // Chevron on the box border, pointing from the box centre at the speaker.
+        const bcx = L.x + L.dx, bcy = L.y + L.dy - L.h / 2;
+        const ang = Math.atan2(L.sy - bcy, L.sx - bcx);
+        if (!(Math.abs(ang - L.wang) <= 0.02)) {
+          L.wang = ang;
+          const ca = Math.cos(ang), sa = Math.sin(ang);
+          const t = Math.min(Math.abs(ca) > 1e-6 ? L.w / 2 / Math.abs(ca) : 1e9, Math.abs(sa) > 1e-6 ? L.h / 2 / Math.abs(sa) : 1e9) + 5;
+          L.chev.style.transform = `translate(${(L.w / 2 + ca * t).toFixed(1)}px,${(L.h / 2 + sa * t).toFixed(1)}px) rotate(${ang.toFixed(3)}rad)`;
+        }
+      }
       const el = L.el;
       if (L.wrap && L.vis) {
         const px = L.x - c.crL, py = L.y - c.crT;
@@ -1096,6 +1226,8 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
   const shownIds = useMemo(() => new Array<string>(16).fill(''), []);
   const safeArea = useMemo<SafeArea>(() => ({ minL: 0, maxR: 1, minT: 0, maxB: 1 }), []);
   const bubbleSlot = useMemo<BubbleSlot>(() => ({ ax: 0, ay: 0, w: 0, h: 0, maxShift: 0, prevDx: NaN, prevDy: NaN }), []);
+  const edgeCands = useMemo(() => new Array<string>(16).fill(''), []);
+  const pin = useMemo<EdgePin>(() => ({ cx: 0, cy: 0, ux: 0, uy: 1 }), []);
   const placement = useMemo<Placement>(() => ({ dx: 0, dy: 0, cost: 0, softHits: 0 }), []);
 
   useFrame((state, delta) => {
@@ -1221,11 +1353,34 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
       c.nObs = collectObstacles(gl.domElement, obsRects, !overlayRef.current, c.crL, c.crT, c.W);
     }
     // Same frame, same projection: labels (obstacles) → bubbles → final labels against the drawn bubbles.
-    projectPlates();
-    layoutBubbles(dt);
-    finalizePlates(state.size.width, state.size.height);
+    // This pass runs at render time (scene.onBeforeRender, below) with the camera the frame is drawn with:
+    // CameraRig moves the camera AFTER this callback, and projecting here used last frame's camera, so DOM
+    // labels/bubbles trailed their owners by a frame (75–100 px in cinematic at low fps). Fallback: if the hook
+    // never fires (scene rendered some other way), run it here as before.
+    c.lateDt = dt;
+    if (c.lateMiss > 3) { c.latePending = false; runLate(); }
+    else { c.latePending = true; c.lateMiss++; }
 
   });
+
+  const runLate = () => { const c = clock.current; projectPlates(); layoutBubbles(c.lateDt); finalizePlates(c.W, c.H); };
+  const lateRef = useRef(runLate);
+  lateRef.current = runLate;
+  const cameraRef = useRef(camera);
+  cameraRef.current = camera;
+  useEffect(() => {
+    const prev = scene.onBeforeRender;
+    const hook = function (this: THREE.Scene, ...args: Parameters<THREE.Scene['onBeforeRender']>) {
+      prev.apply(this, args);
+      const c = clock.current;
+      // Once per frame, for the main camera only (extra passes / other cameras re-render the same scene).
+      if (!c.latePending || args[2] !== cameraRef.current) return;
+      c.latePending = false; c.lateMiss = 0;
+      lateRef.current();
+    };
+    scene.onBeforeRender = hook;
+    return () => { if (scene.onBeforeRender === hook) scene.onBeforeRender = prev; };
+  }, [scene]);
 
   const ringGeo = useMemo(() => new THREE.RingGeometry(0.5, 0.62, 48), []);
   const ringMat = useMemo(() => new THREE.MeshBasicMaterial({ color: '#ffd84d', transparent: true, opacity: 0.7, depthWrite: false, side: THREE.DoubleSide, toneMapped: false }), []);

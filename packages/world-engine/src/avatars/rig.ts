@@ -55,5 +55,13 @@ export interface HumanoidRig {
   dispose(): void;
 }
 
-/** Level of detail requested by the renderer. 'low' = cheap distant avatar. */
-export type AvatarLod = 'high' | 'low';
+/**
+ * Level of detail requested by the renderer.
+ *  - 'high': full detail with a live, expressive face (blink, gaze, expressions, visemes). For the few nearest residents.
+ *  - 'mid':  same silhouette/tessellation as 'high' but merged into ~1 draw call with a STATIC neutral face baked in
+ *            (procedural Townies: `setExpression` / blink are no-ops). Rigs without a separate mid level map it to their
+ *            nearest one (VRM: 'high'; realistic scans: their lighter LOD).
+ *  - 'low':  cheap distant avatar (procedural Townies: one draw call, coarse tessellation, eye dots).
+ * Every LOD exposes the same bones, attach points and height, so animation is LOD-independent.
+ */
+export type AvatarLod = 'high' | 'mid' | 'low';

@@ -4,7 +4,38 @@
  */
 import * as THREE from 'three';
 
-export type Finish = 'skin' | 'cloth' | 'knit' | 'denim' | 'hair' | 'leather' | 'rubber' | 'metal' | 'plastic' | 'lens' | 'shade' | 'eye' | 'mouth' | 'teeth' | 'dark' | 'glow' | 'gem';
+export type Finish = 'skin' | 'cloth' | 'knit' | 'denim' | 'hair' | 'leather' | 'rubber' | 'metal' | 'plastic' | 'lens' | 'shade' | 'eye' | 'mouth' | 'teeth' | 'dark' | 'glow' | 'gem' | 'baked';
+
+/**
+ * Per-finish surface response [roughness, metalness, emissive strength (x albedo)] — the same numbers `make()` uses,
+ * so parts merged into ONE 'baked' mesh (per-vertex `pbr` attribute) shade like their separate-material originals.
+ */
+export const FINISH_PBR: Record<Exclude<Finish, 'baked' | 'lens'>, [number, number, number]> = {
+  skin: [0.56, 0, 0.07], cloth: [0.84, 0, 0], knit: [0.95, 0, 0], denim: [0.9, 0, 0], hair: [0.46, 0, 0.04],
+  leather: [0.4, 0, 0], rubber: [0.78, 0, 0], metal: [0.28, 0.75, 0.12], plastic: [0.32, 0, 0], gem: [0.1, 0.1, 0.25],
+  shade: [0.06, 0.35, 0], eye: [0.2, 0, 0], mouth: [0.65, 0, 0], teeth: [0.3, 0, 0.1], dark: [0.5, 0, 0], glow: [1, 0, 1],
+};
+
+/**
+ * Shared material for merged ("baked") Townie meshes: white albedo x vertex colour, with roughness / metalness /
+ * emissive read per vertex from the `pbr` attribute (see FINISH_PBR). One material + one draw call for a whole avatar
+ * while skin, cloth, hair, leather and metal keep their own response.
+ */
+function bakedMaterial(): THREE.MeshStandardMaterial {
+  const m = new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 1, metalness: 0, side: THREE.DoubleSide });
+  m.onBeforeCompile = (sh) => {
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute vec3 pbr;\nvarying vec3 vPbr;')
+      .replace('#include <color_vertex>', '#include <color_vertex>\n\tvPbr = pbr;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vPbr;')
+      .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = vPbr.x;')
+      .replace('#include <metalnessmap_fragment>', 'float metalnessFactor = vPbr.y;')
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n\ttotalEmissiveRadiance += vColor.rgb * vPbr.z;');
+  };
+  m.customProgramCacheKey = () => 'townie-baked-pbr-1';
+  return m;
+}
 
 interface Entry { mat: THREE.Material; refs: number }
 const cache = new Map<string, Entry>();
@@ -30,6 +61,7 @@ function make(color: string, finish: Finish): THREE.Material {
     case 'teeth': return std({ roughness: 0.3, emissive: c.clone().multiplyScalar(0.1) });
     case 'dark': return std({ roughness: 0.5 });
     case 'glow': return new THREE.MeshBasicMaterial({ color: c, vertexColors: true, toneMapped: false });
+    case 'baked': return bakedMaterial();
   }
 }
 

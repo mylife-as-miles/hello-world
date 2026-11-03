@@ -506,13 +506,13 @@ class RealisticRig implements HumanoidRig {
     mk('leftHand', 'crl_hand__L', [0.08, -0.01, 0.01]);
     mk('rightHand', 'crl_hand__R', [-0.08, -0.01, 0.01]);
     mk('back', 'crl_spine01__C', [0, 0.02, -0.16]);
-    this.buildHeadAccessories(appearance, lod);
+    this.buildHeadAccessories(appearance, lod === 'high' ? 'high' : 'low');
     this.applyPose();
     this.root.updateMatrixWorld(true);
   }
 
   /** Hats / crown / headphones from the procedural kit, fitted to this scan's head (same subset as VRM guests). */
-  private buildHeadAccessories(a: AvatarAppearance, lod: AvatarLod): void {
+  private buildHeadAccessories(a: AvatarAppearance, lod: 'high' | 'low'): void {
     const fit = this.body.headFit, i = this.body.bones.indexOf('crl_Head__C');
     const list = Array.isArray(a.accessories) ? a.accessories.filter((x) => HEAD_OK.has(x)) : [];
     if (!fit || i < 0 || !list.length) return;
@@ -643,7 +643,7 @@ export function disposeRealisticCache(): void {
 
 /**
  * Build a realistic rig for `appearance.baseModelId` ('mh-*' / 'rb-*'). Resolves null (never rejects) on unknown ids or
- * any load error, so the caller can fall back to the procedural rig. lod 'high' → LOD0 (~30k verts), 'low' → LOD1 (~10k).
+ * any load error, so the caller can fall back to the procedural rig. lod 'high' → LOD0 (~30k verts), 'mid' / 'low' → LOD1 (~10k).
  */
 export async function loadRealisticRig(appearance: AvatarAppearance, opts: { lod?: AvatarLod; stylize?: boolean } = {}): Promise<HumanoidRig | null> {
   const st = stats();
@@ -652,7 +652,8 @@ export async function loadRealisticRig(appearance: AvatarAppearance, opts: { lod
     if (!GLB_URLS[id]) { st.realisticFailed++; return null; }
     const body = await getBody(id);
     if (!body) { st.realisticFailed++; return null; }
-    const lod: AvatarLod = opts.lod === 'low' ? 'low' : 'high';
+    // two LODs: 'mid' maps to the lighter LOD1 like 'low' (the rig reports the LOD it built)
+    const lod: AvatarLod = opts.lod === 'low' || opts.lod === 'mid' ? 'low' : 'high';
     const files = new Set<string>();
     for (const part of body.lods[lod === 'low' && body.lods[1]?.length ? 1 : 0] ?? []) {
       for (const g of part.groups) files.add(texName(body, part.hair, body.data.layers[g.slot]! + g.tile));

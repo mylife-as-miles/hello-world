@@ -29,7 +29,7 @@ describe('Townie procedural rig', () => {
         accessories: [ACCESSORIES[i % ACCESSORIES.length]!.id, ACCESSORIES[(i * 5 + 3) % ACCESSORIES.length]!.id],
       };
       i++;
-      for (const lod of ['high', 'low'] as const) {
+      for (const lod of ['high', 'mid', 'low'] as const) {
         const rig = createAvatarRig(a, { lod });
         expect(rig.kind).toBe('procedural');
         rig.update(0.016);
@@ -74,6 +74,51 @@ describe('Townie procedural rig', () => {
       expect(lo.root.getObjectByName('attach:head')).toBeTruthy();
       expect(Math.abs(lo.height - hi.height)).toBeLessThan(1e-6);
       hi.dispose(); lo.dispose();
+    }
+    console.log(rows.join('\n'));
+  });
+
+  it('LOD draw-call budgets: high body merged, mid = static face in one mesh, same skeleton everywhere', () => {
+    const rows: string[] = [];
+    const seeds = Array.from({ length: 10 }, (_, k) => appearanceFromSeed(`lod-${k}`));
+    seeds.push({ ...DEFAULT_APPEARANCE, accessories: ['glasses', 'crown', 'backpack', 'earrings'] });
+    for (const a of seeds) {
+      const rigs = (['high', 'mid', 'low'] as const).map(lod => ({ lod, rig: createAvatarRig(a, { lod }) }));
+      const stat = rigs.map(({ lod, rig }) => {
+        let meshes = 0, skinned = 0, t = 0;
+        rig.root.traverse(o => {
+          const m = o as THREE.Mesh; if (!m.isMesh) return;
+          meshes++; if ((m as THREE.SkinnedMesh).isSkinnedMesh) skinned++;
+          t += (m.geometry.index ? m.geometry.index.count : m.geometry.getAttribute('position').count) / 3;
+        });
+        return { lod, meshes, skinned, tris: t };
+      });
+      const [hi, mid, lo] = stat as [typeof stat[0], typeof stat[0], typeof stat[0]];
+      const glasses = a.accessories.includes('glasses');
+      rows.push(`${a.baseModelId}/${a.hairStyle}/${a.outfit.top}/${a.accessories.join('+') || '-'}: ` + stat.map(s => `${s.lod} ${s.meshes} meshes (${s.skinned} skinned, ${s.tris} tris)`).join(' | '));
+      expect(hi.skinned).toBeLessThanOrEqual(glasses ? 2 : 1); // whole body + head + hair + hats: ONE baked SkinnedMesh (+ lens)
+      expect(hi.skinned).toBeLessThanOrEqual(5);
+      expect(hi.meshes).toBeLessThanOrEqual(16); // + live face (8 eye parts, 2 brows, mouth, teeth, blush)
+      expect(mid.meshes).toBeLessThanOrEqual(2);
+      expect(mid.meshes).toBe(glasses ? 2 : 1);
+      expect(lo.meshes).toBe(1);
+      expect(mid.tris).toBeGreaterThan(lo.tris); // mid keeps the high-detail shape
+      expect(Math.abs(mid.tris - hi.tris) / hi.tris).toBeLessThan(0.25);
+      for (const { rig } of rigs) {
+        for (const b of HUMAN_BONES) expect(rig.root.getObjectByName(b), b).toBeTruthy();
+        for (const slot of ['head', 'leftHand', 'rightHand', 'back'] as const) expect(rig.getAttachPoint(slot)).toBeTruthy();
+        expect(Math.abs(rig.height - rigs[0]!.rig.height)).toBeLessThan(1e-6);
+        rig.root.traverse(o => { const sm = o as THREE.SkinnedMesh; if (sm.isSkinnedMesh) { expect(sm.boundingSphere?.radius).toBeGreaterThan(1.2); expect(sm.geometry.getAttribute('pbr') || sm.name.startsWith('townie-lens')).toBeTruthy(); } });
+        // expressions / blink must be safe on every LOD (no-ops on mid / low)
+        for (const e of ['happy', 'blink', 'aa', 'surprised'] as const) rig.setExpression(e, 1);
+        rig.update(0.05);
+      }
+      // mid: the head + resting face are rigidly skinned to 'head' (eyes, lids, brows, mouth baked in)
+      const midMesh = rigs[1]!.rig.root.getObjectByName('townie-body:mid') as THREE.SkinnedMesh;
+      const si = midMesh.geometry.getAttribute('skinIndex');
+      let headVerts = 0; for (let v = 0; v < si.count; v++) if (si.getX(v) === HUMAN_BONES.indexOf('head')) headVerts++;
+      expect(headVerts).toBeGreaterThan(3000);
+      for (const { rig } of rigs) rig.dispose();
     }
     console.log(rows.join('\n'));
   });

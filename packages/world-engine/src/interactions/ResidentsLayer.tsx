@@ -936,20 +936,31 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
       }
     }
 
-    // LOD assignment (2 Hz): nearest N within range get 'high'.
+    // LOD assignment (2 Hz): the nearest few get 'high' (live face), the next ones 'mid' (same shape, static
+    // face, 1 draw call), the rest 'low'. Hysteresis: a tier is entered within its distance and kept until
+    // TIER_HYST metres beyond it, so residents walking along an edge don't flicker. Selected / viewer: always 'high'.
     if ((c.lodTimer -= dt) <= 0) {
       c.lodTimer = 0.5;
       overlayRef.current = overlay ?? (!!gl.getContextAttributes()?.alpha && !scene.background);
-      const maxHigh = quality === 'low' ? 8 : 20;
-      const highDist = quality === 'low' ? 18 : 30;
+      const maxHigh = quality === 'low' ? 3 : 8;
+      const highDist = quality === 'low' ? 9 : 14;
+      const maxMid = quality === 'low' ? 10 : 20;
+      const midDist = quality === 'low' ? 18 : 30;
+      const TIER_HYST = 3;
+      let nHigh = 0, nMid = 0;
       lodRank.length = 0;
       for (const h of registry.values()) lodRank.push({ id: h.id, d: h.pos.distanceTo(camera.position) });
       lodRank.sort((a, b) => a.d - b.d);
       lodRank.forEach((r, i) => {
-        const cur = lodBus.lod.get(r.id) ?? 'high';
-        const limit = cur === 'high' ? highDist + 3 : highDist - 3;
+        const cur = lodBus.lod.get(r.id) ?? 'mid';
         const forced = r.id === selectedResidentId || r.id === viewerResidentId;
-        lodBus.set(r.id, forced || (i < maxHigh && r.d < limit) ? 'high' : 'low');
+        const highLimit = cur === 'high' ? highDist + TIER_HYST : highDist;
+        const midLimit = cur === 'low' ? midDist : midDist + TIER_HYST;
+        let next: AvatarLod = 'low';
+        if (forced) next = 'high';
+        else if (nHigh < maxHigh && r.d < highLimit) { next = 'high'; nHigh++; }
+        else if (nMid < maxMid && r.d < midLimit) { next = 'mid'; nMid++; }
+        lodBus.set(r.id, next);
         // Shadow budget: at 'low' only the nearest few cast real shadows (others: blob discs).
         const h = registry.get(r.id);
         if (h) { h.shadowOn = quality !== 'low' || i < SHADOW_CASTERS_LOW; applyShadow(h); }
@@ -1070,7 +1081,7 @@ interface ResidentProps {
 
 const Resident = memo(function Resident(p: ResidentProps) {
   const { id, store, registry, pending, hub, lodBus, emotes, overlayRef } = p;
-  const [lod, setLod] = useState<AvatarLod>(() => lodBus.lod.get(id) ?? 'high');
+  const [lod, setLod] = useState<AvatarLod>(() => lodBus.lod.get(id) ?? 'mid');
   useEffect(() => lodBus.subscribe(id, setLod), [lodBus, id]);
   const rig = useAvatarRig(p.appearance, lod);
   const groupRef = useRef<THREE.Group>(null);

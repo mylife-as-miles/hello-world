@@ -91,10 +91,21 @@ function appearanceKey(a: AvatarAppearance): string {
   try { return JSON.stringify(normalizeAppearance(a)); } catch { return 'invalid'; }
 }
 
+/**
+ * The LOD a rig family actually builds for a requested level: VRM guest skins have a single LOD ('high'); realistic
+ * scans have two (LOD0 = 'high', LOD1 serves 'mid' and 'low'); procedural Townies build all three.
+ */
+export function effectiveAvatarLod(baseModelId: string, lod: AvatarLod): AvatarLod {
+  if (isVrmBase(baseModelId)) return 'high';
+  if (isRealisticBase(baseModelId)) return lod === 'high' ? 'high' : 'low';
+  return lod === 'mid' || lod === 'low' ? lod : 'high';
+}
+
 /** React hook: returns a rig for the appearance, swapping + disposing when it changes. */
 export function useAvatarRig(appearance: AvatarAppearance, lodIn: AvatarLod = 'high'): HumanoidRig | null {
-  // VRM guest skins have a single LOD: don't re-parse the file when the renderer flips high/low.
-  const lod: AvatarLod = isVrmBase(normalizeAppearance(appearance).baseModelId) ? 'high' : lodIn;
+  // Only rebuild when the family's effective LOD changes (VRM: never re-parse the file when the renderer flips
+  // high/mid/low; realistic: mid and low share LOD1).
+  const lod: AvatarLod = effectiveAvatarLod(normalizeAppearance(appearance).baseModelId, lodIn);
   const key = appearanceKey(appearance) + '|' + lod;
   const vrm = isAsyncBase(normalizeAppearance(appearance).baseModelId);
   // Instant procedural rig (also used as a placeholder while a VRM loads).

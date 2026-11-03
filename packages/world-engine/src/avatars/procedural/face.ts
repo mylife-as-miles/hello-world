@@ -3,11 +3,13 @@
  * High LOD: 3D eyeballs (sclera + iris + pupil + highlight), rotating upper and
  * lower eyelids with lash lines (blink / squint / half-lidded), brows driven by
  * transforms, nose, a morph-target mouth (smile/frown/grr/O/aa/oh) with teeth,
- * and blush. Low LOD: two cheap eye dots.
+ * and blush. Low LOD: two cheap eye dots. Mid LOD: `buildStaticFace` bakes the
+ * same features at their neutral rest pose into the rig's merged mesh (no
+ * live expressions), so a high <-> mid swap keeps the face's look.
  */
 import * as THREE from 'three';
 import type { ExpressionName } from '../rig';
-import { clamp, lerp, type V3 } from './geom';
+import { GeoBuilder, clamp, lerp, type V3 } from './geom';
 import { RX, RY, headPoint, headStrip, headNormal } from './head';
 
 export function withColor(g: THREE.BufferGeometry, rgb: V3 | ((i: number, x: number, y: number, z: number) => V3)): THREE.BufferGeometry {
@@ -21,7 +23,15 @@ export function withColor(g: THREE.BufferGeometry, rgb: V3 | ((i: number, x: num
   return g;
 }
 
-export interface FaceParams { eyeScale: number; noseScale: number; mouthScale: number; eyeColor: string }
+export interface FaceParams {
+  eyeScale: number; noseScale: number; mouthScale: number; eyeColor: string;
+  /** false: the rig merges the (static) nose into its baked mesh (see `noseMatrix`) instead of a separate mesh. */
+  nose?: boolean;
+}
+
+/** Neutral rest angles of the eyelid pivots (what `update()` computes with every weight at 0). */
+const REST_UPPER_LID = -0.5;
+const REST_LOWER_LID = 0.85;
 
 // ---------------------------------------------------------------- geometry (cached)
 const geoCache = new Map<string, THREE.BufferGeometry>();
@@ -31,6 +41,23 @@ function cached(key: string, make: () => THREE.BufferGeometry): THREE.BufferGeom
 /** Unit sphere with a white colour attribute (all Townie materials use vertex colours). */
 export function unitSphere(ws: number, hs: number): THREE.BufferGeometry {
   return cached(`usphere:${ws}:${hs}`, () => { const g = new THREE.SphereGeometry(1, ws, hs); g.deleteAttribute('uv'); return withColor(g, [1, 1, 1]); });
+}
+
+/** Both catch-light spheres of one eye in eye units (eye radius 1): one mesh instead of two. */
+function highlightGeometry(): THREE.BufferGeometry {
+  return cached('eyeHighlights', () => {
+    const b = new GeoBuilder(false);
+    b.add('g', unitSphere(8, 6), { matrix: new THREE.Matrix4().compose(new THREE.Vector3(0.3, 0.36, 0.9), new THREE.Quaternion(), new THREE.Vector3(0.15, 0.15, 0.15)) });
+    b.add('g', unitSphere(6, 4), { matrix: new THREE.Matrix4().compose(new THREE.Vector3(-0.2, -0.26, 0.95), new THREE.Quaternion(), new THREE.Vector3(0.07, 0.07, 0.07)) });
+    return b.build().get('g')!;
+  });
+}
+
+/** Transform of the nose (unitSphere(16, 12)) in face / unit-head space. */
+export function noseMatrix(noseScale: number): THREE.Matrix4 {
+  const np = headPoint(0, -0.27, -0.006);
+  return new THREE.Matrix4().compose(new THREE.Vector3(np[0], np[1], np[2]), new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.25, 0, 0)),
+    new THREE.Vector3(0.02 * noseScale, 0.017 * noseScale, 0.019 * noseScale));
 }
 
 /** Unit eyeball (radius 1) with iris/pupil vertex colours; front = +Z. */
@@ -209,10 +236,7 @@ export class TownieFace {
       this.group.add(pivot);
       const look = new THREE.Object3D(); pivot.add(look); this.eyes.push(look);
       const ball = new THREE.Mesh(eyeballGeometry(p.eyeColor), m.eye); ball.scale.setScalar(eyeR); look.add(ball);
-      const hl = new THREE.Mesh(unitSphere(8, 6), m.highlight);
-      hl.position.set(eyeR * 0.3, eyeR * 0.36, eyeR * 0.9); hl.scale.setScalar(eyeR * 0.15); look.add(hl);
-      const hl2 = new THREE.Mesh(unitSphere(6, 4), m.highlight);
-      hl2.position.set(-eyeR * 0.2, -eyeR * 0.26, eyeR * 0.95); hl2.scale.setScalar(eyeR * 0.07); look.add(hl2);
+      const hl = new THREE.Mesh(highlightGeometry(), m.highlight); hl.scale.setScalar(eyeR); look.add(hl);
       const up = new THREE.Object3D(); pivot.add(up); this.upperLids.push(up);
       const ul = new THREE.Mesh(lidGeometry(true), m.skin); ul.scale.setScalar(eyeR * 1.09); up.add(ul);
       const lo = new THREE.Object3D(); pivot.add(lo); this.lowerLids.push(lo);
@@ -226,19 +250,17 @@ export class TownieFace {
       this.group.add(o);
       this.brows.push({ o, side, rest: o.position.clone() });
     }
-    // nose
-    const np = headPoint(0, -0.27, -0.006);
-    const nose = new THREE.Mesh(unitSphere(16, 12), m.skin);
-    const ns = p.noseScale;
-    nose.position.set(np[0], np[1], np[2]);
-    nose.scale.set(0.02 * ns, 0.017 * ns, 0.019 * ns);
-    nose.rotation.x = -0.25;
-    this.group.add(nose);
+    // nose (static: the procedural rig merges it into its baked mesh and passes nose: false)
+    if (p.nose !== false) {
+      const nose = new THREE.Mesh(unitSphere(16, 12), m.skin);
+      nose.matrixAutoUpdate = false; nose.matrix.copy(noseMatrix(p.noseScale));
+      this.group.add(nose);
+    }
     const ms = Math.round(p.mouthScale * 20) / 20;
     this.mouth = new THREE.Mesh(mouthGeometry(ms, false), m.mouth);
     this.teeth = new THREE.Mesh(mouthGeometry(ms, true), m.teeth);
     for (const mm of [this.mouth, this.teeth]) { mm.morphTargetInfluences = new Array(6).fill(0); this.group.add(mm); }
-    this.blushMat = new THREE.MeshStandardMaterial({ color: '#ff8a94', roughness: 0.8, transparent: true, opacity: 0.2, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1 });
+    this.blushMat = new THREE.MeshStandardMaterial({ color: BLUSH_COLOR, roughness: 0.8, transparent: true, opacity: 0.2, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1 });
     const blush = new THREE.Mesh(blushGeometry(), this.blushMat);
     blush.renderOrder = 1;
     this.group.add(blush);
@@ -270,8 +292,8 @@ export class TownieFace {
     const blink = Math.max(W.blink, auto);
     let close = 0.55 * W.relaxed + 0.2 * W.sad + 0.22 * W.angry + 0.12 * W.happy - 0.35 * W.surprised;
     close = clamp(close + blink * (1 - close), -0.4, 1);
-    const upper = close >= 0 ? lerp(-0.5, 0.2, close) : lerp(-0.5, -0.95, -close);
-    const lower = lerp(0.85, 0.32, clamp(W.happy * 0.85 + W.angry * 0.25 + blink * 0.25, 0, 1));
+    const upper = close >= 0 ? lerp(REST_UPPER_LID, 0.2, close) : lerp(REST_UPPER_LID, -0.95, -close);
+    const lower = lerp(REST_LOWER_LID, 0.32, clamp(W.happy * 0.85 + W.angry * 0.25 + blink * 0.25, 0, 1));
     for (const u of this.upperLids) u.rotation.x = upper;
     for (const l of this.lowerLids) l.rotation.x = lower;
     for (const b of this.brows) {
@@ -285,8 +307,41 @@ export class TownieFace {
       const k = sum > 1 ? 1 / sum : 1;
       for (let i = 0; i < 6; i++) { const v = t[i]! * k; this.mouth.morphTargetInfluences![i] = v; this.teeth.morphTargetInfluences![i] = v; }
     }
-    if (this.blushMat) this.blushMat.opacity = 0.16 + 0.42 * W.happy + 0.12 * W.surprised;
+    if (this.blushMat) this.blushMat.opacity = REST_BLUSH + 0.42 * W.happy + 0.12 * W.surprised;
   }
 
   dispose(): void { this.blushMat?.dispose(); }
 }
+
+// ---------------------------------------------------------------- static (mid LOD) face
+/** Builder material keys for `buildStaticFace` (resolved by the rig like any other part key). */
+export interface StaticFaceKeys { skin: string; brow: string; eye: string; mouth: string; glow: string; blush: string }
+
+/**
+ * The high-LOD face frozen at its neutral rest pose (eyes open, gaze ahead, brows at rest, neutral mouth, resting
+ * blush pre-blended into an opaque strip), added in unit-head space to a static builder so the rig can merge it with
+ * the head into ONE draw call. Same geometry and colours as `TownieFace` at rest => no visible high <-> mid pop.
+ */
+export function buildStaticFace(b: GeoBuilder, p: FaceParams, k: StaticFaceKeys): void {
+  const eyeR = 0.0272 * p.eyeScale;
+  const S = (f: number) => new THREE.Matrix4().makeScale(f, f, f);
+  for (const side of [1, -1] as const) {
+    const c = headPoint(side * 0.41, -0.075, -eyeR * 0.6);
+    const pivot = new THREE.Matrix4().compose(new THREE.Vector3(c[0], c[1], c[2]), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, side * 0.09, 0)), new THREE.Vector3(1, 1, 1));
+    b.add(k.eye, eyeballGeometry(p.eyeColor), { matrix: pivot.clone().multiply(S(eyeR)) });
+    b.add(k.glow, highlightGeometry(), { matrix: pivot.clone().multiply(S(eyeR)) });
+    b.add(k.skin, lidGeometry(true), { matrix: pivot.clone().multiply(new THREE.Matrix4().makeRotationX(REST_UPPER_LID)).multiply(S(eyeR * 1.09)) });
+    b.add(k.skin, lidGeometry(false), { matrix: pivot.clone().multiply(new THREE.Matrix4().makeRotationX(REST_LOWER_LID)).multiply(S(eyeR * 1.06)) });
+  }
+  for (const side of [1, -1] as const) {
+    const { g, pivot } = browGeometry(side, 'high');
+    b.add(k.brow, g, { matrix: new THREE.Matrix4().makeTranslation(pivot[0], pivot[1], pivot[2]) });
+  }
+  b.add(k.skin, unitSphere(16, 12), { matrix: noseMatrix(p.noseScale) });
+  b.add(k.mouth, mouthGeometry(Math.round(p.mouthScale * 20) / 20, false)); // base shape = neutral (teeth hidden at rest)
+  b.add(k.blush, blushGeometry());
+}
+
+/** Resting blush opacity of `TownieFace` (all weights 0) — the mid LOD pre-blends this much blush into the skin. */
+export const REST_BLUSH = 0.16;
+export const BLUSH_COLOR = '#ff8a94';

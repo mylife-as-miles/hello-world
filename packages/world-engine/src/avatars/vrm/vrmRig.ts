@@ -48,6 +48,7 @@ const MAP: Partial<Record<ExpressionName, string[]>> = {
 
 const HEAD_OK = new Set(['beanie', 'cap', 'crown', 'headphones']);
 
+/** VRM guest skins have a single LOD: every requested level ('high' / 'mid' / 'low') builds the full model. */
 export async function loadVrmRig(a: AvatarAppearance, _opts: { lod?: AvatarLod } = {}): Promise<HumanoidRig> {
   const url = VRM_FILES[a.baseModelId];
   if (!url) throw new Error(`unknown VRM base ${a.baseModelId}`);

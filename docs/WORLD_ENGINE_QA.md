@@ -353,6 +353,53 @@ Overlay readability, measured by projecting each resident at 720p (the same prob
 
 At 01:45 on day 2 (fast-forwarded), 9 of 13 residents were asleep, and exactly those 9 were hidden indoors. The other 4 were having a café drink, sitting on the pond bench or walking. The world and overlay pages logged 0 page errors.
 
+### Cycle 8 (00:59–01:20 UTC, frozen build of round-8 commit `b98c2fc`): **7.9 / 10** (7.85 weighted; +0.17)
+
+Scores: world 7.7 · creator/avatars 7.7 · simulation 8.0 · interactions 8.0 · performance 7.9 · persistence 7.8. History: 6.9 → 7.2 → 7.4 → 7.6 → 7.7 → 7.7 → 7.7 → **7.85**. This is the first gain after three flat cycles.
+
+The critic's own runs: tsc 0 errors, vitest 83/83, 0 page or console errors.
+
+Confirmed by the critic:
+- **Overlay.**
+  - The resting median rose from 20–30 px to 50 px, with a max of 66–77 px.
+  - Events now get their own overlay shots. Raid: 145–149 px. Gift receiver: 115–178 px. Confetti actor: 155 px. Greet: 105–153 px. Chat burst: median 87 px.
+  - Transparency holds: 83–85 % of pixels are fully transparent and all corners are at alpha 0.
+- **Event shots.** The gift receiver is framed front-on at 207–221 px, and the speaker push-in stays in frame at 229–285 px.
+- **Bubbles.** In bursts, no bubble overlapped another bubble or a nameplate, and none was off screen.
+- **Nights.** 64–82 % of residents are asleep between 00:00 and 06:00, with no dancing in those hours, and wake-ups are staggered.
+- **Mobile creator.** The preview is 390×490 and the expression buttons are 40×40.
+- **Draw calls at quality=low:**
+
+  | View | Cycle 8 | Cycle 7 |
+  | --- | --- | --- |
+  | Default | 74–86 | 99–127 |
+  | Street | 66–82 | 139–175 |
+  | Follow | 72–99 | 108–152 |
+  | Night | 93–108 | — |
+  | Raid spike | 134 | — |
+
+- **Persistence.** A reload restored all 27 residents, 23 of 23 relationships (within ±6), the memories and the weather.
+
+Remaining:
+- **Most damaging: overlay events are only half shown.**
+  - In a gift between distant residents, the giver (the paying viewer) is off screen for 3–4 s.
+  - A greet's target never enters the shot.
+  - Overlay confetti is shot from behind, and the confetti starts above the frame.
+  - Weather draws nothing on the overlay (`<WeatherFx>` is skipped when transparent), and there is no weather toast.
+- **World camera modes.**
+  - Follow loses a seated or sulking subject.
+  - Street mode covers about half the frame with a stippled canopy, because the see-through dither still runs there.
+  - In cinematic, labels can sit 75–100 px from their owners.
+- **Overlay composition.** The opaque stage disc and the café furniture are heavy, subjects and bubbles get pushed to the top edge, and the "+N raiders" chip count jumps around.
+- **Simulation.**
+  - About a third of residents are up at 1–4 AM (the deliberate night watch).
+  - One stage line ("tearing up the stage") is said while the stage is empty.
+- **Avatars.**
+  - Photoreal faces are flat-lit and can't emote.
+  - "Afro" reads as a beret.
+- **Tooling.** Playwright can't click Save because of an actionability timeout; a DOM click works.
+- **Triangles.** 300–450k normally, and 661k during a raid.
+
 ## Launch film
 
 A 21.2 s, 1920×1080, 30 fps silent launch cut was made from real product renders by a separate agent pair: footage capture plus a director working from the [cinetic](https://github.com/Leonxlnx/cinetic) skill (MIT). Remotion was skipped for time and the film was assembled with ffmpeg. The film is delivered outside the repository and is not committed.

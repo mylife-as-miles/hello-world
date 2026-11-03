@@ -503,7 +503,11 @@ export const projectedPx = (h: number, depth: number, tanV: number, vpH: number)
  */
 export type BeatPhase = 'actor' | 'two' | 'done';
 export interface TwoBeat { phase: BeatPhase; start: number; phaseAt: number; inFrameAt: number; bestSep: number; progressAt: number; wide: boolean }
-export const TWO_BEAT = { range: 10, minActor: 1.5, maxApproach: 7.5, stall: 2.2, hold: 2.4, giveUp: 4 } as const;
+/**
+ * `wideMaxSep`: a pair still farther apart than this when the approach times out or stalls gets no wide two-shot
+ * (both would be tiny, ~45 px at 720p); the shot stays on the actor — the viewer who triggered it — and ends.
+ */
+export const TWO_BEAT = { range: 10, minActor: 1.5, maxApproach: 7.5, stall: 2.2, hold: 2.4, giveUp: 4, wideMaxSep: 26 } as const;
 export const newTwoBeat = (): TwoBeat => ({ phase: 'done', start: 0, phaseAt: 0, inFrameAt: NaN, bestSep: Infinity, progressAt: 0, wide: false });
 
 export function startTwoBeat(b: TwoBeat, t: number, sep: number): BeatPhase {
@@ -518,6 +522,7 @@ export function stepTwoBeat(b: TwoBeat, t: number, sep: number, bothInFrame: boo
     const age = t - b.phaseAt;
     const close = sep <= TWO_BEAT.range;
     if ((close && age >= TWO_BEAT.minActor) || age >= TWO_BEAT.maxApproach || (age >= TWO_BEAT.minActor + 0.5 && t - b.progressAt >= TWO_BEAT.stall)) {
+      if (!close && sep > TWO_BEAT.wideMaxSep) { b.phase = 'done'; return b.phase; }
       b.phase = 'two'; b.phaseAt = t; b.inFrameAt = NaN; b.wide = !close;
     }
     return b.phase;

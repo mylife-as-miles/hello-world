@@ -492,9 +492,10 @@ export function AvatarCreator(props: AvatarCreatorProps & AvatarCreatorExtraProp
           <div className="hwc-standin" ref={standInEl} role="status" data-testid="creator-standin">Couldn't load this body — showing a Townie stand-in</div>
           <div className="hwc-dock" ref={dockRef}>
             <div className={cls('hwc-dock-row', 'hwc-dock-expr', !expressionsApply && 'is-empty')} role="group" aria-label="Preview expression">
-              <span className="hwc-dock-label">Expression</span>
-              {!expressionsApply && <span className="hwc-dock-note" role="note" title="Expressions work on Townie & VRM bodies">No facial rig on {baseName}</span>}
-              {expressionsApply && EXPRESSION_BUTTONS.map(x => (
+              <span className="hwc-dock-label" title={realistic ? 'Photoreal bodies have no facial rig: they emote with head and neck gestures' : undefined}>{realistic ? 'Gesture' : 'Expression'}</span>
+              {!expressionsApply && <span className="hwc-dock-note" role="note" title="This body has no facial rig">No facial rig on {baseName}</span>}
+              {/* Photoreal bodies gesture with the head/neck; blink has nothing to drive there, so it is hidden. */}
+              {expressionsApply && EXPRESSION_BUTTONS.filter(x => !(realistic && x.name === 'blink')).map(x => (
                 <button key={x.name} type="button" className={cls('hwc-pill', flash.expr === x.name && 'is-on')} aria-pressed={flash.expr === x.name}
                   aria-label={`Preview ${x.label.toLowerCase()} expression`} title={x.label} data-testid={`expr-${x.name}`} onClick={() => playExpression(x.name)}>
                   <span className="hwc-emo" aria-hidden="true">{x.emo}</span><span className="hwc-pill-text">{x.label}</span>

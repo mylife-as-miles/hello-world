@@ -242,6 +242,16 @@ describe('two-beat event shot (gift / greet with a far target)', () => {
     expect(b.wide).toBe(false);
   });
 
+  it('a pair still too far apart for a readable two-shot ends on the actor instead of a tiny wide shot', () => {
+    const b = newTwoBeat();
+    startTwoBeat(b, 0, 40);
+    let ph = 'actor', t = 0;
+    while (ph === 'actor' && t < 20) { t += 0.1; ph = stepTwoBeat(b, t, 40, false); }
+    expect(ph).toBe('done');
+    expect(t).toBeGreaterThanOrEqual(TWO_BEAT.minActor); // the actor (the viewer who triggered it) was shown first
+    expect(t).toBeLessThanOrEqual(TWO_BEAT.maxApproach + 0.11);
+  });
+
   it('a pair already within range opens straight on the two-shot; it gives up if never in frame', () => {
     const b = newTwoBeat();
     expect(startTwoBeat(b, 5, 4)).toBe('two');

@@ -4,14 +4,14 @@
  */
 import * as THREE from 'three';
 
-export type Finish = 'skin' | 'cloth' | 'knit' | 'denim' | 'hair' | 'leather' | 'rubber' | 'metal' | 'plastic' | 'lens' | 'shade' | 'eye' | 'mouth' | 'teeth' | 'dark' | 'glow' | 'gem' | 'baked';
+export type Finish = 'skin' | 'cloth' | 'knit' | 'denim' | 'hair' | 'coil' | 'leather' | 'rubber' | 'metal' | 'plastic' | 'lens' | 'shade' | 'eye' | 'mouth' | 'teeth' | 'dark' | 'glow' | 'gem' | 'baked';
 
 /**
  * Per-finish surface response [roughness, metalness, emissive strength (x albedo)] — the same numbers `make()` uses,
  * so parts merged into ONE 'baked' mesh (per-vertex `pbr` attribute) shade like their separate-material originals.
  */
 export const FINISH_PBR: Record<Exclude<Finish, 'baked' | 'lens'>, [number, number, number]> = {
-  skin: [0.56, 0, 0.07], cloth: [0.84, 0, 0], knit: [0.95, 0, 0], denim: [0.9, 0, 0], hair: [0.46, 0, 0.04],
+  skin: [0.56, 0, 0.07], cloth: [0.84, 0, 0], knit: [0.95, 0, 0], denim: [0.9, 0, 0], hair: [0.46, 0, 0.04], coil: [0.9, 0, 0.05],
   leather: [0.4, 0, 0], rubber: [0.78, 0, 0], metal: [0.28, 0.75, 0.12], plastic: [0.32, 0, 0], gem: [0.1, 0.1, 0.25],
   shade: [0.06, 0.35, 0], eye: [0.2, 0, 0], mouth: [0.65, 0, 0], teeth: [0.3, 0, 0.1], dark: [0.5, 0, 0], glow: [1, 0, 1],
 };
@@ -51,6 +51,7 @@ function make(color: string, finish: Finish): THREE.Material {
     case 'knit': return std({ roughness: 0.95, side: THREE.DoubleSide });
     case 'denim': return std({ roughness: 0.9, side: THREE.DoubleSide });
     case 'hair': return std({ roughness: 0.46, side: THREE.DoubleSide, emissive: c.clone().multiplyScalar(0.04) });
+    case 'coil': return std({ roughness: 0.9, side: THREE.DoubleSide, emissive: c.clone().multiplyScalar(0.05) });
     case 'leather': return std({ roughness: 0.4 });
     case 'rubber': return std({ roughness: 0.78 });
     case 'metal': return std({ roughness: 0.28, metalness: 0.75, emissive: c.clone().multiplyScalar(0.12) });

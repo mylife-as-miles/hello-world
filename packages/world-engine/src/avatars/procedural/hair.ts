@@ -97,8 +97,7 @@ function hairShade(lowEl = -0.6, depth = 0.25, grooves = 0) {
  * Approximate outward offset (m, unit head) of a hair style's surface at (phi, el):
  * accessories (headphones, flower, crown, hats) sit on top of it instead of vanishing inside.
  */
-export function hairOffset(styleIn: string, phi: number, el: number, hat: boolean): number {
-  const style = hat && styleIn === 'afro' ? 'curly' : styleIn;
+export function hairOffset(style: string, phi: number, el: number, hat: boolean): number {
   const top = smooth(-0.2, 1.2, el);
   const below = (line: number[][]) => el < lineAt(line, Math.abs(phi)) - 0.05;
   switch (style) {
@@ -110,7 +109,7 @@ export function hairOffset(styleIn: string, phi: number, el: number, hat: boolea
     case 'long': return 0.02 + 0.01 * top + (el < 0 ? 0.035 : 0);
     case 'ponytail': case 'bun': case 'braids': return below(SLEEK_LINE) ? 0 : 0.012 + 0.006 * top;
     case 'curly': return below(STD_LINE) ? 0 : 0.026 + (hat ? 0 : 0.012 + 0.018) * top;
-    case 'afro': return 0.055 + 0.03 * smooth(-0.4, 0.9, el) + 0.024;
+    case 'afro': { const o = afroOffset(phi, el, hat, true); return o > 0 ? o + (hat ? 0.006 : 0.004) : 0; }
     case 'spiky': return below(STD_LINE) ? 0 : 0.016 + 0.006 * top;
     default: return 0.02;
   }
@@ -129,11 +128,134 @@ function sphereAt(b: GeoBuilder, mat: string, p: V3, r: number | V3, lod: Lod, c
   b.add(mat, g, { matrix: new THREE.Matrix4().compose(new THREE.Vector3(...p), new THREE.Quaternion(), new THREE.Vector3(...s)), color });
 }
 
+// ---------------------------------------------------------------- afro
+/**
+ * Afro: a volumetric, clustered-coil silhouette instead of a smooth dome.
+ *  - envelope: round and full (crown + upper sides), offset along the head normal;
+ *  - curl clusters: a max-of-round-caps field over ~46 jittered puffs (+ ~150 small coils at high detail) gives lumpy
+ *    "cauliflower" clusters with creases between them, so the outline is irregular from every angle;
+ *  - the volume rolls back onto the scalp at a slightly irregular, rounded hairline (no thin shell edge);
+ *  - under a hat the top compresses below the crown of the hat and the clusters puff out beneath its edge.
+ * Vertex colours bake crease occlusion (darker between clusters) + a fine grain; the 'hairCoil' slot is matte.
+ * Budget: high/mid ~6.3k tris, low ~0.6k tris (one baked mesh with the rest of the avatar).
+ */
+/** Afro hairline [absPhi, el]: rounded forehead, soft temples, sideburns, nape. */
+const AFRO_LINE = [[0, 0.53], [0.32, 0.5], [0.7, 0.4], [1.12, 0.04], [1.38, -0.24], [1.75, -0.36], [2.5, -0.58], [Math.PI, -0.68]];
+const AFRO_TOP = Math.PI / 2 - 0.001;
+const AFRO_VPOW = 0.85;
+/** Lowest hat edge (beanie, see accessories.ts `dome(0.36, -0.42)`): the afro compresses above it. */
+function hatEdge(aphi: number): number {
+  return aphi < 1.2 ? lerp(0.36, 0.18, smooth(0, 1.2, aphi)) : lerp(0.18, -0.42, smooth(1.2, Math.PI, aphi));
+}
+const hash01 = (n: number): number => { const s = Math.sin(n * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); };
+interface Puff { x: number; y: number; z: number; r2: number; h: number }
+const puffSets = new Map<string, Puff[]>();
+/** Deterministic curl clusters on the unit sphere: Fibonacci layout + hash jitter in position, radius and height. */
+function puffSet(n: number, r0: number, r1: number, h0: number, h1: number, seed: number): Puff[] {
+  const key = `${n}|${seed}`;
+  let out = puffSets.get(key);
+  if (out) return out;
+  out = [];
+  const ga = Math.PI * (3 - Math.sqrt(5));
+  for (let i = 0; i < n; i++) {
+    const y0 = 1 - (2 * (i + 0.5)) / n, rr = Math.sqrt(Math.max(0, 1 - y0 * y0));
+    const th = ga * i + (hash01(i * 3 + seed) - 0.5) * 0.9;
+    let x = Math.cos(th) * rr, y = y0 + (hash01(i * 3 + 1 + seed) - 0.5) * 0.14, z = Math.sin(th) * rr;
+    const l = Math.hypot(x, y, z) || 1; x /= l; y /= l; z /= l;
+    if (y < -0.8) continue;
+    const r = lerp(r0, r1, hash01(i * 3 + 2 + seed));
+    out.push({ x, y, z, r2: r * r, h: lerp(h0, h1, hash01(i * 7 + 11 + seed)) });
+  }
+  puffSets.set(key, out);
+  return out;
+}
+const AFRO_BIG_H = 0.021, AFRO_SMALL_H = 0.0065;
+const afroBig = () => puffSet(46, 0.34, 0.5, 0.011, AFRO_BIG_H, 7);
+const afroSmall = () => puffSet(150, 0.14, 0.21, 0.0035, AFRO_SMALL_H, 101);
+/** Max-of-round-caps field (m): rounded clusters with creases where they meet. */
+function puffField(list: Puff[], dx: number, dy: number, dz: number): number {
+  let best = 0;
+  for (let i = 0; i < list.length; i++) {
+    const p = list[i]!;
+    const ex = dx - p.x, ey = dy - p.y, ez = dz - p.z;
+    const d2 = ex * ex + ey * ey + ez * ez;
+    if (d2 >= p.r2) continue;
+    const v = p.h * Math.sqrt(1 - d2 / p.r2);
+    if (v > best) best = v;
+  }
+  return best;
+}
+/** Afro hairline elevation at azimuth phi (slightly irregular along the front). */
+function afroLine(phi: number): number {
+  const aphi = Math.abs(phi);
+  return lineAt(AFRO_LINE, aphi) + 0.016 * Math.sin(phi * 11 + 0.6) * (1 - smooth(1.1, 1.9, aphi));
+}
+interface AfroSample { off: number; big: number; small: number }
+const _afro: AfroSample = { off: 0, big: 0, small: 0 };
+/** Afro surface offset (m, unit head, along the head normal) incl. the rounded roll onto the hairline. */
+function afroSample(phi: number, el: number, hat: boolean, fine: boolean, out: AfroSample = _afro): AfroSample {
+  const elMin = afroLine(phi);
+  if (el < elMin - 0.005) { out.off = 0; out.big = 0; out.small = 0; return out; }
+  const ce = Math.cos(el);
+  const dx = Math.sin(phi) * ce, dy = Math.sin(el), dz = Math.cos(phi) * ce;
+  // envelope: full crown, rounder upper sides, a gentle asymmetric wobble
+  let off = 0.044 + 0.03 * smooth(-0.45, 0.85, el)
+    + 0.005 * Math.abs(Math.sin(phi)) * smooth(-0.7, 0.2, el) * (1 - smooth(0.2, 1.0, el))
+    + 0.004 * Math.sin(phi * 2 + 0.7) * Math.cos(el * 1.5);
+  const big = puffField(afroBig(), dx, dy, dz);
+  const small = fine ? puffField(afroSmall(), dx, dy, dz) : 0;
+  off += big + small;
+  if (hat) {
+    // compressed under the crown of the hat, clusters puff out beneath its edge
+    const he = hatEdge(Math.abs(phi));
+    off = lerp(0.017 + small * 0.4, off * 0.9, smooth(he + 0.02, he - 0.18, el));
+  }
+  // roll the volume back onto the scalp over the lower part of the cap (cosine taper: a round ball tucking in toward
+  // the hairline, not a ledge over the ears)
+  const v = Math.pow(clamp((AFRO_TOP - el) / Math.max(0.05, AFRO_TOP - elMin), 0, 1), 1 / AFRO_VPOW);
+  // (under a hat the hair is pushed out below the brim: a later, bulgier quarter-ellipse roll)
+  const e = smooth(hat ? 0.72 : 0.55, 1, v);
+  off *= 0.06 + 0.94 * (hat ? Math.sqrt(Math.max(0, 1 - e * e)) : Math.cos(e * Math.PI / 2));
+  out.off = off; out.big = big; out.small = small;
+  return out;
+}
+/** Afro outer surface offset at (phi, el): accessories sit on it. */
+export function afroOffset(phi: number, el: number, hat: boolean, fine = true): number {
+  return afroSample(phi, el, hat, fine).off;
+}
+
+function afroGeometry(lod: Lod, hat: boolean): THREE.BufferGeometry {
+  const hi = lod === 'high';
+  const nu = hi ? 92 : 28, nv = hi ? 34 : 11;
+  const shade: number[] = [];
+  const s: AfroSample = { off: 0, big: 0, small: 0 };
+  const tone = (el: number, smp: AfroSample, k: number): number => {
+    const depth = 0.7 + 0.3 * smooth(-0.6, 1.1, el);                         // darker toward the nape / under-side
+    const ao = 0.66 + 0.34 * Math.pow(Math.min(1, smp.big / AFRO_BIG_H), 0.6); // creases between clusters
+    const coil = hi ? 0.88 + 0.12 * Math.min(1, smp.small / AFRO_SMALL_H) : 1;
+    const grain = 0.93 + 0.07 * hash01(k * 1.37 + 5);
+    return depth * ao * coil * grain;
+  };
+  let k = 0;
+  const g = grid((u, v) => {
+    const phi = -Math.PI + u * Math.PI * 2;
+    const el = lerp(AFRO_TOP, afroLine(phi), Math.pow(v, AFRO_VPOW));
+    afroSample(phi, el, hat, hi, s);
+    shade.push(tone(el, s, k++));
+    return headPoint(phi, el, Math.max(0.003, s.off));
+  }, nu, nv, { poleTop: headPoint(0, Math.PI / 2, afroSample(0, Math.PI / 2, hat, hi, s).off), center: HC });
+  shade.push(tone(Math.PI / 2, afroSample(0, Math.PI / 2, hat, hi, s), k));
+  const n = g.getAttribute('position').count;
+  const col = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) { const c = shade[i] ?? 1; col[i * 3] = c; col[i * 3 + 1] = c; col[i * 3 + 2] = c; }
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  return g;
+}
+
 const STD_LINE = [[0, 0.5], [0.55, 0.44], [1.05, 0.12], [1.45, -0.02], [1.75, -0.12], [2.4, -0.55], [Math.PI, -0.72]];
 const SLEEK_LINE = [[0, 0.52], [0.55, 0.46], [1.05, 0.14], [1.45, -0.02], [1.75, -0.1], [2.4, -0.5], [Math.PI, -0.66]];
 
-export function buildHair(b: GeoBuilder, styleIn: string, lod: Lod, hat: boolean): void {
-  const style = hat && (styleIn === 'afro') ? 'curly' : styleIn;
+export function buildHair(b: GeoBuilder, style: string, lod: Lod, hat: boolean): void {
   const H = 'hair';
   const add = (g: THREE.BufferGeometry, color: V3 | ((x: number, y: number, z: number) => V3) = hairShade()) => b.add(H, g, { color });
   const hi = lod === 'high';
@@ -211,7 +333,8 @@ export function buildHair(b: GeoBuilder, styleIn: string, lod: Lod, hat: boolean
       return;
     }
     case 'afro': {
-      add(capGeometry({ line: [[0, 0.5], [0.6, 0.42], [1.1, 0.0], [1.5, -0.25], [Math.PI, -0.62]], off: (_p, el) => 0.055 + 0.03 * smooth(-0.4, 0.9, el), grooves: 0, bumps: 0.024, lobe: [7, 6] }, lod), hairShade(-0.6, 0.32));
+      // matte coils (own finish slot), vertex colours carry the curl-cluster occlusion + grain
+      b.add('hairCoil', afroGeometry(lod, hat));
       return;
     }
     case 'spiky': {

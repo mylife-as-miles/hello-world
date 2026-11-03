@@ -28,6 +28,7 @@ import { DEFAULT_APPEARANCE } from '../catalog';
 import { GeoBuilder } from '../procedural/geom';
 import { buildHeadAccessories } from '../procedural/accessories';
 import { RX, RY, RZ, HC } from '../procedural/head';
+import { HeadEmote } from './headEmote';
 import { acquireMaterial, releaseMaterial, shade, type Finish } from '../procedural/materials';
 export { REALISTIC_BASE_MODELS, REALISTIC_SUPPORT, isRealisticBase, realisticSupportFor } from './catalog';
 export type { AppearanceSupport } from './catalog';
@@ -347,36 +348,89 @@ const STYLE_AMBIENT = /* glsl */ `
 const DIFFUSE_LINE = 'reflectedLight.directDiffuse += irradiance * diffuseBRDF * ( 1.0 - F );';
 const STYLE_OK = THREE.ShaderChunk.lights_physical_pars_fragment.includes(DIFFUSE_LINE);
 
-/** Garment recolour (Valdrada-style), partial and luminance-preserving: the outfit hue at the texel's own brightness,
- *  blended ~50% so the fabric's pattern, folds and original character stay visible. */
+/** Garment recolour: the chosen colour carries the fabric's own shading — each texel's luminance RELATIVE to its local
+ *  mean (a coarse mip) scales the tint, so folds and pattern survive, the garment reads as the colour that was picked, and
+ *  bright trims (collars, cuffs) take a lighter shade of it instead of staying stark white. 20% of the original texel is
+ *  kept so the fabric's character shows through. */
 const TINT_GLSL = /* glsl */ `
   {
     const vec3 hwW = vec3(0.2126, 0.7152, 0.0722);
     float hwL = dot(diffuseColor.rgb, hwW);
-    vec3 hwC = min(uHwTint * (hwL / max(dot(uHwTint, hwW), 0.02)), vec3(1.0));
-    diffuseColor.rgb = mix(diffuseColor.rgb, hwC, 0.5);
+    #ifdef USE_MAP
+      float hwLl = max(dot(texture2D(map, vMapUv, 5.0).rgb * diffuse, hwW), 0.012);
+    #else
+      float hwLl = max(hwL, 0.012);
+    #endif
+    float hwR = clamp(hwL / hwLl, 0.35, 1.35);
+    vec3 hwC = min(uHwTint * hwR, vec3(1.0));
+    diffuseColor.rgb = mix(diffuseColor.rgb, hwC, 0.8);
   }`;
+
+/* Photoreal skin / eye / hair response (WebGL only via onBeforeCompile; WebGPU renders the plain material). */
+/** Skin albedo: dark specks (exaggerated moles / pores / compression blotches) pulled toward the local tone of a
+ *  slightly blurred sample, plus a light overall smoothing, so faces read as skin instead of mottled paint. */
+const SKIN_ALBEDO = /* glsl */ `
+  #ifdef USE_MAP
+  {
+    const vec3 hwW = vec3(0.2126, 0.7152, 0.0722);
+    vec3 hwSoft = texture2D(map, vMapUv, 1.6).rgb * diffuse;
+    float hwLs = dot(diffuseColor.rgb, hwW), hwLb = max(dot(hwSoft, hwW), 1e-4);
+    float hwDark = clamp((hwLb - hwLs) / hwLb, 0.0, 1.0);
+    diffuseColor.rgb = mix(diffuseColor.rgb, hwSoft, clamp(hwDark * 2.4, 0.0, 0.8));
+    diffuseColor.rgb = mix(diffuseColor.rgb, hwSoft, 0.18);
+  }
+  #endif`;
+/** Skin diffuse: per-channel wrap lighting (red scatters furthest past the terminator) — a cheap subsurface look. */
+const SKIN_DIFFUSE = /* glsl */ `{
+    float hwNLr = dot( geometryNormal, directLight.direction );
+    const vec3 hwWr = vec3( 0.5, 0.24, 0.16 );
+    vec3 hwWrap = clamp( ( vec3( hwNLr ) + hwWr ) / ( 1.0 + hwWr ), 0.0, 1.0 );
+    reflectedLight.directDiffuse += hwWrap * directLight.color * diffuseBRDF * ( 1.0 - F );
+  }`;
+/** Skin sheen: a soft, ambient-scaled grazing rim (peach fuzz) that rounds the face off against the background. */
+const SKIN_RIM = /* glsl */ `
+  #if defined( RE_IndirectDiffuse )
+  {
+    float hwF = 1.0 - saturate(dot(normal, normalize(vViewPosition)));
+    vec3 hwAmb = (irradiance + iblIrradiance) * RECIPROCAL_PI;
+    reflectedLight.indirectDiffuse += hwAmb * (0.55 * diffuseColor.rgb + 0.05) * pow(hwF, 3.0);
+  }
+  #endif`;
+/** Eyes: a wet catchlight from a fixed key just above-left of the camera, so eyes keep a highlight under any light. */
+const EYE_GLINT = /* glsl */ `
+  {
+    vec3 hwH = normalize(normalize(vViewPosition) + normalize(vec3(-0.35, 0.5, 1.0)));
+    float hwG = pow(saturate(dot(normal, hwH)), 420.0);
+    reflectedLight.directSpecular += vec3(hwG * 1.5);
+  }`;
+/** Hair cards: thinner strand coverage reads darker (depth between braids / strands instead of flat paint). */
+const HAIR_DEPTH = /* glsl */ `
+  diffuseColor.rgb *= mix(0.62, 1.0, smoothstep(0.35, 0.95, diffuseColor.a));`;
 
 function applyShaderMods(m: THREE.MeshStandardMaterial, tint: THREE.Color | null, stylize: boolean, cls: number): void {
   if (stylize) {
     // softer, broader highlights (eyes keep a little sparkle)
     m.roughness = Math.max(m.roughness, cls === 2 ? 0.3 : cls === 3 ? 0.62 : 0.8);
     m.envMapIntensity = 0.45;
-  }
-  if (!tint && !stylize) { m.onBeforeCompile = () => {}; m.customProgramCacheKey = () => 'hw-real'; return; }
+  } else if (cls === 0) { m.roughness = 0.5; m.envMapIntensity = 0.8; }  // skin: a defined, soft specular lobe
+  else if (cls === 2) { m.roughness = 0.06; m.envMapIntensity = 1; }     // eyes: wet
+  else if (cls === 3) { m.roughness = 0.48; }
+  // strand depth on the alpha-tested core hair pass only (the soft edge pass, alphaTest 0.03, would darken into a halo)
+  const skin = cls === 0, eye = cls === 2, hair = cls === 3 && m.alphaTest > 0.1;
   const tintU = tint ? { value: tint.clone() } : null;
   const doStyle = stylize && STYLE_OK;
+  const doWrap = skin && !stylize && STYLE_OK;
+  if (!tintU && !doStyle && !skin && !eye && !hair) { m.onBeforeCompile = () => {}; m.customProgramCacheKey = () => 'hw-real'; return; }
   m.onBeforeCompile = (sh) => {
     let fs = sh.fragmentShader;
     if (tintU) { sh.uniforms.uHwTint = tintU; fs = fs.replace('#include <common>', '#include <common>\nuniform vec3 uHwTint;'); }
-    fs = fs.replace('#include <map_fragment>', '#include <map_fragment>' + (tintU ? TINT_GLSL : '') + (doStyle ? STYLE_ALBEDO : ''));
-    if (doStyle) {
-      fs = fs.replace('#include <lights_physical_pars_fragment>', THREE.ShaderChunk.lights_physical_pars_fragment.replace(DIFFUSE_LINE, STYLE_DIFFUSE))
-        .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>' + STYLE_AMBIENT);
-    }
+    fs = fs.replace('#include <map_fragment>', '#include <map_fragment>' + (skin ? SKIN_ALBEDO : '') + (hair ? HAIR_DEPTH : '') + (tintU ? TINT_GLSL : '') + (doStyle ? STYLE_ALBEDO : ''));
+    if (doStyle) fs = fs.replace('#include <lights_physical_pars_fragment>', THREE.ShaderChunk.lights_physical_pars_fragment.replace(DIFFUSE_LINE, STYLE_DIFFUSE));
+    else if (doWrap) fs = fs.replace('#include <lights_physical_pars_fragment>', THREE.ShaderChunk.lights_physical_pars_fragment.replace(DIFFUSE_LINE, SKIN_DIFFUSE));
+    fs = fs.replace('#include <lights_fragment_end>', '#include <lights_fragment_end>' + (doStyle ? STYLE_AMBIENT : skin ? SKIN_RIM : '') + (eye ? EYE_GLINT : ''));
     sh.fragmentShader = fs;
   };
-  m.customProgramCacheKey = () => `hw-real:${tintU ? 't' : ''}${doStyle ? 's' : ''}`;
+  m.customProgramCacheKey = () => `hw-real:${tintU ? 't' : ''}${doStyle ? 's' : ''}${skin ? 'k' : eye ? 'e' : hair ? 'h' : ''}${doWrap ? 'w' : ''}`;
 }
 
 function tintedMaterial(base: THREE.MeshStandardMaterial, tint: THREE.Color, stylize: boolean, cls: number): THREE.MeshStandardMaterial {
@@ -399,6 +453,8 @@ const HEAD_OK = new Set(['beanie', 'cap', 'crown', 'headphones']);
 /** Model-space sphere that contains the body in every animator pose (hips offsets, raised arms, sitting). */
 const POSE_BOUNDS = new THREE.Sphere(new THREE.Vector3(0, 1.0, 0), 1.45);
 const _q = new THREE.Quaternion();
+const _qe = new THREE.Quaternion();
+const _ee = new THREE.Euler();
 const _v = new THREE.Vector3();
 const IDENTITY = new THREE.Matrix4();
 
@@ -426,6 +482,11 @@ class RealisticRig implements HumanoidRig {
   private readonly skeleton: THREE.Skeleton;
   private readonly attach: Partial<Record<AttachSlot, THREE.Object3D>> = {};
   private dirty = true;
+  /** Non-facial emotes: additive head/neck gesture layers driven by setExpression (see ./headEmote.ts). */
+  private readonly emote = new HeadEmote();
+  private emoteOn = false;
+  private readonly neckIdx = HUMAN_BONES.indexOf('neck');
+  private readonly headIdx = HUMAN_BONES.indexOf('head');
 
   readonly stylized: boolean;
 
@@ -549,12 +610,21 @@ class RealisticRig implements HumanoidRig {
     this.dirty = true;
   }
 
-  /** No-op: the scans have no morph targets and the CARLA GEN2 skeleton has no jaw or eyelid bones (only eye_L/R). */
-  setExpression(_name: ExpressionName, _weight: number): void { /* unsupported */ }
+  /**
+   * The scans have no morph targets and the CARLA GEN2 skeleton has no jaw or eyelid bones (only eye_L/R), so
+   * expressions play as head/neck gestures layered additively over the animator's pose (applied in update()).
+   */
+  setExpression(name: ExpressionName, weight: number): void { this.emote.set(name, weight); }
 
   getAttachPoint(slot: AttachSlot): THREE.Object3D | null { return this.attach[slot] ?? null; }
 
-  update(_dt: number): void { if (this.dirty) this.applyPose(); }
+  update(dt: number): void {
+    this.emote.update(dt);
+    const on = this.emote.active;
+    if (on || this.emoteOn) this.dirty = true; // keep re-posing while a gesture plays, plus one frame to settle at rest
+    this.emoteOn = on;
+    if (this.dirty) this.applyPose();
+  }
 
   private applyPose(): void {
     this.dirty = false;
@@ -562,6 +632,9 @@ class RealisticRig implements HumanoidRig {
       const p = CANON_PARENT_IDX[c]!;
       if (p < 0) this.canonWorld[c]!.copy(this.canonLocal[c]!);
       else this.canonWorld[c]!.multiplyQuaternions(this.canonWorld[p]!, this.canonLocal[c]!);
+      // additive emote layer on top of the animator's local rotation (canonical frame: x > 0 nods down)
+      const e = c === this.headIdx ? this.emote.head : c === this.neckIdx ? this.emote.neck : null;
+      if (e && (e.x !== 0 || e.y !== 0 || e.z !== 0)) this.canonWorld[c]!.multiply(_qe.setFromEuler(_ee.set(e.x, e.y, e.z, 'XYZ')));
     }
     const B = this.body;
     for (let i = 0; i < this.bones.length; i++) {

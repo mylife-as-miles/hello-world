@@ -130,3 +130,60 @@ describe('Townie procedural rig', () => {
     expect(getAppearanceSupport('vrm-chill').hair).toBe(false);
   });
 });
+
+describe('Afro hair geometry', () => {
+  // eslint-disable-next-line @typescript-eslint/consistent-type-imports
+  const load = async () => ({ ...(await import('./geom')), ...(await import('./hair')), ...(await import('./head')) });
+  it('is a volumetric, clustered silhouette within a sensible triangle budget at every LOD (with and without hats)', async () => {
+    const { GeoBuilder, buildHair, hairOffset, HC, RY } = await load();
+    const build = (lod: 'high' | 'low', hat: boolean) => {
+      const b = new GeoBuilder(false);
+      buildHair(b, 'afro', lod, hat);
+      const g = b.build().get('hairCoil')!;
+      expect(g, `afro ${lod} hat=${hat}`).toBeTruthy();
+      const p = g.getAttribute('position'), c = g.getAttribute('color');
+      let maxR = 0, maxY = -1, cMin = 9, cMax = 0;
+      for (let i = 0; i < p.count; i++) {
+        maxR = Math.max(maxR, Math.hypot(p.getX(i) - HC[0], p.getY(i) - HC[1], p.getZ(i) - HC[2]));
+        maxY = Math.max(maxY, p.getY(i));
+        cMin = Math.min(cMin, c.getX(i)); cMax = Math.max(cMax, c.getX(i));
+      }
+      // outline roughness: second difference of the radius around a ring of the grid (smooth dome ~0)
+      const nu = lod === 'high' ? 92 : 28, row = Math.round((lod === 'high' ? 34 : 11) * 0.45);
+      const r = (j: number) => { const k = row * nu + ((j + nu) % nu); return Math.hypot(p.getX(k) - HC[0], p.getZ(k) - HC[2]); };
+      let rough = 0; for (let j = 0; j < nu; j++) rough += Math.abs(r(j) - (r(j - 1) + r(j + 1)) / 2); rough /= nu;
+      const tris = g.index!.count / 3;
+      g.dispose();
+      return { tris, maxR, maxY, cMin, cMax, rough };
+    };
+    const hi = build('high', false), lo = build('low', false), hiHat = build('high', true), loHat = build('low', true);
+    console.log('afro stats', JSON.stringify({ hi, lo, hiHat, loHat }));
+    // budgets: one baked mesh with the rest of the avatar
+    expect(hi.tris).toBeLessThan(7000); expect(lo.tris).toBeLessThan(800); expect(hi.tris).toBeGreaterThan(lo.tris * 4);
+    // volume: well clear of the skull, much taller than the head
+    expect(hi.maxR).toBeGreaterThan(0.2); expect(lo.maxR).toBeGreaterThan(0.19);
+    expect(hi.maxY).toBeGreaterThan(HC[1] + RY + 0.08);
+    // irregular, clustered outline + crease occlusion baked into vertex colours
+    expect(hi.rough).toBeGreaterThan(0.0006);
+    expect(hi.cMin).toBeLessThan(hi.cMax * 0.7);
+    // under a hat: the crown compresses (hat sits low) but clusters still puff out below its edge
+    expect(hiHat.maxY).toBeLessThan(HC[1] + RY + 0.035);
+    expect(hiHat.maxR).toBeGreaterThan(0.17);
+    expect(loHat.tris).toBeLessThan(800);
+    // accessories sit on the real surface: hat crown just above the compressed hair, ear cups outside the puffs
+    expect(hairOffset('afro', 0, 1.2, true)).toBeLessThan(0.03);
+    expect(hairOffset('afro', 0, 1.2, false)).toBeGreaterThan(0.06);
+    expect(hairOffset('afro', 0, -1.2, false)).toBe(0); // below the hairline: no hair
+  });
+
+  it('builds afro avatars at every LOD with and without hats (one baked mesh at mid / low)', () => {
+    for (const accessories of [[], ['beanie'], ['cap', 'headphones'], ['crown', 'flower']]) {
+      for (const lod of ['high', 'mid', 'low'] as const) {
+        const rig = createAvatarRig({ ...DEFAULT_APPEARANCE, hairStyle: 'afro', accessories }, { lod });
+        let meshes = 0; rig.root.traverse(o => { if ((o as THREE.Mesh).isMesh) meshes++; });
+        if (lod !== 'high') expect(meshes).toBe(1);
+        rig.update(0.016); rig.dispose();
+      }
+    }
+  });
+});

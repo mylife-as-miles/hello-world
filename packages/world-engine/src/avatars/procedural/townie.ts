@@ -104,6 +104,7 @@ function resolveMaterial(key: string, a: AvatarAppearance): [string, Finish] {
     case 'skin': return [a.skinTone, 'skin'];
     case 'hair': return [a.hairColor, 'hair'];
     case 'hairDark': return [shade(a.hairColor, -0.35), 'hair'];
+    case 'hairCoil': return [a.hairColor, 'coil'];
     case 'top': return [oc, topFinish];
     case 'topDark': return [shade(oc, -0.28), topFinish];
     case 'topLight': return [shade(oc, 0.38), topFinish];
@@ -163,7 +164,7 @@ function mixSrgb(a: string, b: string, t: number): string {
 /** Shared per-vertex-PBR material key of every merged Townie mesh (all LODs, all residents). */
 const BAKED_MATERIAL = '#ffffff|baked';
 /** Builder slots whose colour gets baked; their resolved colours are part of the merged-geometry cache key. */
-const BAKED_SLOTS = ['skin', 'hair', 'hairDark', 'top', 'topDark', 'topLight', 'trim', 'shirt', 'bottom', 'bottomDark', 'bottomLight', 'shoe', 'shoeDark', 'sole', 'accent', 'accentDark'];
+const BAKED_SLOTS = ['skin', 'hair', 'hairDark', 'hairCoil', 'top', 'topDark', 'topLight', 'trim', 'shirt', 'bottom', 'bottomDark', 'bottomLight', 'shoe', 'shoeDark', 'sole', 'accent', 'accentDark'];
 
 // ---------------------------------------------------------------- rig
 export interface TownieOptions { lod?: AvatarLod; seed?: string }

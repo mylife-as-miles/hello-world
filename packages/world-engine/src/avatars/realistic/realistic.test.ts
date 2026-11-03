@@ -95,3 +95,74 @@ describe.each(['mh-elena', 'rb-sofia'])('realistic rig %s (Node, from GLB bytes)
     rig.dispose();
   });
 });
+
+describe('HeadEmote (non-facial expressions)', () => {
+  it('maps expressions to head/neck gestures; blink does nothing; the happy nod is frame-rate independent', async () => {
+    const { HeadEmote } = await import('./headEmote');
+    const settle = (e: InstanceType<typeof HeadEmote>, s: number, dt = 1 / 60) => { for (let t = 0; t < s; t += dt) e.update(dt); };
+    const e = new HeadEmote();
+    e.set('sad', 1); settle(e, 2);
+    expect(e.head.x).toBeGreaterThan(0.15); expect(e.neck.x).toBeGreaterThan(0.1); // head down
+    e.set('sad', 0); settle(e, 3);
+    expect(Math.abs(e.head.x) + Math.abs(e.neck.x)).toBeLessThan(0.005);
+    expect(e.active).toBe(false);
+    e.set('surprised', 1); settle(e, 0.15);
+    expect(e.head.x).toBeLessThan(-0.1); // quick lift back
+    e.reset();
+    e.set('angry', 1); settle(e, 1.5);
+    expect(e.neck.x).toBeGreaterThan(0.1); expect(e.head.x).toBeGreaterThan(0.03); // chin down / forward
+    e.reset();
+    e.set('blink', 1); settle(e, 1);
+    expect(e.head.x === 0 && e.neck.x === 0 && e.head.z === 0).toBe(true);
+    const peakNod = (dt: number, steps: number) => {
+      const h = new HeadEmote(); let peak = 0;
+      for (let k = 1; k <= steps; k++) { h.set('happy', k / steps * 0.9); for (let t = 0; t < dt - 1e-9; t += 1 / 240) { h.update(1 / 240); peak = Math.max(peak, h.head.x); } }
+      for (let t = 0; t < 1; t += 1 / 240) { h.update(1 / 240); peak = Math.max(peak, h.head.x); }
+      settle(h, 3);
+      return { peak, rest: { x: h.head.x, z: h.head.z } };
+    };
+    const fast = peakNod(1 / 60, 12), slow = peakNod(0.1, 2);
+    expect(fast.peak).toBeGreaterThan(0.03); // a visible nod down on onset
+    expect(fast.peak).toBeLessThan(0.2); // ... but a small one
+    expect(Math.abs(fast.peak - slow.peak) / fast.peak).toBeLessThan(0.45);
+    expect(fast.rest.x).toBeLessThan(-0.03); expect(fast.rest.z).toBeGreaterThan(0.03); // settles chin-up with a tilt
+  });
+});
+
+describe('realistic rig expressions (mh-amara, Node)', () => {
+  it('setExpression drives additive head/neck rotations on top of the animator pose', { timeout: 60000 }, async () => {
+    const id = 'mh-amara';
+    const buf = fs.readFileSync(asset(BODIES[id]!.file));
+    expect(await primeRealisticBase(id, buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength))).toBe(true);
+    for (const lod of ['high', 'low'] as const) {
+      const rig = (await loadRealisticRig({ ...appearance(id), accessories: [] }, { lod }))!;
+      const R = rig.root;
+      const head = new THREE.Vector3(), eye = new THREE.Vector3();
+      const sample = () => { R.updateMatrixWorld(true); pos(R, 'attach:head', head); pos(R, 'crl_eye__L', eye); return { top: head.clone(), eye: eye.clone() }; };
+      const run = (s: number) => { for (let t = 0; t < s; t += 1 / 60) rig.update(1 / 60); return sample(); };
+      rig.update(0);
+      const rest = sample();
+      rig.setExpression('sad', 1);
+      const sad = run(2);
+      expect(sad.top.z - rest.top.z).toBeGreaterThan(0.03); // head nods down: the crown moves forward
+      expect(sad.eye.y - rest.eye.y).toBeLessThan(-0.015);
+      // additive over the animator: a look-left pose survives the gesture
+      rig.setBoneRotation('head', new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0.6, 0)));
+      const sadLook = run(0.1);
+      expect(sadLook.eye.x - sad.eye.x).toBeGreaterThan(0.02);
+      expect(sadLook.eye.y - rest.eye.y).toBeLessThan(-0.01);
+      rig.setBoneRotation('head', new THREE.Quaternion());
+      rig.setExpression('sad', 0);
+      const back = run(3);
+      expect(back.top.distanceTo(rest.top)).toBeLessThan(0.003);
+      rig.setExpression('surprised', 1);
+      const sur = run(0.2);
+      expect(sur.top.z - rest.top.z).toBeLessThan(-0.015); // quick lift back
+      rig.setExpression('surprised', 0); run(3);
+      rig.setExpression('blink', 1);
+      const blink = run(1);
+      expect(blink.top.distanceTo(rest.top)).toBeLessThan(0.003);
+      rig.dispose();
+    }
+  });
+});

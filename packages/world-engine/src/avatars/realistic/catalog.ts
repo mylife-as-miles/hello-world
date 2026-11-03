@@ -24,13 +24,16 @@ export const REALISTIC_BASE_MODELS: BaseModelEntry[] = [
 export interface AppearanceSupport {
   /** Which AvatarAppearance fields visibly apply to this base. */
   skinTone: boolean; hair: boolean; outfitColor: boolean; outfitPieces: boolean; face: boolean; body: boolean; accessories: boolean;
+  /** Expression previews visibly apply (Townies: face; VRM: blendshapes; realistic scans: head/neck gestures). Omitted = true
+   *  except where a consumer decides otherwise. */
+  expressions?: boolean;
 }
 
 /** body = height only (uniform scale); outfit.color recolours the top garment (mh-* only, see realisticSupportFor);
  *  accessories = head pieces only (beanie, cap, crown, headphones), fitted to the scan's head; skin/hair/face/outfit
- *  pieces are baked into the scans. */
+ *  pieces are baked into the scans. expressions: no facial rig, but setExpression plays head/neck gestures. */
 export const REALISTIC_SUPPORT: AppearanceSupport = {
-  skinTone: false, hair: false, outfitColor: true, outfitPieces: false, face: false, body: true, accessories: true,
+  skinTone: false, hair: false, outfitColor: true, outfitPieces: false, face: false, body: true, accessories: true, expressions: true,
 };
 
 /** Per-base support: Rocketbox bodies have no garment segmentation, so outfit colour does not apply to them. */

@@ -946,6 +946,10 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
       L.cls = id === viewerResidentId ? 0 : (!b.sim || id === selectedResidentId) ? 1 : 2;
       L.start = b.start;
       L.vis = true;
+      // Unplaceable (tail anchor outside the safe area, or no room above it): collapse ("Name …")
+      // without taking one of the capped slots, so a placeable older bubble still shows.
+      if (L.x < c.crL + SAFE_MARGIN || L.x > c.crL + c.W - SAFE_MARGIN || L.y > c.crT + c.H
+        || L.y - (L.h || 48) * L.sc < c.crT + SAFE_MARGIN) continue;
       bubbleCands[nc++] = id;
     }
     insertionSort(bubbleCands, nc, cmpSelect);
@@ -1049,6 +1053,15 @@ export function ResidentsLayer(props: ResidentsLayerProps) {
         // natural expiry keeps the CSS fade.
         el.style.transition = op === 0 && !fading ? 'none' : '';
         L.wop = op; el.style.opacity = op ? '1' : '0';
+      } else if (fading && op === 0 && L.vis && el.style.transition !== 'none') {
+        // A bubble fading out is no longer laid out: if a camera move carries it into a HUD rect or a placed
+        // bubble during its 0.3 s fade, drop it at once.
+        const bw = (L.w || 160) * L.sc, bh = (L.h || 48) * L.sc;
+        const l = L.x + L.dx - bw / 2, r = l + bw, bb = L.y + L.dy, tt = bb - bh;
+        let hit = false;
+        for (let j = 0; j < c.nObs && !hit; j++) if (overlaps(l, r, tt, bb, obsRects, j)) hit = true;
+        for (let j = 0; j < n && !hit; j++) if (overlaps(l, r, tt, bb, shownRects, j)) hit = true;
+        if (hit) el.style.transition = 'none';
       }
     }
   };

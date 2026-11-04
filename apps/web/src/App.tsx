@@ -54,10 +54,9 @@ import type {
   WorldEventKind,
 } from "@hello-world/contracts";
 import { useWorld } from "./lib/world";
-import { ComposioProfileProof } from "./components/ComposioProfileProof";
 
 type Page = "home" | "world" | "director";
-type ModalName = "creator" | "obs" | "twitch" | "director" | "reset" | "signin" | null;
+type ModalName = "creator" | "obs" | "twitch" | "director" | "reset" | "signin" | "account" | null;
 const cameras: { value: CameraMode; label: string }[] = [
   { value: "neighborhood", label: "Neighborhood" },
   { value: "orbit", label: "Free orbit" },
@@ -277,8 +276,10 @@ export default function App() {
     sendEvent,
     residentId,
   } = world;
-  const hostedWorld = "requiresSignIn" in world;
+  const hostedWorld = world.hosted;
   const requiresSignIn = hostedWorld && world.requiresSignIn;
+  const twitchUser = hostedWorld ? world.user : null;
+  const twitchSetupMessage = "Twitch sign-in is being enabled. You can explore the public world meanwhile.";
   const overlay = window.location.pathname.startsWith("/overlay");
   const queryCamera = new URLSearchParams(window.location.search).get("camera");
   const [page, setPage] = useState<Page>(pageFromLocation);
@@ -361,14 +362,19 @@ export default function App() {
         .sort((a, b) => b.friendship - a.friendship)
         .slice(0, 3)
     : [];
-  const overlayUrl = `${window.location.origin}/overlay?camera=${camera}&renderer=${rendererMode}${selectedId ? `&resident=${encodeURIComponent(selectedId)}` : ""}`;
+  const selectedWorld = new URLSearchParams(window.location.search).get("world");
+  const worldQuery = selectedWorld && /^twitch-\d{1,32}$/.test(selectedWorld) ? selectedWorld : null;
+  const overlayUrl = `${window.location.origin}/overlay?camera=${camera}&renderer=${rendererMode}${worldQuery ? `&world=${encodeURIComponent(worldQuery)}` : ""}${selectedId ? `&resident=${encodeURIComponent(selectedId)}` : ""}`;
+  const ownWorldUrl = hostedWorld && world.ownWorldId ? `${window.location.origin}/world?world=${encodeURIComponent(world.ownWorldId)}` : "";
   const authorization = world.capabilities.authorization;
   const broadcasterName = authorization?.startsWith("authorized ")
     ? authorization.slice("authorized ".length)
     : null;
   const hostName =
-    mode === "demo"
-      ? "Local preview world"
+    worldQuery
+      ? isDirector && twitchUser ? `${twitchUser.displayName}’s world` : "Twitch community world"
+      : mode === "demo"
+      ? "Public demo world"
       : broadcasterName
         ? `${broadcasterName}’s community`
         : "Connected Twitch community";
@@ -413,8 +419,8 @@ export default function App() {
   const closeModal = useCallback(() => setModal(null), []);
   function navigate(next: Page) {
     setPage(next);
-    const path = next === "home" ? "/" : `/${next}`;
-    if (window.location.pathname !== path)
+    const path = `${next === "home" ? "/" : `/${next}`}${worldQuery ? `?world=${encodeURIComponent(worldQuery)}` : ""}`;
+    if (`${window.location.pathname}${window.location.search}` !== path)
       window.history.pushState(null, "", path);
     window.scrollTo(0, 0);
   }
@@ -541,7 +547,7 @@ export default function App() {
           {(
             [
               { value: "home", icon: Home, label: "Discover" },
-              { value: "world", icon: Globe2, label: "Your world" },
+              { value: "world", icon: Globe2, label: "World" },
               { value: "director", icon: Settings2, label: "Director Studio" },
             ] as const
           ).map((item) => (
@@ -591,6 +597,9 @@ export default function App() {
             WORLD.
           </div>
           <div className="topbar-actions">
+            {hostedWorld && <button className="button small secondary twitch-account-button" aria-label={twitchUser ? `Twitch account: ${twitchUser.displayName}` : "Sign in with Twitch"} title={!twitchUser && !world.loginConfigured ? twitchSetupMessage : undefined} disabled={world.signingIn || !twitchUser && !world.loginConfigured} onClick={() => twitchUser ? setModal("account") : void world.signInTwitch()}>
+              <Radio size={15} /><span className="auth-label-full">{world.signingIn ? "Opening Twitch…" : twitchUser ? twitchUser.displayName : "Sign in with Twitch"}</span><span className="auth-label-short">{world.signingIn ? "Opening…" : twitchUser ? initials(twitchUser.displayName) : "Twitch"}</span>
+            </button>}
             <button
               className={`connection-pill ${ready ? "connected" : ""}`}
               onClick={() => setModal("twitch")}
@@ -731,15 +740,16 @@ export default function App() {
                       <br />A life of its own.
                     </h2>
                     <p>Move in. Make friends. Let the unexpected happen.</p>
-                    <button
-                      className="button primary enter-button"
-                      onClick={enterWorld}
-                    >
-                      Enter the world
-                      <ArrowRight size={18} />
-                    </button>
+                    <div className="landing-entry-actions">
+                      {hostedWorld && <button className="button primary enter-button" disabled={world.signingIn || !twitchUser && !world.loginConfigured} onClick={() => world.openOwnWorld()}>
+                        {twitchUser ? "Open your world" : "Create your world"}<ArrowRight size={18} />
+                      </button>}
+                      <button className={`button ${hostedWorld ? "secondary" : "primary"} enter-button`} onClick={enterWorld}>
+                        {worldQuery ? "Explore this world" : "Explore demo world"}<ArrowRight size={18} />
+                      </button>
+                    </div>
                     <span className="intro-caption">
-                      {mode === "demo"
+                      {hostedWorld && !twitchUser && !world.loginConfigured ? twitchSetupMessage : mode === "demo"
                         ? "Explore in Demo Mode · No Twitch account needed"
                         : "Your connected community is waiting"}
                     </span>
@@ -828,7 +838,7 @@ export default function App() {
                       <h3>
                         Hello Neighborhood{" "}
                         <span className="small-tag">
-                          {mode === "demo" ? "PUBLIC DEMO" : "LIVE WORLD"}
+                          {mode === "demo" ? worldQuery ? "COMMUNITY WORLD" : "PUBLIC DEMO" : "LIVE WORLD"}
                         </span>
                       </h3>
                       <p>A place for your people to become a story.</p>
@@ -1062,14 +1072,14 @@ export default function App() {
                       <div className="studio-lock">
                         <p>
                           {hostedWorld
-                            ? "Director controls belong to the world owner. Sign in with the owner's ChatGPT account."
+                            ? twitchUser ? "This world's streamer directs the action. Open your own world to use your Director Studio." : "Sign in with Twitch to create your own world and direct your community."
                             : "Director controls are private. Unlock the studio with your server’s Director key."}
                         </p>
                         <button
                           className="button secondary"
-                          onClick={() => setModal("director")}
+                          onClick={() => hostedWorld && twitchUser ? world.openOwnWorld() : setModal("director")}
                         >
-                          Unlock controls
+                          {hostedWorld && twitchUser ? "Open my world" : "Unlock controls"}
                           <LockKeyhole size={14} />
                         </button>
                       </div>
@@ -1745,12 +1755,16 @@ export default function App() {
       {modal === "twitch" && (
         <Modal
           title={
-            mode === "live"
+            hostedWorld
+              ? twitchUser ? `Hello, ${twitchUser.displayName}.` : "Your community starts with Twitch."
+              : mode === "live"
               ? "Your community is connected."
               : "A little preview of what’s possible."
           }
           subtitle={
-            mode === "live"
+            hostedWorld
+              ? "Create a world for your channel, or become a resident in someone else’s."
+              : mode === "live"
               ? "Twitch events feed the same world you see here."
               : "You’re exploring HELLO WORLD in Demo Mode."
           }
@@ -1762,24 +1776,29 @@ export default function App() {
             </span>
             <div>
               <strong>
-                {mode === "live" ? "Live Twitch adapter" : "Demo Mode"}
+                {hostedWorld ? twitchUser ? "Signed in with Twitch" : "Twitch sign-in" : mode === "live" ? "Live Twitch adapter" : "Demo Mode"}
               </strong>
               <p>
-                {twitch ||
+                {hostedWorld ? twitchUser ? "Your account is ready to join worlds and create a world of your own." : !world.loginConfigured ? twitchSetupMessage : "Use your Twitch account to create your resident. Watching a world is public." : twitch ||
                   "Twitch credentials are not configured on this server."}
               </p>
             </div>
           </div>
           <div className="twitch-capabilities">
-            {Object.entries(world.capabilities).map(([capability, status]) => (
+            {hostedWorld ? <>
+              <div><span>Your Twitch account</span><strong>{twitchUser ? twitchUser.displayName : "Not signed in"}</strong></div>
+              <div><span>This world's live events</span><strong>{mode === "live" ? "Connected" : "Demo events"}</strong></div>
+            </> : Object.entries(world.capabilities).map(([capability, status]) => (
               <div key={capability}>
                 <span>{prettyActivity(capability)}</span>
                 <strong>{status}</strong>
               </div>
             ))}
           </div>
-          {isDirector && import.meta.env.VITE_TRANSPORT === "http" && <ComposioProfileProof />}
-          {world.oauthConfigured && (
+          {hostedWorld && <button className="button twitch-connect full-width" disabled={world.signingIn || !twitchUser && !world.loginConfigured} onClick={() => twitchUser ? world.openOwnWorld() : void world.signInTwitch()}>
+            <Radio size={16} />{world.signingIn ? "Opening Twitch…" : twitchUser ? "Open my world" : "Sign in with Twitch"}<ArrowRight size={15} />
+          </button>}
+          {world.oauthConfigured && isDirector && (
             <button
               className="button twitch-connect full-width"
               disabled={!isDirector || !ready}
@@ -1787,7 +1806,7 @@ export default function App() {
             >
               <Radio size={16} />
               {isDirector
-                ? "Connect with Twitch"
+                ? "Enable live channel events"
                 : "Unlock Director Studio to connect Twitch"}
               <ArrowRight size={15} />
             </button>
@@ -1800,7 +1819,7 @@ export default function App() {
             </h3>
             <p>
               {mode === "demo"
-                ? "Your residents, friendships, and shared world are real. Director celebrations and raids are labeled demo events until you connect Twitch."
+                ? "Your residents, friendships, and shared world are real. Celebrations and raids are labeled demo events until live channel events are enabled."
                 : "Chat commands and authorized channel events become validated world actions. Availability depends on your broadcaster’s granted permissions."}
             </p>
             <div className="command-list">
@@ -1810,12 +1829,11 @@ export default function App() {
               <code>!hello</code>
               <code>!gift username</code>
             </div>
-            <h3>Connect your channel</h3>
+            <h3>{hostedWorld ? "Your account. Your world." : "Connect your channel"}</h3>
             <p>
-              Configure Twitch credentials and broadcaster permissions on the
-              server. Your access tokens and client secret stay out of this app.
+              {hostedWorld ? "Sign-in asks for your basic Twitch profile. Each streamer controls their own world; viewers control their own residents. Live channel events use separate permissions." : "Configure Twitch credentials and broadcaster permissions on the server. Your access tokens and client secret stay out of this app."}
             </p>
-            <a
+            {!hostedWorld && <a
               className="text-link"
               href="https://github.com/mylife-as-miles/hello-world/blob/main/docs/TWITCH.md"
               target="_blank"
@@ -1823,7 +1841,7 @@ export default function App() {
             >
               Read the Twitch setup guide
               <ExternalLink size={13} />
-            </a>
+            </a>}
           </div>
           <button
             className="button primary full-width"
@@ -1845,10 +1863,11 @@ export default function App() {
         >
           {hostedWorld ? (
             <div className="name-form">
-              <p>Only the signed-in world owner can change weather, moderate interactions, reset the world, or connect Twitch.</p>
-              <a className="button primary" href="/signin-with-chatgpt" target="_top">
-                Sign in with ChatGPT <ArrowRight size={16} />
-              </a>
+              <p>The streamer who creates a world controls its weather, events and moderation. Viewers can join the neighborhood and control their own resident.</p>
+              {!twitchUser && !world.loginConfigured && <p role="status">{twitchSetupMessage}</p>}
+              <button className="button twitch-connect" disabled={world.signingIn || !twitchUser && !world.loginConfigured} onClick={() => twitchUser ? world.openOwnWorld() : void world.signInTwitch("/director")}>
+                {world.signingIn ? "Opening Twitch…" : twitchUser ? "Open my world" : "Sign in with Twitch"}<ArrowRight size={16} />
+              </button>
             </div>
           ) : <form
             className="name-form"
@@ -1883,12 +1902,28 @@ export default function App() {
         </Modal>
       )}
       {modal === "signin" && (
-        <Modal title="Your story starts with a hello." subtitle="Watch freely. Sign in to make a resident of your own." onClose={closeModal}>
+        <Modal title="Your story starts with a hello." subtitle="Watch freely. Sign in with Twitch to become a resident." onClose={closeModal}>
           <div className="name-form">
-            <p>Your ChatGPT sign-in keeps your resident and saved appearance connected to you.</p>
-            <a className="button primary" href="/signin-with-chatgpt" target="_top">
-              Sign in with ChatGPT <ArrowRight size={16} />
-            </a>
+            <p>Your Twitch account keeps your resident and appearance connected to you. Sign-in uses your basic profile; live chat permissions are separate.</p>
+            {hostedWorld && !world.loginConfigured && <p role="status">{twitchSetupMessage}</p>}
+            {hostedWorld && <button className="button twitch-connect" disabled={world.signingIn || !world.loginConfigured} onClick={() => void world.signInTwitch(`/world${worldQuery ? `?world=${encodeURIComponent(worldQuery)}` : ""}`)}>
+              {world.signingIn ? "Opening Twitch…" : "Sign in with Twitch"}<ArrowRight size={16} />
+            </button>}
+          </div>
+        </Modal>
+      )}
+      {modal === "account" && hostedWorld && twitchUser && (
+        <Modal title={`Hello, ${twitchUser.displayName}.`} subtitle="Signed in with Twitch." onClose={closeModal}>
+          <div className="name-form">
+            <p>Join a streamer's neighborhood as a resident, or open your own world and bring your community along.</p>
+            <button className="button primary full-width" onClick={() => world.openOwnWorld()}>Open my world<ArrowRight size={16} /></button>
+            {ownWorldUrl && <div className="world-invite-link">
+              <label htmlFor="viewer-world-link">Invite viewers to your world</label>
+              <input id="viewer-world-link" readOnly value={ownWorldUrl} onFocus={e => e.currentTarget.select()} />
+              <button className="button secondary full-width" onClick={() => { void navigator.clipboard.writeText(ownWorldUrl).then(() => setLocalNotice("World link copied. Share it with your community."), () => setLocalNotice("Select the world link above to copy it.")); }}><Copy size={15} />Copy viewer link</button>
+            </div>}
+            <button className="button secondary full-width" onClick={openCreator}>{me ? "Customize my resident" : "Join this world"}</button>
+            <button className="button text-button full-width" onClick={() => void world.signOut()}>Sign out</button>
           </div>
         </Modal>
       )}

@@ -870,6 +870,8 @@ export async function handleHostedTwitch(
         redirect_uri: env.TWITCH_REDIRECT_URI!,
       });
       const info = await validate(env, token.access_token);
+      if (actor?.startsWith("twitch:") && actor !== `twitch:${info.user_id}`)
+        throw new TwitchHttpError("Connect the Twitch account that owns this world.", 403);
       await env.WORLD_DB.prepare(
         "UPDATE twitch_accounts SET broadcaster_id = ?, broadcaster_login = ?, token_cipher = ?, expires_at = ?, validated_at = ?, capabilities_json = ?, last_event_at=0, last_event_id=NULL WHERE world_id = ? AND owner_actor = ?",
       )
@@ -888,7 +890,7 @@ export async function handleHostedTwitch(
       return new Response(null, {
         status: 303,
         headers: {
-          Location: `${url.origin}/director?twitch=connected`,
+          Location: `${url.origin}/director?twitch=connected&world=${encodeURIComponent(world(env))}`,
           "Cache-Control": "no-store",
         },
       });

@@ -8,7 +8,7 @@ This is an independent vertical slice of a persistent virtual society. All resid
 
 **[Open HELLO WORLD](https://hello-world-miles-society.myles4miles.chatgpt.site)** · [Director Studio](https://hello-world-miles-society.myles4miles.chatgpt.site/director) · [OBS browser source](https://hello-world-miles-society.myles4miles.chatgpt.site/overlay?camera=neighborhood)
 
-The world is public to watch, including the OBS browser-source route. Creating a resident and interacting requires ChatGPT sign-in. Director controls and Twitch connection setup require the world owner’s authenticated account; public visitors cannot reset or moderate the world. Operation inside native OBS is unverified. The hosted world uses D1 and server-side Workers, without a local Node server. It remains **Demo Mode** until the Twitch app ID/secret are configured privately and the broadcaster authorizes. [Hosted Twitch callbacks, permissions and setup](docs/HOSTED_TWITCH.md).
+HELLO WORLD is a public app for Twitch communities. A streamer signs in with Twitch through Composio and opens their own world. Viewers sign in with Twitch, follow the streamer’s world link and control their own residents. Director controls belong only to that world’s verified Twitch owner. Public watching and OBS do not require sign-in; no ChatGPT account is needed. Operation inside native OBS is unverified. The hosted world uses D1 and server-side Workers, without a local Node server. Twitch identity login and live channel events are separate: the world retains its explicit simulation/demo label until actual channel events are verified. Public Twitch login requires the one-time Composio project verifier setup described below. [Hosted Twitch callbacks, permissions and setup](docs/HOSTED_TWITCH.md).
 
 ## Run locally
 
@@ -52,7 +52,7 @@ The browser identity and Twitch account identity are separate in this slice. Lin
 
 See [Twitch configuration and permissions](docs/TWITCH.md) and [verified integration research](docs/RESEARCH.md).
 
-[Composio-managed OAuth investigation](docs/COMPOSIO_TWITCH.md) includes an owner-only hosted basic-profile test in the Twitch connection dialog and an optional CLI (`pnpm twitch:composio:poc --mode=plan`). Managed OAuth is documented, but real consent/read/event delivery have not been verified. No Composio credentials are needed to run the Demo world.
+[Public Twitch login and world ownership](docs/PUBLIC_TWITCH.md) uses Composio’s managed app and deferred OAuth callback verifier. The operator configures the project once; streamers and viewers supply no API keys or developer apps. Real Twitch consent and live events still require verification. [Earlier managed-auth research](docs/COMPOSIO_TWITCH.md) records the investigation; its isolated profile proof is operator tooling, not the public login flow.
 
 The local Node server uses Twurple with authenticated IRC for chat commands and EventSub WebSockets for subscriptions, approved reward redemptions, and incoming raids. Broadcaster authorization and the correct scopes are required; available capabilities and failures are reported honestly. Access tokens, refresh tokens, and client secrets remain on the server.
 

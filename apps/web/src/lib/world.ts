@@ -393,6 +393,7 @@ function useWebSocketWorld() {
   );
   return {
     ...state,
+    hosted: false as const,
     runtime: world.runtime,
     sendEvent: world.sendEvent,
     authenticateDirector: world.authenticateDirector,

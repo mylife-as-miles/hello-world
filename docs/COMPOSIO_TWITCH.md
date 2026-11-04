@@ -1,5 +1,7 @@
 # Composio-managed Twitch investigation
 
+**Historical operator proof:** the public application now uses the separate [Twitch login and multi-world ownership flow](PUBLIC_TWITCH.md). Its deferred OAuth verifier is required; the isolated profile proof below is not the user login path and should not be run with that project-wide verifier enabled.
+
 Checked **2026-11-04**. The owner has supplied a Composio project key privately in Sites and approved a basic-profile proof. Its value is not readable through the Sites settings tool and has not been exported. No persistent connection, Twitch consent or real event has been verified. The public world remains Demo Mode. The profile proof is isolated from the world-event adapter.
 
 ## Findings and the remaining event-path blocker

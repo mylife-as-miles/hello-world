@@ -272,6 +272,38 @@ option {
   display: flex;
   align-items: center;
 }
+.landing-entry-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.world-invite-link { display: grid; gap: 10px; }
+.world-invite-link > label { font-size: 12px; line-height: 1.5; }
+.world-invite-link > input { min-width: 0; width: 100%; }
+.twitch-account-button {
+  max-width: 210px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.twitch-account-button > span { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.twitch-account-button .auth-label-short { display: none; }
+@media (max-width: 700px) {
+  .game-interface .topbar-actions .connection-pill { display: none; }
+  .game-interface .topbar-actions .twitch-account-button {
+    max-width: 95px;
+    font-size: 12px;
+    padding: 9px 10px;
+    gap: 6px;
+  }
+  .twitch-account-button .auth-label-full { display: none; }
+  .twitch-account-button .auth-label-short { display: block; }
+  .landing-entry-actions { gap: 10px; }
+}
+@media (max-width: 380px) {
+  .game-interface .topbar-actions .twitch-account-button { max-width: 88px; font-size: 11px; }
+}
 .connection-pill {
   display: flex;
   align-items: center;

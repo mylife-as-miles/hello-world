@@ -7,6 +7,7 @@ import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { readFileSync } from "node:fs";
 import type { WorldEvent, WorldSnapshot } from "@hello-world/contracts";
 import worker from "../apps/server/src/sites-worker.ts";
+import { fixtureTwitchCookie } from "./helpers/twitch-login.ts";
 
 interface Reply {
   authorized: boolean;
@@ -28,10 +29,10 @@ function ok(condition: unknown) {
 async function main() {
   const sqlite = new DatabaseSync(":memory:");
   try {
-    sqlite.exec(
+    for (const name of ["0001_world.sql", "0002_twitch.sql", "0003_twitch_delivery.sql", "0004_composio_profile.sql", "0005_twitch_users.sql"]) sqlite.exec(
       readFileSync(
         new URL(
-          "../apps/server/sites-migrations/0001_world.sql",
+          "../apps/server/sites-migrations/" + name,
           import.meta.url,
         ),
         "utf8",
@@ -65,8 +66,19 @@ async function main() {
     const env = {
       WORLD_DB: db,
       ASSETS: { fetch: async () => new Response("asset") },
+      AUTH_SESSION_SECRET: "fixture-auth-secret-over-32-characters",
+      COMPOSIO_OAUTH_VERIFIER_URL: "https://world.test/api/auth/twitch/verify",
+      COMPOSIO_API_KEY: "fixture-composio-key",
+      WORLD_ID: "twitch-123",
       DIRECTOR_OWNER_EMAIL: "owner@example.test",
     };
+    const cookies = new Map<string, string>();
+    const userIds: Record<string, string> = { "owner-test": "123", "ordinary-user": "456", "user-a": "42", "user-b": "43", observer: "44" };
+    async function signedCookie(user: string) {
+      if (!user) return "";
+      if (!cookies.has(user)) cookies.set(user, await fixtureTwitchCookie(env, userIds[user] || "999"));
+      return cookies.get(user)!;
+    }
     const send = async (
       path: string,
       user = "owner-test",
@@ -76,7 +88,7 @@ async function main() {
       const request = new Request(`https://world.test${path}`, {
         method: message ? "POST" : "GET",
         headers: {
-          ...(user ? { "oai-authenticated-user-id": user, "oai-authenticated-user-email": user === "owner-test" ? "owner@example.test" : "viewer@example.test" } : {}),
+          ...(user ? { Cookie: await signedCookie(user) } : {}),
           ...(message
             ? { "Content-Type": "application/json", Origin: origin }
             : {}),
@@ -128,9 +140,10 @@ async function main() {
       { type: "director-auth", key: "pretend-owner" },
     ]) equal((await send("/api/messages", "ordinary-user", message)).status, 403);
     const missingOwner = await worker.fetch(new Request("https://world.test/api/status", {
-      headers: { "oai-authenticated-user-id": "owner-test", "oai-authenticated-user-email": "owner@example.test" },
+      headers: { Cookie: await signedCookie("owner-test") },
     }), { ...env, DIRECTOR_OWNER_EMAIL: undefined });
-    equal((await missingOwner.json() as Reply).authorized, false);
+    // Twitch world ownership is independent of any ChatGPT account/email.
+    equal((await missingOwner.json() as Reply).authorized, true);
     const emailWithoutIdentity = await worker.fetch(new Request("https://world.test/api/status", {
       headers: { "oai-authenticated-user-email": "owner@example.test" },
     }), env);
@@ -185,7 +198,7 @@ async function main() {
       new Request("https://world.test/api/messages", {
         method: "POST",
         headers: {
-          "oai-authenticated-user-id": "ordinary-user",
+          Cookie: await signedCookie("ordinary-user"),
           Origin: "https://world.test",
         },
         body: JSON.stringify(weather),
@@ -193,6 +206,20 @@ async function main() {
       env,
     );
     equal(denied.status, 403);
+    // Every streamer owns a separate world; viewers retain only their own actor.
+    const otherWorld = await send("/api/status?world=twitch-42", "user-a");
+    equal(otherWorld.data.authorized, true);
+    equal((await send("/api/status?world=twitch-42", "owner-test")).data.authorized, false);
+    equal((await send("/api/messages?world=twitch-42", "owner-test", { type: "reset" })).status, 403);
+    equal((await send("/api/messages?world=twitch-42", "user-a", { type: "director-settings", settings: { maxResidents: 25 } })).status, 200);
+    const untouched = await send("/api/status?world=twitch-123", "owner-test");
+    equal((untouched.data as any).settings.maxResidents, 50);
+    const otherJoin = await send("/api/messages?world=twitch-42", "user-a", event("My own world"));
+    equal(otherJoin.data.snapshot.worldId, "twitch-42");
+    equal(otherJoin.data.snapshot.residents.at(-1)?.id, "twitch:42");
+    equal(otherJoin.data.snapshot.residents.length, seedCount + 1);
+    equal((await send("/api/snapshot?world=twitch-123", "owner-test")).data.snapshot.residents.length, seedCount + 3);
+    equal((await send("/api/snapshot?world=twitch-987654", "owner-test")).status, 404);
     console.log(
       JSON.stringify({
         checks,

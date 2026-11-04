@@ -1,5 +1,5 @@
 /** Sites/Cloudflare adapter. One shared engine, durable D1 state, HTTP polling.
- * Public reads; writes require Sites identity, and Director access requires the owner email.
+ * Public reads; viewers authenticate with Twitch and each streamer owns a world.
  * Simulation advances during active requests; no always-on or live Twitch claim.
  */
 import {
@@ -7,10 +7,13 @@ import {
   hostedTwitchStatus,
   maintainHostedTwitch,
   twitchOwnerAllowed,
+  verifyTwitchWebhook,
   type HostedTwitchEnv,
 } from "./sites-twitch.js";
 import { createWorldRuntime } from "@hello-world/world-engine/runtime";
 import { handleHostedComposio, type HostedComposioEnv } from "./sites-composio.js";
+import { handleTwitchLogin, resolveTwitchSession, type TwitchLoginEnv } from "./twitch-login.js";
+import { conditionKey } from "./twitch-subscriptions.js";
 import type {
   ClientMessage,
   DirectorSettings,
@@ -34,7 +37,7 @@ interface D1Database {
   prepare(query: string): D1Statement;
   batch?(statements: D1Statement[]): Promise<Array<{ meta?: { changes?: number } }>>;
 }
-interface WorkerEnv extends HostedTwitchEnv, HostedComposioEnv {
+interface WorkerEnv extends HostedTwitchEnv, HostedComposioEnv, TwitchLoginEnv {
   WORLD_DB: D1Database;
   ASSETS: { fetch(request: Request): Promise<Response> };
   DIRECTOR_OWNER_EMAIL?: string;
@@ -98,23 +101,59 @@ const json = (value: unknown, status = 200, cookie?: string) =>
       ...(cookie ? { "Set-Cookie": cookie } : {}),
     },
   });
-async function siteIdentity(request: Request): Promise<string> {
-  // Supplied/overwritten by the Sites access gateway; never trust actor IDs in JSON.
-  const userId = request.headers.get("oai-authenticated-user-id");
-  if (!userId || userId.length > 256)
-    throw new ApiError(
-      "Sign in with ChatGPT to join or change this world.",
-      401,
-    );
-  const digest = new Uint8Array(
-    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(userId)),
-  );
-  return `viewer:site:${Array.from(digest.slice(0, 16), (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+async function authEnvironment(env: WorkerEnv): Promise<WorkerEnv> {
+  if (env.AUTH_SESSION_SECRET || !env.TWITCH_TOKEN_ENCRYPTION_KEY) return env;
+  // A distinct derived key keeps browser sessions independent of token encryption.
+  try {
+    const raw = Uint8Array.from(atob(env.TWITCH_TOKEN_ENCRYPTION_KEY), c => c.charCodeAt(0));
+    if (raw.length !== 32) return env;
+    const key = await crypto.subtle.importKey("raw", raw, "HKDF", false, ["deriveBits"]);
+    const bits = await crypto.subtle.deriveBits({ name: "HKDF", hash: "SHA-256", salt: new TextEncoder().encode("hello-world-auth"), info: new TextEncoder().encode("public-twitch-session-v1") }, key, 256);
+    return { ...env, AUTH_SESSION_SECRET: Array.from(new Uint8Array(bits), b => b.toString(16).padStart(2, "0")).join("") };
+  } catch { return env; }
 }
-async function isWorldDirector(request: Request, env: WorkerEnv, actor: string | null | undefined) {
-  const owner = env.DIRECTOR_OWNER_EMAIL?.trim().toLowerCase();
-  const signedInEmail = request.headers.get("oai-authenticated-user-email")?.trim().toLowerCase();
-  return Boolean(actor && owner && signedInEmail === owner && await twitchOwnerAllowed(env, actor));
+async function isWorldDirector(env: WorkerEnv, actor: string | null | undefined) {
+  if (!actor?.startsWith("twitch:")) return false;
+  const owner = await env.WORLD_DB.prepare("SELECT twitch_user_id FROM world_owners WHERE world_id=?")
+    .bind(env.WORLD_ID || "hello-neighborhood").first<{ twitch_user_id: string }>();
+  return Boolean(owner && actor === `twitch:${owner.twitch_user_id}` && await twitchOwnerAllowed(env, actor));
+}
+async function selectedWorld(request: Request, env: WorkerEnv): Promise<WorkerEnv> {
+  const url = new URL(request.url);
+  let selected = url.searchParams.get("world") || env.WORLD_ID || "hello-neighborhood";
+  if (url.pathname === "/api/twitch/callback") {
+    const state = url.searchParams.get("state") || "";
+    if (state.length <= 128) {
+      const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(state)));
+      const hash = Array.from(digest, b => b.toString(16).padStart(2, "0")).join("");
+      const row = await env.WORLD_DB.prepare("SELECT world_id FROM twitch_oauth_states WHERE state_hash=?")
+        .bind(hash).first<{ world_id: string }>();
+      if (row) selected = row.world_id;
+    }
+  }
+  if (selected !== (env.WORLD_ID || "hello-neighborhood")) {
+    if (!/^twitch-\d{1,24}$/.test(selected)) throw new ApiError("World not found.", 404);
+    const known = await env.WORLD_DB.prepare("SELECT world_id FROM world_owners WHERE world_id=?").bind(selected).first();
+    if (!known) throw new ApiError("This streamer has not opened a world yet.", 404);
+  }
+  return { ...env, WORLD_ID: selected };
+}
+async function routeWebhook(request: Request, env: WorkerEnv) {
+  const reader = request.body?.getReader(), chunks: Uint8Array[] = []; let size = 0;
+  if (reader) while (true) { const part = await reader.read(); if (part.done) break; size += part.value.length;
+    if (size > 65536) { await reader.cancel(); throw new ApiError("Webhook body is too large.", 413); } chunks.push(part.value); }
+  const raw = new Uint8Array(size); let offset = 0;
+  for (const chunk of chunks) { raw.set(chunk, offset); offset += chunk.length; }
+  if (!await verifyTwitchWebhook(request, env.TWITCH_WEBHOOK_SECRET || "", raw)) throw new ApiError("Invalid EventSub signature or timestamp.", 403);
+  let payload: any; try { payload = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(raw)); }
+  catch { throw new ApiError("Malformed EventSub payload.", 400); }
+  const sub = payload?.subscription;
+  const match = await env.WORLD_DB.prepare(`SELECT COUNT(*) AS matches, MIN(world_id) AS world_id FROM twitch_subscriptions
+    WHERE subscription_id=? OR (subscription_id IS NULL AND type=? AND version=? AND condition_json=?)`)
+    .bind(typeof sub?.id === "string" ? sub.id : "", typeof sub?.type === "string" ? sub.type : "", typeof sub?.version === "string" ? sub.version : "", conditionKey(sub?.condition))
+    .first<{ matches: number; world_id: string | null }>();
+  if (match?.matches !== 1 || !match.world_id) throw new ApiError("EventSub subscription is not registered for one world.", 403);
+  return { request: new Request(request, { body: raw }), env: { ...env, WORLD_ID: match.world_id } };
 }
 async function getWorld(env: WorkerEnv): Promise<WorldRow> {
   const worldId = env.WORLD_ID || "hello-neighborhood";
@@ -450,14 +489,22 @@ export default {
           "Hosted database binding WORLD_DB is unavailable.",
           503,
         );
+      env = await authEnvironment(env);
+      if (url.pathname.startsWith("/api/auth/")) return handleTwitchLogin(request, env);
+      if (url.pathname === "/api/twitch/webhook" && request.method === "POST") {
+        const routed = await routeWebhook(request, env); request = routed.request; env = routed.env;
+      } else env = await selectedWorld(request, env);
+      const viewer = await resolveTwitchSession(request, env);
       if (url.pathname.startsWith("/api/composio/twitch/")) {
-        const actor = await siteIdentity(request);
+        const actor = viewer?.actorId;
+        if (!actor) throw new ApiError("Sign in with Twitch to manage your world.", 401);
         await requestLimit(env, env.WORLD_ID || "hello-neighborhood", actor, Date.now());
-        return handleHostedComposio(request, env, actor, await isWorldDirector(request, env, actor));
+        return handleHostedComposio(request, env, actor, await isWorldDirector(env, actor));
       }
       if (url.pathname.startsWith("/api/twitch/")) {
         const webhook = url.pathname === "/api/twitch/webhook";
-        const actor = webhook ? undefined : await siteIdentity(request);
+        const actor = webhook ? undefined : viewer?.actorId;
+        if (!webhook && !actor) throw new ApiError("Sign in with Twitch to connect your channel.", 401);
         if (actor)
           await requestLimit(
             env,
@@ -469,7 +516,7 @@ export default {
           request,
           env,
           actor,
-          await isWorldDirector(request, env, actor),
+          await isWorldDirector(env, actor),
           {
             getSnapshot: async () =>
               parseSnapshot(JSON.parse((await getWorld(env)).snapshot_json)),
@@ -517,11 +564,9 @@ export default {
         request.headers.get("Origin") !== url.origin
       )
         throw new ApiError("Origin is not allowed.", 403);
-      const viewerId = request.headers.get("oai-authenticated-user-id")
-        ? await siteIdentity(request)
-        : null;
+      const viewerId = viewer?.actorId || null;
       if (request.method === "POST" && !viewerId)
-        throw new ApiError("Sign in with ChatGPT to join or change this world.", 401);
+        throw new ApiError("Sign in with Twitch to create or control your resident.", 401);
       const initial = await getWorld(env);
       if (viewerId) await requestLimit(env, initial.id, viewerId, Date.now());
       let message: ClientMessage | undefined;
@@ -537,7 +582,7 @@ export default {
           );
         }
       }
-      const director = await isWorldDirector(request, env, viewerId);
+      const director = await isWorldDirector(env, viewerId);
       // Token health is independent of who is viewing the world.
       await maintainHostedTwitch(env);
       const twitchStatus = await hostedTwitchStatus(env);
@@ -558,16 +603,18 @@ export default {
       )
         .bind(row.id, Date.now() - 15000)
         .first<{ count: number }>();
+      const loginConfigured = Boolean(env.COMPOSIO_API_KEY && env.AUTH_SESSION_SECRET && env.AUTH_SESSION_SECRET.length >= 32 && env.COMPOSIO_OAUTH_VERIFIER_URL === `${url.origin}/api/auth/twitch/verify`);
       const status: Extract<ServerMessage, { type: "status" }> = {
         type: "status",
         mode: twitchStatus.mode,
-        twitch: twitchStatus.twitch,
+        twitch: twitchStatus.mode === "live" ? twitchStatus.twitch : viewer ? `Twitch account: ${viewer.displayName} · live channel events not enabled` : "Simulation preview · sign in with Twitch to join or create a world",
         clients: presence?.count || 0,
         settings: data.settings,
         pending: director ? data.pending : [],
         capabilities: {
           transport: "D1-backed HTTP polling",
-          ...twitchStatus.capabilities,
+          ...(twitchStatus.oauthConfigured ? twitchStatus.capabilities : { "channel-events": "Live channel events are not enabled" }),
+          "twitch-sign-in": viewer ? `Signed in as ${viewer.login}` : loginConfigured ? "Sign in with Twitch is available" : "Twitch sign-in is being configured",
         },
       };
       const withSnapshot =
@@ -584,6 +631,9 @@ export default {
           ...status,
           status,
           viewerId: viewerId,
+          user: viewer ? { id: viewer.twitchId, login: viewer.login, displayName: viewer.displayName } : null,
+          ownWorldId: viewer ? `twitch-${viewer.twitchId}` : null,
+          loginConfigured,
           requiresSignIn: viewerId === null,
           authorized: director,
           directorLocalAllowed: director,

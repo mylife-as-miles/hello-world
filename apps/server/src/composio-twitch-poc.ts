@@ -7,9 +7,10 @@ export interface ManagedProfileClient {
   toolkit(): Promise<unknown>;
   createProfileConfig(): Promise<unknown>;
   config(id: string): Promise<unknown>;
-  authorize(owner: string, config: string): Promise<{ id: string; redirectUrl?: string | null }>;
+  authorize(owner: string, config: string, callbackUrl?: string): Promise<{ id: string; redirectUrl?: string | null }>;
   ownedAccounts(owner: string, config: string): Promise<unknown>;
   profile(owner: string, account: string): Promise<{ status: number; data?: unknown }>;
+  completeAuth?(owner: string, sessionUri: string): Promise<{ connectedAccountId: string; toolkitSlug: string }>;
 }
 export interface ProfileAttempt {
   ownerId: string;
@@ -29,21 +30,22 @@ export async function createManagedProfileClient(apiKey: string): Promise<Manage
     toolkitVersions: { twitch: "20261101_00" } });
   const bounded = () => ({ signal: AbortSignal.timeout(10_000) });
   return {
+    completeAuth: (userId, sessionUri) => composio.connectedAccounts.completeAuth({ userId, sessionUri }, bounded()),
     toolkit: () => composio.toolkits.get("twitch", bounded()),
     createProfileConfig: () => composio.authConfigs.create("twitch", {
       type: "use_composio_managed_auth", name: "HELLO WORLD profile-only proof",
       credentials: { scopes: "" },
     }, bounded()),
     config: id => composio.authConfigs.get(id, bounded()),
-    async authorize(ownerId, authConfigId) {
+    async authorize(ownerId, authConfigId, callbackUrl) {
       const session = await composio.sessions.create(ownerId, {
         toolkits: ["twitch"], authConfigs: { twitch: authConfigId },
         tools: { twitch: ["TWITCH_GET_USERS"] }, manageConnections: false,
       }, bounded());
       // 0.28.0's facade type omits the third argument; its bound runtime method
       // forwards it to the generated client's link request (ToolRouterSession).
-      const authorize = session.authorize as (toolkit: string, options: undefined, request: { signal: AbortSignal }) => ReturnType<typeof session.authorize>;
-      return authorize("twitch", undefined, bounded());
+      const authorize = session.authorize as (toolkit: string, options: { callbackUrl: string } | undefined, request: { signal: AbortSignal }) => ReturnType<typeof session.authorize>;
+      return authorize("twitch", callbackUrl ? { callbackUrl } : undefined, bounded());
     },
     ownedAccounts: (ownerId, configId) => composio.connectedAccounts.list({
       userIds: [ownerId], authConfigIds: [configId], statuses: ["ACTIVE"], limit: 100,

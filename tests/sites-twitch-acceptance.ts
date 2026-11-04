@@ -6,6 +6,7 @@ import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { readFileSync } from "node:fs";
 import worker from "../apps/server/src/sites-worker.ts";
 import { sqliteD1 } from "./helpers/sqlite-d1.ts";
+import { fixtureTwitchCookie } from "./helpers/twitch-login.ts";
 let checks = 0;
 const eq = (a: unknown, b: unknown) => {
   assert.deepEqual(a, b);
@@ -17,7 +18,7 @@ const ok = (a: unknown) => {
 };
 async function main() {
   const sqlite = new DatabaseSync(":memory:");
-  for (const name of ["0001_world.sql", "0002_twitch.sql", "0003_twitch_delivery.sql"])
+  for (const name of ["0001_world.sql", "0002_twitch.sql", "0003_twitch_delivery.sql", "0004_composio_profile.sql", "0005_twitch_users.sql"])
     sqlite.exec(
       readFileSync(
         new URL("../apps/server/sites-migrations/" + name, import.meta.url),
@@ -37,6 +38,10 @@ async function main() {
   } };
   const env = {
     WORLD_DB: db,
+    AUTH_SESSION_SECRET: "fixture-auth-secret-over-32-characters",
+    COMPOSIO_OAUTH_VERIFIER_URL: "https://world.test/api/auth/twitch/verify",
+    COMPOSIO_API_KEY: "fixture-composio-key",
+    WORLD_ID: "twitch-123",
     ASSETS: { fetch: async () => new Response("asset") },
     DIRECTOR_OWNER_EMAIL: "owner@example.test",
     TWITCH_CLIENT_ID: "test-app",
@@ -103,12 +108,18 @@ async function main() {
     throw new Error("Unexpected fetch " + url);
   };
   try {
+    const cookies = new Map<string, string>();
+    async function signedCookie(user: string) {
+      if (!user) return "";
+      if (!cookies.has(user)) cookies.set(user, await fixtureTwitchCookie(env, user === "owner" ? "123" : "456"));
+      return cookies.get(user)!;
+    }
     const request = async (path: string, user = "owner", body?: unknown) =>
       worker.fetch(
         new Request("https://world.test" + path, {
           method: body ? "POST" : "GET",
           headers: {
-            ...(user ? { "oai-authenticated-user-id": user, "oai-authenticated-user-email": user === "owner" ? "owner@example.test" : "viewer@example.test" } : {}),
+            ...(user ? { Cookie: await signedCookie(user) } : {}),
             ...(body
               ? {
                   Origin: "https://world.test",
@@ -158,7 +169,7 @@ async function main() {
     eq(callback.status, 303);
     eq(
       callback.headers.get("Location"),
-      "https://world.test/director?twitch=connected",
+      "https://world.test/director?twitch=connected&world=twitch-123",
     );
     eq(subscriptions.length, 6);
     eq(subscriptions.find((s) => s.type === "channel.chat.message").condition, {

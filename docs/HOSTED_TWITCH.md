@@ -4,7 +4,7 @@ Verified against official Twitch documentation on **2026-11-02**. This describes
 
 Updated **2026-11-04** with durable subscription identity and transactional world-ingress receipts. [Composio-managed OAuth investigation and approval-gated proof](COMPOSIO_TWITCH.md) are separate from this optional custom-app path; no managed or custom-app live connection has been established.
 
-The hosted world is public to watch. Resident writes require Sites sign-in. Director controls and Twitch OAuth require an authenticated identity whose trusted Sites email matches the server-configured `DIRECTOR_OWNER_EMAIL`. Missing owner configuration fails closed. Twitch uses an API-only public ingress relay for one EventSub POST path; it forwards to the application’s fixed signed webhook using a server-only service credential. Neither a local Node process nor an outgoing EventSub WebSocket is required.
+The hosted world is public to watch. Resident writes require Twitch sign-in. Director controls and optional custom-app Twitch OAuth require the verified Twitch identity that owns the selected world. Public login is managed through Composio; see [public Twitch identity and ownership](PUBLIC_TWITCH.md). Twitch uses an API-only public ingress relay for one EventSub POST path; it forwards to the application’s fixed signed webhook using a server-only service credential. Neither a local Node process nor an outgoing EventSub WebSocket is required.
 
 ## OAuth callback and permissions
 
@@ -89,4 +89,4 @@ Both Workers were successfully published on 2026-11-02. Production D1 initially 
 
 To enable live connection, configure `TWITCH_CLIENT_ID` and `TWITCH_CLIENT_SECRET` in the world's Sites runtime settings, mark the secret sensitive, and redeploy the saved version to apply the environment revision. The exact redirect URI, public callback, generated webhook secret and token-encryption key are already configured server-side. Sign in as the world owner, open Director Studio and connect Twitch. Confirm actual signed Twitch challenge/subscription status and real event delivery before calling it live. Do not paste app secrets into chat or add them to frontend variables.
 
-Public access does not grant Director permissions. Viewer and service identities cannot start Twitch OAuth. The legacy `DEMO_DIRECTOR` audience shortcut was removed when public viewing was enabled. The configured owner email stays server-side.
+Public access does not grant Director permissions. Viewer and service identities cannot start Twitch OAuth. The legacy `DEMO_DIRECTOR` audience shortcut was removed when public viewing was enabled. World ownership is recorded server-side and scoped to the selected world.

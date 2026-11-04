@@ -1,0 +1,45 @@
+{
+  "checkedAt": "2026-11-04T13:27:00Z",
+  "operatorReportedComposioVerifierSaved": true,
+  "serverVerifierURL": "https://hello-world-miles-society.myles4miles.chatgpt.site/api/auth/twitch/verify",
+  "environmentRevision": 5,
+  "siteVersion": 12,
+  "githubCodeCommit": "4ce23b2b7d3b557215306105d4dc8c5da7ab98d4",
+  "siteSourceCommit": "8b9d4b264c9a0f067ceef5ed1837dc2fe819c883",
+  "deployment": {
+    "id": "appgdep_6aeb327db43c8191b7b4e40c21870d0f",
+    "status": "succeeded",
+    "url": "https://hello-world-miles-society.myles4miles.chatgpt.site"
+  },
+  "realStartTest": {
+    "appHTTP": 400,
+    "upstreamHTTP": 403,
+    "providerSlug": "ApiKey_InsufficientPermissions",
+    "safeErrorCode": "COMPOSIO_CONFIG_CREATE_HTTP_403_APIKEY_INSUFFICIENTPERMISSIONS",
+    "failedOperation": "POST auth_configs",
+    "consentLinkIssued": false,
+    "twitchAuthorized": false,
+    "userSessionCreated": false
+  },
+  "checks": {
+    "serverUnitTestsPassed": 95,
+    "unchangedEngineUnitTestsPreviouslyPassed": 109,
+    "worldAcceptance": 44,
+    "twitchAcceptance": 76,
+    "relayAcceptance": 31,
+    "typecheck": true,
+    "sitesBuild": true,
+    "publicSnapshotHTTP": 200,
+    "residentsPreserved": 13,
+    "readinessWhileSetupReview": false
+  },
+  "remainingOperatorAction": "Create replacement scoped project key with documented login permissions and replace COMPOSIO_API_KEY privately; redeploy saved version before retry",
+  "requiredProjectKeyPermissions": {
+    "Auth configs": "Read and write",
+    "Connected accounts": "Read and write",
+    "Session management": "Write only",
+    "Toolkits": "Read only",
+    "Proxy execute (Legacy)": "Write only"
+  },
+  "realConsentStillPending": true
+}

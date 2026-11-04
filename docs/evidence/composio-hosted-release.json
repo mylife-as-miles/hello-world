@@ -1,0 +1,49 @@
+{
+  "verifiedAt": "2026-11-04T08:20:54Z",
+  "githubCodeCommit": "0ce7bcbcbe99c7cf5b8a7cf391705ce651a90209",
+  "siteSourceCommit": "995e57ea3b1cad59b8cf6b1644255f2c49c82890",
+  "siteVersion": 8,
+  "deployment": {
+    "id": "appgdep_6aeaea879f108191947857250f84d167",
+    "status": "succeeded",
+    "url": "https://hello-world-miles-society.myles4miles.chatgpt.site",
+    "environmentRevision": 4
+  },
+  "audience": "public",
+  "directorAuthorization": "trusted Sites owner identity; service credential supplies no owner identity",
+  "checks": {
+    "unitTestsPassed": 169,
+    "hostedAcceptanceChecksPassed": 141,
+    "runtimeChecksPassed": 10,
+    "mockedBrowserUiChecksPassed": 9,
+    "typecheck": true,
+    "productionBuild": true,
+    "sitesBuild": true,
+    "cleanSiteTypecheckAndBuild": true,
+    "publicSnapshotHTTP": 200,
+    "residentIdsPreserved": 13,
+    "anonymousProofStatusHTTP": 401,
+    "anonymousProofConnectHTTP": 401,
+    "forgedOwnerProofConnectHTTP": 401,
+    "productionTablesConfirmed": [
+      "composio_profile_proofs",
+      "twitch_subscriptions",
+      "world_ingress"
+    ]
+  },
+  "composio": {
+    "secretConfiguredServerSide": true,
+    "secretExported": false,
+    "credentialBackedReadVerified": false,
+    "realConsentVerified": false,
+    "managedEventSubVerified": false,
+    "realWorldEventVerified": false
+  },
+  "remaining": [
+    "Owner must invoke the permission inspection and complete Twitch consent in the hosted owner session",
+    "Managed EventSub WebSocket creation and a continuously hosted listener remain unverified",
+    "Managed-app webhook app-token access is not established",
+    "No production hourly token-validation Cron is configured",
+    "Native OBS is unverified"
+  ]
+}

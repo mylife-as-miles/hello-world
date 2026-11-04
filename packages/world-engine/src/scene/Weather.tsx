@@ -87,9 +87,9 @@ void main() {
   float d = length(gl_PointCoord - 0.5);
   if (d > 0.5 || vA <= 0.0) discard;
 #ifdef HW_OVERLAY
-  // white core with a cool grey rim so flakes also read over bright footage
-  vec3 c = mix(vec3(0.7, 0.78, 0.9), vec3(1.0), smoothstep(0.38, 0.16, d));
-  gl_FragColor = vec4(c, smoothstep(0.5, 0.3, d) * 0.95 * vA);
+  // uniform light cool grey, opacity peaking at the centre: an almost-white soft flake over dark footage and a
+  // soft light-grey dot over bright footage (a brighter core than rim read as hollow rings on white)
+  gl_FragColor = vec4(0.86, 0.9, 0.97, smoothstep(0.5, 0.0, d) * 0.95 * vA);
 #else
   gl_FragColor = vec4(1.0, 1.0, 1.0, smoothstep(0.5, 0.15, d) * 0.92);
 #endif

@@ -400,6 +400,106 @@ Remaining:
 - **Tooling.** Playwright can't click Save because of an actionability timeout; a DOM click works.
 - **Triangles.** 300–450k normally, and 661k during a raid.
 
+### Round 9 (verified at `12d73f6`)
+
+Routed from cycle 8, one specialist agent per area:
+- **Simulation.**
+  - **Viewer social actions and gifts now meet in person.** The actor walks to a target more than 5 m away, jogs past 12 m, and the two meet halfway past 25 m. The payoff (reply, friendship, memory, hand-over) always lands within 9 s; if that cap is hit, it happens at the distance reached. A wave stays a wave across distance.
+  - **Grounded dialogue.** Lines claiming someone is dancing or on stage are re-checked when spoken. Across 4 worlds × 24 game hours, false claims went from 3 of 6 dancer lines and 9 of 35 stale "watching X dance" samples to 0.
+  - **Night watch.** Between 01:00 and 05:00, 2–3 locals are awake (3–6 before), with no dancing or arcade.
+- **Camera.**
+  - **Two-beat event shots in the world view and the overlay:**
+    - open on the actor, front three-quarter;
+    - follow the approach;
+    - cut to a two-shot once the pair is within 10 m;
+    - hold it for 2.4 s with both in frame.
+  - **Far pairs.** A pair still more than 26 m apart ends on the actor rather than a tiny wide shot.
+  - **Overlay framing.** Overlay shots favour the actor's front, and an asymmetric safe band leaves headroom for bubbles.
+  - **Follow framing guard.** Head and feet stay within ±0.8 NDC, with a minimum down-angle.
+  - **Street mode.** No see-through stipple, and poses avoid wide canopies near the lens.
+- **Effects.**
+  - **Confetti.** Actor confetti now pops at about 3.2 m, so it falls through close shots; the raid shower is unchanged.
+  - **Overlay weather.** Rain and snow now render on the overlay without breaking alpha, and sunset warms the light.
+  - **Weather toasts.**
+  - **Overlay furniture.** The stage is a faint decal, and furniture is drawn only while someone sits on it.
+- **Interactions.**
+  - **Edge bubbles.** A viewer chat from a speaker who is off screen, behind the camera or indoors is pinned to the screen edge as "NAME: text", with a chevron pointing toward the speaker. At most 2 show at once.
+  - **Raid chip.** It shows one stable number per raid, the same as the banner.
+  - **Label and bubble projection.** Labels and bubbles are projected with the camera the frame is actually drawn with (`scene.onBeforeRender`), which removes the one-frame drift.
+  - **LOD cleanup.** `LodBus` entries of departed residents are removed.
+- **Avatars.**
+  - **Afro.** The Afro is now a coiled, clustered volume at every LOD and works with hats.
+  - **Photoreal faces.** Skin and eye shading are better, and the outfit tint is consistent (no white collar).
+  - **Photoreal gestures.** Photoreal bodies gesture with the head and neck from `setExpression`. In the creator the strip reads "Gesture" for them, and Blink is hidden.
+
+Verified at `12d73f6` in an isolated worktree: tsc 0 errors, vitest **108/108** (12 files), build OK.
+
+Measured on the frozen build of `12d73f6` at quality=low, 1280×720:
+
+| View | Draw calls | Triangles |
+| --- | ---: | ---: |
+| Default | 75 | 328k |
+| Street | 70 | 429k |
+| Cinematic | 65 | 371k |
+| Follow | 76 | 328k |
+
+Overlay, with the same probe as before:
+
+| Moment | Median (range) | Clipped | Transparent |
+| --- | --- | --- | --- |
+| At rest | 47 px (37–60) | 0 | 93.2 % |
+| Gift Nova→PixelCat, +1.5 s / +2.5 s | 82 / 94 px, up to 238 px | 0 subjects; two bystanders partly in frame at +1.5 s | |
+| After the shot | 43 px | 0 | |
+
+In the gift frame, Nova is walking over to PixelCat with both in shot, under the banner "Nova gave PixelCat cupcake".
+
+A viewer chat burst right after a 40-viewer raid:
+- From +3.5 s, all 5 chats were visible with no overlaps, one first shown as an edge bubble.
+- The earlier empty readings at +2 s are SwiftShader's slow first frames.
+
+### Cycle 9 (01:58–02:24 UTC, frozen build of round-9 commit `12d73f6`): **8.0 / 10** (8.04 weighted; +0.19)
+
+Scores: world 7.9 · creator/avatars 7.9 · simulation 8.2 · interactions 8.3 · performance 7.9 · persistence 7.9. History: 6.9 → 7.2 → 7.4 → 7.6 → 7.7 → 7.7 → 7.7 → 7.85 → **8.04**.
+
+The critic's own runs: tsc 0 errors, vitest 108/108, 0 page or console errors in 12 browser runs. Its event conclusions come from unfrozen runs, because the render-clock freeze does not stop the simulation.
+
+Confirmed fixed:
+- **Overlay events.**
+  - Gift at 10 m: both at 138–146 px.
+  - Gift at 25 m: actor first, then both at 158–166 px for the payoff.
+  - Far greet at 32 m: the actor seen front-on at 126–151 px, then both at 154–173 px.
+  - Confetti falls inside the frame.
+  - Rain and snow show on the overlay, corners stay at alpha 0, and weather toasts appear.
+  - The raid chip reads "+40", matching the banner.
+  - Furniture appears only while someone sits on it.
+- **Camera and labels.** Street mode has no stipple, and the worst label drift is 9 px (69 px in cycle 8). Edge bubbles keep viewer chats visible with 0 overlaps.
+- **Simulation.**
+  - At night, about 80 % of residents are asleep from 00:00 to 05:00, with no dancing.
+  - Meetings pay off at 1.1–1.3 m within 3–8.5 s.
+- **Avatars.** The Afro has a coiled silhouette, and the photoreal outfit tint is consistent; the strip reads "Gesture" without Blink.
+- **Leaks.** The stale-map leaks are fixed.
+- **Persistence.** 27 of 27 residents and 28 of 28 relationships survive a reload.
+
+Remaining:
+- **Most damaging: the payoff in the main world view.** A gift or greet does not reliably show both people at the payoff.
+  - Gift at 10 m: the giver is off screen while the receiver thanks them.
+  - Gift at 26 m: the payoff appears only in a 42 px wide shot.
+  - Far greet: the target is off screen at the meeting.
+  - Part of this is avatar lag. Motion integrates `min(delta, 0.1)` per frame, so below about 10 fps avatars trail the simulation by metres, and the camera frames those lagging positions.
+- **Composition.**
+  - Follow mode is high-angle, with one overhead sample, and the subject can sit under the inspector panel.
+  - A café umbrella covers about 35 % of a street shot.
+  - Cinematic holds on an empty stage, and a nameplate is drawn over the HUD clock.
+  - When the overlay is crowded after a raid, the median resident is 26 px.
+  - Bystanders dominate some event shots.
+- **Simulation.**
+  - Sunset weather never expires: residents "admire the sunset" at night and at 10 AM.
+  - One dialogue template has a plural slip.
+- **Avatars and creator.**
+  - Photoreal emotes move only the head and neck, the eyes are dull, and the header thumbnail shows a Townie for photoreal bases.
+  - At maximum height, the creator's "Full body" view crops at the knees.
+- **Performance.** A raid spike now reaches 203 draw calls and 835k triangles (134 and 661k in cycle 8). Other views run 57–99 calls.
+
 ## Launch film
 
 A 21.2 s, 1920×1080, 30 fps silent launch cut was made from real product renders by a separate agent pair: footage capture plus a director working from the [cinetic](https://github.com/Leonxlnx/cinetic) skill (MIT). Remotion was skipped for time and the film was assembled with ffmpeg. The film is delivered outside the repository and is not committed.

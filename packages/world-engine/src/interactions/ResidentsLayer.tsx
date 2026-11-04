@@ -21,6 +21,7 @@ import { EmoteSystem, GiftSystem, InstancedEmoteSystem, makeBlobTexture, makeNam
 import { labelSightBlocked, PORTAL_LABEL_OCCLUDERS, WORLD_LABEL_OCCLUDERS, type LabelOccluder } from './labelOcclusion';
 import { BUBBLE_GAP, edgePin, overlaps, placeBubble, type BubbleSlot, type EdgePin, type Placement, type SafeArea } from './bubbleLayout';
 import { densestMember, raidChipCount, raidChipText } from './raidChip';
+import { stepMotion, type MotionState, type MotionStepResult } from './motion';
 
 /** Common surface of the sprite (high) and instanced (low) emote pools. */
 interface EmotePool {
@@ -1458,6 +1459,8 @@ const Resident = memo(function Resident(p: ResidentProps) {
     lastActivity: '', family: 'idle' as AnimationFamily, seat: null as null | { x: number; z: number; facing: number },
     sitting: false, frameSkip: 0, accDt: 0, emoteTimer: 1 + Math.random() * 2, snapAt: 0,
     distress: null as null | 'sulk' | 'nap' | 'bored' | 'lonely',
+    motion: { x: 0, z: 0, lagT: 0 } as MotionState,
+    step: { moved: 0, dt: 0, snapped: false } as MotionStepResult,
   });
 
   useEffect(() => {
@@ -1504,6 +1507,8 @@ const Resident = memo(function Resident(p: ResidentProps) {
   useFrame((state, delta) => {
     const g = groupRef.current;
     if (!g) return;
+    // Animation / emote timers keep the 0.1 s clamp (protects blending + springs); movement and facing integrate
+    // the real (bounded) frame time so avatars keep pace with the simulation at low fps (motion.ts).
     const dt = Math.min(delta, 0.1);
     const s = m.current;
     const r = store.getResident(id);
@@ -1521,7 +1526,7 @@ const Resident = memo(function Resident(p: ResidentProps) {
         const snapSpeed = Math.min(8, s.lastTarget.distanceTo(s.target) / interval);
         s.estSpeed = s.estSpeed * 0.45 + snapSpeed * 0.55;
       } else if (now - s.snapAt > store.snapshotInterval * 1.6) {
-        s.estSpeed *= Math.exp(-dt * 3);
+        s.estSpeed *= Math.exp(-Math.min(delta, 1) * 3);
       }
       // --- Activity → family / seat -----------------------------------------
       if (r.activity !== s.lastActivity) {
@@ -1553,18 +1558,16 @@ const Resident = memo(function Resident(p: ResidentProps) {
     const dx = goal.x - pos.x, dz = goal.z - pos.z;
     const dist = Math.hypot(dx, dz);
     const seated = sitFam && s.estSpeed < 0.3 && dist < 0.3;
-    let moved = 0;
-    if (dist > TELEPORT_DISTANCE) { pos.copy(goal); s.visSpeed = 0; }
-    else if (dist > 0.005) {
-      const lagTarget = s.estSpeed * (store.snapshotInterval / 1000);
-      const catchUp = s.estSpeed > 0.2 ? Math.min(1.6, Math.max(0.75, 1 + (dist - lagTarget) / Math.max(0.4, lagTarget * 2))) : 1;
-      const want = Math.max(s.estSpeed * catchUp, Math.min(1.4, dist * 2.2));
-      const step = Math.min(dist, want * dt);
-      pos.x += (dx / dist) * step; pos.z += (dz / dist) * step;
-      moved = step;
+    const mo = s.motion;
+    mo.x = pos.x; mo.z = pos.z;
+    const st = stepMotion(mo, goal.x, goal.z, s.estSpeed, store.snapshotInterval / 1000, delta, TELEPORT_DISTANCE, s.step);
+    pos.x = mo.x; pos.z = mo.z;
+    const mdt = st.dt;
+    if (st.snapped && dist > TELEPORT_DISTANCE) s.visSpeed = 0;
+    else {
+      const inst = mdt > 0 ? st.moved / mdt : 0;
+      s.visSpeed += (inst - s.visSpeed) * (1 - Math.exp(-mdt * 6));
     }
-    const inst = dt > 0 ? moved / dt : 0;
-    s.visSpeed += (inst - s.visSpeed) * (1 - Math.exp(-dt * 6));
 
     // --- Facing ---------------------------------------------------------------
     let desiredYaw: number | null = null;
@@ -1585,7 +1588,7 @@ const Resident = memo(function Resident(p: ResidentProps) {
         if (fx * fx + fz * fz > 0.04 && fx * fx + fz * fz < 400) desiredYaw = Math.atan2(fx, fz);
       }
     }
-    if (desiredYaw !== null) handle.yaw = angleLerp(handle.yaw, desiredYaw, 1 - Math.exp(-dt * (seated ? 5 : 7)));
+    if (desiredYaw !== null) handle.yaw = st.snapped && !seated ? desiredYaw : angleLerp(handle.yaw, desiredYaw, 1 - Math.exp(-mdt * (seated ? 5 : 7)));
     g.position.copy(pos);
     g.rotation.y = handle.yaw;
 

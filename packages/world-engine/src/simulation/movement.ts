@@ -98,14 +98,19 @@ export function moveAlong(a: Agent, budget: number): boolean {
   return a.path.length === 0;
 }
 
-const MIN_GAP = 0.7;
+export const MIN_GAP = 0.7;
 
-function anchored(a: Agent): boolean {
+/**
+ * Residents that must never be nudged: seated on a reserved seat or asleep in bed.
+ * Other "anchored" actions (a conversation spot, a standing gesture) are only
+ * soft-anchored — two standing chats must not stand inside each other.
+ */
+function fixed(a: Agent): boolean {
   const act = a.action;
-  return !!act && act.phase === 'perform' && act.anchored;
+  return !!act && act.phase === 'perform' && act.anchored && (!!act.seatKey || act.type === 'sleep' || !!act.night);
 }
 
-/** Soft separation: overlapping residents are nudged apart (seated/sleeping ones never move). */
+/** Soft separation: overlapping residents are nudged apart (seated/sleeping ones never move). Cheap: O(n²) with an AABB reject, deterministic. */
 export function separate(w: World): void {
   const list = [...w.agents.values()];
   for (let i = 0; i < list.length; i++) {
@@ -118,7 +123,7 @@ export function separate(w: World): void {
       if (dz > MIN_GAP || dz < -MIN_GAP) continue;
       const d2 = dx * dx + dz * dz;
       if (d2 >= MIN_GAP * MIN_GAP) continue;
-      const fa = anchored(a), fb = anchored(b);
+      const fa = fixed(a), fb = fixed(b);
       if (fa && fb) continue;
       let d = Math.sqrt(d2);
       let nx: number, nz: number;

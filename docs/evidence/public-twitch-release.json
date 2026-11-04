@@ -1,0 +1,42 @@
+{
+  "verifiedAt": "2026-11-04T10:03:31Z",
+  "githubCodeCommit": "7973a44d316153773c03e564fdb218cc3f335e9f",
+  "siteSourceCommit": "df5fd1b02205dcfc68a8616fbf42c299c9ab096a",
+  "siteVersion": 9,
+  "deployment": {
+    "id": "appgdep_6aeb024662e881919bfb0427bec5b608",
+    "status": "succeeded",
+    "url": "https://hello-world-miles-society.myles4miles.chatgpt.site",
+    "environmentRevision": 4
+  },
+  "audience": "public",
+  "identityModel": "Twitch users through Composio deferred OAuth verifier; per-streamer world ownership; no ChatGPT product sign-in",
+  "checks": {
+    "unitTests": 197,
+    "worldAcceptance": 44,
+    "twitchAcceptance": 76,
+    "relayAcceptance": 31,
+    "nodeRuntimeAcceptance": 10,
+    "mockedAuthBrowserAssertions": 13,
+    "realHostedBrowserAssertions": 5,
+    "realHostedBrowserErrors": 0,
+    "anonymousSnapshotHTTP": 200,
+    "preservedResidentIds": 13,
+    "anonymousResetHTTP": 401,
+    "unconfiguredLoginStartHTTP": 503,
+    "setupGateCode": "TWITCH_IDENTITY_VERIFIER_NOT_CONFIGURED",
+    "typecheck": true,
+    "build": true,
+    "sitesBuild": true,
+    "cleanSitesTypecheckAndBuild": true
+  },
+  "pending": {
+    "composioDashboardVerifierSetting": true,
+    "matchingRuntimeVerifierVariable": true,
+    "realTwitchConsent": true,
+    "realTwitchEvent": true,
+    "nativeOBS": true
+  },
+  "securityReview": "Deferred completion URI redemption and world isolation reviewed; no ACTIVE-only login fallback",
+  "logs": "Expected setup503 and authorization401 responses; one canceled browser poll; no exception outcome observed"
+}

@@ -56,3 +56,9 @@ Independent security review rejected an early ACTIVE-only prototype; it was neve
 The local Node/Twurple adapter remains a single-world development path with its existing private Director key. The public multi-world Twitch identity flow described here is implemented in the hosted Sites Worker/D1 adapter.
 
 References: [Composio callback identity verification](https://docs.composio.dev/reference/api-reference/connected-accounts#callback-identity-verification), [project settings](https://docs.composio.dev/reference/api-reference/projects#project-settings), [completeAuth SDK](https://docs.composio.dev/reference/sdk-reference/typescript/connected-accounts#completeauth), [Twitch integration research](COMPOSIO_TWITCH.md).
+
+## Published release
+
+Sites version **9** is live at the existing public URL, code `7973a44d316153773c03e564fdb218cc3f335e9f`, source `df5fd1b02205dcfc68a8616fbf42c299c9ab096a`, deployment `appgdep_6aeb024662e881919bfb0427bec5b608`. Production confirmed the new auth/ownership tables and preserved all 13 default-neighborhood resident IDs.
+
+The actual deployed page passed five signed-out Chromium checks: public app loading, visible setup gate, absence of ChatGPT sign-in links, Twitch-only resident login, and zero uncaught browser errors. [Current login screenshot](screenshots/public/twitch-login-v9.png) shows the real setup-pending state, not a completed login. Anonymous world writes remain 401; auth-start safely returns `TWITCH_IDENTITY_VERIFIER_NOT_CONFIGURED` (503) while the project/server verifier setup is pending. [Release evidence](evidence/public-twitch-release.json).

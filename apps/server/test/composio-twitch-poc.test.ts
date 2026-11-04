@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { beginManagedProfileProof, inspectManagedTwitch, readManagedProfileProof, requireComposioApproval, type ManagedProfileClient } from "../src/composio-twitch-poc.js";
+import { beginManagedProfileProof, inspectManagedTwitch, readManagedProfileProof, requireComposioApproval, normalizeProfileConfig, type ManagedProfileClient } from "../src/composio-twitch-poc.js";
 
 function fixture() {
   const client: ManagedProfileClient = {
@@ -13,6 +13,19 @@ function fixture() {
   return client;
 }
 describe("approval-gated Composio managed Twitch proof", () => {
+  it("reads explicit shared scope metadata without returning config secrets", () => {
+    const config = normalizeProfileConfig({ id: "ac_profile", name: "Profile", type: "default", toolkit: { slug: "twitch" }, status: "ENABLED",
+      credentials: { client_secret: "must-not-return" }, shared_connection_fields: { scopes: [] } });
+    expect(config.isComposioManaged).toBe(true); expect(config.credentials.scopes).toEqual([]);
+    expect(JSON.stringify(config)).not.toContain("must-not-return");
+  });
+  it("never invents empty scopes or overrides an explicit custom-config flag", () => {
+    const config = normalizeProfileConfig({ type: "default", is_composio_managed: false, credentials: { client_secret: "private" } });
+    expect(config.isComposioManaged).toBe(false); expect(config.credentials).toEqual({});
+  });
+  it("rejects conflicting scope representations instead of selecting the empty one", () => {
+    expect(() => normalizeProfileConfig({ credentials: { scopes: "user:read:email" }, shared_connection_fields: { scopes: [] } })).toThrow("CONFLICTING_CONFIG_SCOPES");
+  });
   it("requires distinct owner approvals before credential use or persistent authorization", async () => {
     expect(() => requireComposioApproval(undefined)).toThrow("OWNER_APPROVAL_REQUIRED");
     expect(() => requireComposioApproval("read-only", true)).toThrow("OWNER_APPROVAL_REQUIRED");

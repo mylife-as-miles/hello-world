@@ -30,8 +30,11 @@ async function providerCall<T>(stage: string, run: () => Promise<T>): Promise<T>
   catch (error) {
     if (error instanceof ComposioPocError) throw error;
     const e = object(error), status = e.status ?? e.statusCode;
-    const providerCode = object(e.error).code;
-    const code = typeof providerCode === "string" && /^[A-Z][A-Z0-9_]{1,63}$/.test(providerCode) ? `_${providerCode}` : "";
+    const envelope = object(e.error), provider = object(envelope.error);
+    const slug = provider.slug ?? envelope.slug;
+    const providerCode = provider.code ?? envelope.code;
+    const code = typeof slug === "string" && /^[a-z][a-z0-9_-]{1,80}$/i.test(slug) ? `_${slug.toUpperCase().replaceAll("-", "_")}`
+      : typeof providerCode === "string" && /^[A-Z][A-Z0-9_]{1,63}$/.test(providerCode) ? `_${providerCode}` : "";
     const suffix = Number.isInteger(status) && status >= 400 && status <= 599 ? `HTTP_${status}`
       : /abort|timeout/i.test(String(e.name || "")) ? "TIMED_OUT"
       : /validation|transform/i.test(String(e.name || "")) ? "RESPONSE_INVALID" : "FAILED";
@@ -50,8 +53,11 @@ export async function createManagedProfileClient(apiKey: string): Promise<Manage
     recoverProfileConfig: async () => {
       const list = await providerCall("CONFIG_RECOVERY", () => composio.authConfigs.list({ toolkit: "twitch", isComposioManaged: true, limit: 100 }, bounded()));
       if (list.items.length === 0 && !list.nextCursor) throw new ComposioPocError("COMPOSIO_CONFIG_NOT_FOUND");
-      const matches = list.items.filter(c => c.name === "HELLO WORLD profile-only proof" && c.status === "ENABLED");
-      if (matches.length !== 1) throw new ComposioPocError("COMPOSIO_CONFIG_RECOVERY_REQUIRES_REVIEW");
+      const named = list.items.filter(c => c.name === "HELLO WORLD profile-only proof" && c.status === "ENABLED");
+      const profileOnly = list.items.filter(c => c.isComposioManaged === true && c.toolkit.slug.toLowerCase() === "twitch" && c.status === "ENABLED" &&
+        (c.credentials?.scopes === "" || Array.isArray(c.credentials?.scopes) && c.credentials.scopes.length === 0));
+      const matches = named.length ? named : profileOnly;
+      if (matches.length !== 1 || list.nextCursor) throw new ComposioPocError("COMPOSIO_CONFIG_RECOVERY_REQUIRES_REVIEW");
       return { id: matches[0].id };
     },
     completeAuth: (userId, sessionUri) => composio.connectedAccounts.completeAuth({ userId, sessionUri }, bounded()),

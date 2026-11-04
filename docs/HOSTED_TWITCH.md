@@ -2,6 +2,8 @@
 
 Verified against official Twitch documentation on **2026-11-02**. This describes the hosted connection contract and release checks. It is not evidence of a successful broadcaster grant or real Twitch delivery: Twitch app credentials were unavailable during research.
 
+Updated **2026-11-04** with durable subscription identity and transactional world-ingress receipts. [Composio-managed OAuth investigation and approval-gated proof](COMPOSIO_TWITCH.md) are separate from this optional custom-app path; no managed or custom-app live connection has been established.
+
 The hosted world is public to watch. Resident writes require Sites sign-in. Director controls and Twitch OAuth require an authenticated identity whose trusted Sites email matches the server-configured `DIRECTOR_OWNER_EMAIL`. Missing owner configuration fails closed. Twitch uses an API-only public ingress relay for one EventSub POST path; it forwards to the application’s fixed signed webhook using a server-only service credential. Neither a local Node process nor an outgoing EventSub WebSocket is required.
 
 ## OAuth callback and permissions
@@ -36,7 +38,7 @@ Send `POST https://api.twitch.tv/helix/eventsub/subscriptions` with `Authorizati
 }
 ```
 
-Set `TWITCH_EVENTSUB_CALLBACK` to `https://hello-world-miles-events.myles4miles.chatgpt.site/api/twitch/eventsub`. This public webhook callback is separate from the owner-authenticated OAuth callback above. The relay intentionally translates its public `/api/twitch/eventsub` path to the receiver at `https://hello-world-miles-society.myles4miles.chatgpt.site/api/twitch/webhook`. Keep this existing relay callback registered: it also preserves webhook delivery if the world is made private later. The shared secret must be 10–100 ASCII characters; 32 cryptographically random bytes encoded as 64 hex characters is suitable. It stays in hosted secrets. HTTPS port 443 is required, and Twitch does not follow callback redirects. [Create EventSub Subscription](https://dev.twitch.tv/docs/api/reference/#create-eventsub-subscription).
+Set `TWITCH_EVENTSUB_CALLBACK` to `https://hello-world-miles-events.myles4miles.chatgpt.site/api/twitch/eventsub`. This public webhook callback is separate from the owner-authenticated OAuth callback above. The relay intentionally translates its public `/api/twitch/eventsub` path to the receiver at `https://hello-world-miles-society.myles4miles.chatgpt.site/api/twitch/webhook`. Keep this existing relay callback registered: it also preserves webhook delivery if the world is made private later. Twitch accepts 10–100 ASCII characters; this application requires 32–100 printable ASCII characters; 32 cryptographically random bytes encoded as 64 hex characters is suitable. It stays in hosted secrets. HTTPS port 443 is required, and Twitch does not follow callback redirects. [Create EventSub Subscription](https://dev.twitch.tv/docs/api/reference/#create-eventsub-subscription).
 
 With `B` equal to the authenticated broadcaster's numeric Twitch ID:
 
@@ -51,7 +53,9 @@ With `B` equal to the authenticated broadcaster's numeric Twitch ID:
 
 A redemption condition can optionally include `reward_id`. Always retain the server's action allowlist. Incoming raid conditions must not also include `from_broadcaster_user_id`. New subscriptions do not include resubscriptions; the subscription-message receiver handles resub messages. [Subscription definitions](https://dev.twitch.tv/docs/eventsub/eventsub-subscription-types/).
 
-An HTTP 202 creation response initially means `webhook_callback_verification_pending`. Do not label it connected until a valid callback verification/confirmed enabled status exists. Save per-subscription IDs, type, condition, and status; report failures and revocations. Avoid duplicate subscriptions when reconnecting. [Subscription lifecycle](https://dev.twitch.tv/docs/eventsub/manage-subscriptions/).
+An HTTP 202 creation response initially means `webhook_callback_verification_pending`. Migration `0003_twitch_delivery.sql` adds a durable subscription registry. Creation records the exact type/version/condition/callback before the Helix call, binds the returned ID, and safely handles a challenge racing the creation response. A 409 requires matching the existing subscription from Helix; it does not establish connectivity by itself. 429/5xx records a bounded durable retry time honoring `Retry-After`/`Ratelimit-Reset`; reconnect attempts before it expires skip that subscription. Automatic retry scheduling is not configured. [Subscription lifecycle](https://dev.twitch.tv/docs/eventsub/manage-subscriptions/).
+
+Live Mode now requires a fresh validated grant, an enabled registered subscription, **and an accepted signed notification that changed/queued an authoritative world action**. A challenge alone keeps the world in Demo Mode. This runtime signal is not a substitute for a human-reviewed real-event acceptance record.
 
 ## Public ingress and authenticated delivery
 
@@ -63,11 +67,13 @@ The receiver authenticates **every** EventSub message, including challenges and 
 2. Require message ID, timestamp, signature, and supported message type headers. Header names are case-insensitive.
 3. Verify `sha256=` plus HMAC-SHA256 of the concatenation `message ID + original timestamp string + raw body`, using the subscription secret and constant-time/WebCrypto signature verification. Reject mismatches with 4xx.
 4. Reject invalid timestamps and timestamps older than ten minutes. Bound future clock skew as an explicit application policy.
-5. Validate the signed payload, subscription type/version/condition, configured broadcaster, and allowlisted action before any world change.
+5. Require header/body type and version agreement, the registered subscription ID, exact canonical condition and callback, configured broadcaster in both subscription and notification, enabled status, and an allowlisted action before any world change. A signed challenge for an unknown/revoked subscription is rejected.
 
 [Official verification procedure](https://dev.twitch.tv/docs/eventsub/handling-webhook-events/).
 
-Twitch retries deliveries with the same message ID. Use a durable unique message-ID receipt in D1 and apply each accepted notification once; in-memory deduplication is insufficient across Worker instances. Acknowledge only after durable acceptance, and process quickly enough to avoid delivery-failure revocation. A previously accepted duplicate should receive a successful acknowledgement without another world action. [Duplicates and replay protection](https://dev.twitch.tv/docs/eventsub/).
+Twitch retries deliveries with the same message ID. A token-owned D1 message lease prevents overlapping handlers; each accepted normalized action also has a permanent `world_ingress` receipt committed **in the same D1 transaction as its world snapshot/settings/moderation state**. A lost revision comparison rolls the transaction back. A crash after commit but before acknowledgement cannot duplicate the action even after the bounded event history is cleared. Do not delete these ingress receipts while notifications can be replayed. Previously accepted duplicates receive 204 without another world action. No AI work runs in this path. [Duplicates and replay protection](https://dev.twitch.tv/docs/eventsub/).
+
+Token validation/refresh no longer depends on a Director tab: public API traffic runs maintenance, and a notification with stale validation defers maintenance using `waitUntil` and returns 503 for Twitch to retry. There is also a scheduled Worker entrypoint for hosts with Cron support. **No hourly production Cron is currently configured**, so an entirely idle deployment is not claimed to validate every hour. Public-reader, scheduled-entrypoint and stale-webhook retries are tested with mocked Twitch responses; an always-idle production schedule and real refresh/revocation remain unverified.
 
 For `webhook_callback_verification`, return HTTP 200 with the **raw challenge string only**, `text/plain`, and its correct byte Content-Length. For `notification`, return a quick successful 2xx after durable acceptance. For signed `revocation`, update the stored subscription status and return 204. The webhook handler must not require a browser cookie or owner login; its authority comes from the valid Twitch signature and configured subscription. This exception applies only to the webhook path, never to Director controls.
 
@@ -79,7 +85,7 @@ A signed synthetic challenge test is useful protocol evidence but is not proof T
 
 ## Deployed verification
 
-Both Workers were successfully published on 2026-11-02. Production D1 contains the world, presence, OAuth state, encrypted-account and webhook-receipt tables. A signed **synthetic** challenge traversed the anonymous relay, Sites service access and private webhook and returned exact plaintext (200); retry returned the same challenge (200), and tampering was rejected (403). This does not establish an actual Twitch grant or subscription. The world remains labeled Demo Mode because Twitch app ID/secret and broadcaster consent are unavailable. See [deployment evidence](evidence/sites-deployment.json).
+Both Workers were successfully published on 2026-11-02. Production D1 initially contained the world, presence, OAuth state, encrypted-account and webhook-receipt tables. A signed **synthetic** challenge traversed the anonymous relay, Sites service access and private webhook and returned exact plaintext (200); retry returned the same challenge (200), and tampering was rejected (403). That historical test predates the stricter subscription registry: an unregistered synthetic challenge is now rejected. It does not establish an actual Twitch grant or subscription. The world remains labeled Demo Mode because Twitch app ID/secret and broadcaster consent are unavailable. See [deployment evidence](evidence/sites-deployment.json).
 
 To enable live connection, configure `TWITCH_CLIENT_ID` and `TWITCH_CLIENT_SECRET` in the world's Sites runtime settings, mark the secret sensitive, and redeploy the saved version to apply the environment revision. The exact redirect URI, public callback, generated webhook secret and token-encryption key are already configured server-side. Sign in as the world owner, open Director Studio and connect Twitch. Confirm actual signed Twitch challenge/subscription status and real event delivery before calling it live. Do not paste app secrets into chat or add them to frontend variables.
 

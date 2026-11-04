@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { readFileSync } from "node:fs";
 import worker from "../apps/server/src/sites-worker.ts";
+import { sqliteD1 } from "./helpers/sqlite-d1.ts";
 let checks = 0;
 const eq = (a: unknown, b: unknown) => {
   assert.deepEqual(a, b);
@@ -16,40 +17,24 @@ const ok = (a: unknown) => {
 };
 async function main() {
   const sqlite = new DatabaseSync(":memory:");
-  for (const name of ["0001_world.sql", "0002_twitch.sql"])
+  for (const name of ["0001_world.sql", "0002_twitch.sql", "0003_twitch_delivery.sql"])
     sqlite.exec(
       readFileSync(
         new URL("../apps/server/sites-migrations/" + name, import.meta.url),
         "utf8",
       ),
     );
-  const db = {
-    prepare(sql: string) {
-      let args: unknown[] = [];
-      const s = {
-        bind(...v: unknown[]) {
-          args = v;
-          return s;
-        },
-        async first<T>() {
-          await Promise.resolve();
-          return (sqlite.prepare(sql).get(...(args as SQLInputValue[])) ||
-            null) as T | null;
-        },
-        async run() {
-          await Promise.resolve();
-          return {
-            meta: {
-              changes: Number(
-                sqlite.prepare(sql).run(...(args as SQLInputValue[])).changes,
-              ),
-            },
-          };
-        },
-      };
-      return s;
-    },
-  };
+  const baseDb = sqliteD1(sqlite);
+  let failAcknowledgement = false;
+  const db = { ...baseDb, prepare(sql: string) {
+    const statement = baseDb.prepare(sql);
+    const run = statement.run.bind(statement);
+    if (sql.startsWith("UPDATE twitch_webhook_messages SET completed")) statement.run = async () => {
+      if (failAcknowledgement) { failAcknowledgement = false; throw new Error("Injected crash after world commit, before receipt acknowledgement"); }
+      return run();
+    };
+    return statement;
+  } };
   const env = {
     WORLD_DB: db,
     ASSETS: { fetch: async () => new Response("asset") },
@@ -108,9 +93,10 @@ async function main() {
     }
     if (url.endsWith("/helix/eventsub/subscriptions")) {
       eq(init.headers.Authorization, "Bearer test-app-access");
-      subscriptions.push(JSON.parse(init.body));
+      const subscription = JSON.parse(init.body);
+      subscriptions.push(subscription);
       return Response.json(
-        { data: [{ status: "webhook_callback_verification_pending" }] },
+        { data: [{ ...subscription, id: `sub-${subscription.type.replaceAll(".", "-")}`, status: "webhook_callback_verification_pending" }] },
         { status: 202 },
       );
     }
@@ -192,6 +178,7 @@ async function main() {
         .status,
       403,
     );
+    let webhookContext: { waitUntil(task: Promise<unknown>): void } | undefined;
     const webhook = async (
       payload: any,
       type: string,
@@ -199,7 +186,10 @@ async function main() {
       timestamp = new Date().toISOString(),
       tamper = false,
       rawPrefix = "",
+      extraHeaders: Record<string, string> = {},
     ) => {
+      if (type === "webhook_callback_verification" && payload.subscription?.status === "enabled")
+        payload = { ...payload, subscription: { ...payload.subscription, status: "webhook_callback_verification_pending" } };
       const raw = rawPrefix + JSON.stringify(payload);
       const key = await crypto.subtle.importKey(
         "raw",
@@ -224,13 +214,18 @@ async function main() {
             "Twitch-Eventsub-Message-Timestamp": timestamp,
             "Twitch-Eventsub-Message-Type": type,
             "Twitch-Eventsub-Message-Signature": "sha256=" + signature,
+            "Twitch-Eventsub-Subscription-Type": payload.subscription?.type || "",
+            "Twitch-Eventsub-Subscription-Version": payload.subscription?.version || "",
+            ...extraHeaders,
           },
           body: tamper ? raw + " " : raw,
         }),
-        env,
+        env, webhookContext,
       );
     };
     const subscription = {
+      id: "sub-channel-chat-message", version: "1",
+      transport: { method: "webhook", callback: env.TWITCH_EVENTSUB_CALLBACK },
       type: "channel.chat.message",
       condition: { broadcaster_user_id: "123", user_id: "123" },
       status: "enabled",
@@ -262,6 +257,7 @@ async function main() {
     );
     eq(challenge.status, 200);
     eq(await challenge.text(), "challenge-exact");
+    eq(((await (await request("/api/status")).json()) as any).mode, "demo");
     eq(
       await (
         await webhook(
@@ -310,7 +306,7 @@ async function main() {
     const payload = {
       subscription,
       event: {
-        chatter_user_id: "42",
+        broadcaster_user_id: "123", chatter_user_id: "42",
         chatter_user_name: "Ada",
         message: { text: "!join" },
       },
@@ -336,7 +332,7 @@ async function main() {
           {
             subscription,
             event: {
-              chatter_user_id: user,
+              broadcaster_user_id: "123", chatter_user_id: user,
               chatter_user_name: "Guest" + user,
               message: { text: "!join" },
             },
@@ -371,6 +367,53 @@ async function main() {
       ).status,
       403,
     );
+    // Signed payloads still need this application's exact subscription identity.
+    for (const changed of [
+      { ...subscription, id: "unknown-subscription" },
+      { ...subscription, version: "9" },
+      { ...subscription, condition: { ...subscription.condition, unexpected: "another-scope" } },
+      { ...subscription, transport: { method: "webhook", callback: "https://another.test/events" } },
+    ]) eq((await webhook({ subscription: changed, event: payload.event }, "notification")).status, 403);
+    eq((await webhook({ subscription, event: { ...payload.event, broadcaster_user_id: "999" } }, "notification")).status, 403);
+    eq((await webhook(payload, "notification", crypto.randomUUID(), new Date().toISOString(), false, "", { "Twitch-Eventsub-Subscription-Version": "9" })).status, 403);
+
+    // A public reader and scheduled hook validate tokens without the Director tab.
+    const beforePublicValidation = validations;
+    sqlite.prepare("UPDATE twitch_accounts SET validated_at = ?").run(Date.now() - 3600001);
+    await request("/api/status", "");
+    ok(validations > beforePublicValidation);
+    const beforeScheduledValidation = validations;
+    sqlite.prepare("UPDATE twitch_accounts SET validated_at = ?").run(Date.now() - 3600001);
+    await worker.scheduled({}, env);
+    ok(validations > beforeScheduledValidation);
+
+    // Stale grant: return retry promptly and validate outside the webhook response.
+    const deferred: Promise<unknown>[] = [];
+    webhookContext = { waitUntil(task) { deferred.push(task); } };
+    sqlite.prepare("UPDATE twitch_accounts SET validated_at = ?").run(Date.now() - 3600001);
+    const staleId = crypto.randomUUID();
+    eq((await webhook(payload, "notification", staleId)).status, 503);
+    eq(deferred.length, 1);
+    await Promise.all(deferred);
+    webhookContext = undefined;
+    eq((await webhook(payload, "notification", staleId)).status, 204);
+
+    // Fault window: the world committed, then the process failed to acknowledge.
+    // Event history is evicted before the retry; the durable ingress ledger still wins.
+    const crashId = crypto.randomUUID();
+    const crashPayload = { subscription, event: { ...payload.event, chatter_user_id: "90", chatter_user_name: "Crash proof" } };
+    failAcknowledgement = true;
+    eq((await webhook(crashPayload, "notification", crashId)).status, 503);
+    const committed = JSON.parse((sqlite.prepare("SELECT snapshot_json FROM worlds").get() as any).snapshot_json);
+    ok(committed.residents.some((r: any) => r.id === "twitch:90"));
+    committed.eventHistory = [];
+    sqlite.prepare("UPDATE worlds SET snapshot_json = ?, revision = revision + 1").run(JSON.stringify(committed));
+    eq((await webhook(crashPayload, "notification", crashId)).status, 204);
+    const retried = JSON.parse((sqlite.prepare("SELECT snapshot_json FROM worlds").get() as any).snapshot_json);
+    eq(retried.eventHistory.some((e: any) => e.id === "twitch:webhook:" + crashId), false);
+    eq((sqlite.prepare("SELECT COUNT(*) AS n FROM world_ingress WHERE event_id = ?").get("twitch:webhook:" + crashId) as any).n, 1);
+    eq((sqlite.prepare("SELECT completed FROM twitch_webhook_messages WHERE id = ?").get(crashId) as any).completed, 1);
+
     eq(
       (
         await webhook(
@@ -415,7 +458,7 @@ async function main() {
     sqlite
       .prepare("UPDATE twitch_accounts SET validated_at = ?")
       .run(Date.now() - 3600001);
-    await request("/api/status");
+    await request("/api/status", "");
     ok(validations > beforeValidation);
     const beforeRefresh = refreshes;
     sqlite
@@ -453,7 +496,7 @@ async function main() {
       (sqlite.prepare("SELECT token_cipher FROM twitch_accounts").get() as any)
         .token_cipher,
     );
-    encrypted.cipher = "A" + encrypted.cipher.slice(1);
+    encrypted.cipher = (encrypted.cipher[0] === "A" ? "B" : "A") + encrypted.cipher.slice(1);
     sqlite
       .prepare("UPDATE twitch_accounts SET token_cipher = ?, validated_at = ?")
       .run(JSON.stringify(encrypted), Date.now() - 3600001);
@@ -471,7 +514,7 @@ async function main() {
           {
             subscription,
             event: {
-              chatter_user_id: "999",
+              broadcaster_user_id: "123", chatter_user_id: "999",
               chatter_user_name: "Blocked",
               message: { text: "!join" },
             },
@@ -490,7 +533,7 @@ async function main() {
       ),
       false,
     );
-    // Even a valid late challenge cannot revive a failed OAuth session.
+    // A valid late challenge cannot revive a failed OAuth session.
     eq(
       (
         await webhook(
@@ -498,7 +541,7 @@ async function main() {
           "webhook_callback_verification",
         )
       ).status,
-      200,
+      403,
     );
     eq(((await (await request("/api/status")).json()) as any).mode, "demo");
     console.log(
@@ -510,6 +553,7 @@ async function main() {
         signedWebhookDispatch: true,
         persistentDedupe: true,
         wrongAccountPreservesToken: true,
+        crashAfterCommitRetry: true, historyEvictionSafe: true, registeredSubscriptionIdentity: true, directorClosedMaintenance: true,
       }),
     );
   } finally {

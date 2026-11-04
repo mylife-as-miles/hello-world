@@ -3,3 +3,6 @@ packages:
   - packages/*
 allowBuilds:
   esbuild: true
+minimumReleaseAgeExclude:
+  - '@composio/client@2.0.1'
+  - '@composio/core@0.28.0'

@@ -12,7 +12,8 @@
     "test:browser": "node tests/browser-smoke.mjs",
     "test:runtime": "pnpm --filter @hello-world/server exec tsx ../../tests/runtime-acceptance.ts",
     "build:sites": "node scripts/build-sites.mjs",
-    "test:webgpu": "node tests/webgpu-smoke.mjs"
+    "test:webgpu": "node tests/webgpu-smoke.mjs",
+    "twitch:composio:poc": "pnpm --filter @hello-world/server exec tsx src/composio-twitch-cli.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

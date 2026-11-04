@@ -31,6 +31,7 @@ interface D1Statement {
 }
 interface D1Database {
   prepare(query: string): D1Statement;
+  batch?(statements: D1Statement[]): Promise<Array<{ meta?: { changes?: number } }>>;
 }
 interface WorkerEnv extends HostedTwitchEnv {
   WORLD_DB: D1Database;
@@ -237,6 +238,11 @@ async function mutate(
       pending: JSON.parse(row.pending_json),
       limits: JSON.parse(row.limits_json),
     };
+    if (trusted) {
+      const receipt = await env.WORLD_DB.prepare("SELECT applied_revision FROM world_ingress WHERE world_id = ? AND event_id = ?")
+        .bind(row.id, trusted.event.id).first<{ applied_revision: number }>();
+      if (receipt?.applied_revision) return { row, data };
+    }
     let runtime = createWorldRuntime({
       worldId: row.id,
       initialSnapshot: data.snapshot,
@@ -372,10 +378,7 @@ async function mutate(
       }
       data.snapshot = runtime.getSnapshot();
       if (!changed) return { row, data };
-      const result = await env.WORLD_DB.prepare(
-        "UPDATE worlds SET snapshot_json = ?, settings_json = ?, pending_json = ?, limits_json = ?, revision = revision + 1, updated_at = ? WHERE id = ? AND revision = ?",
-      )
-        .bind(
+      const values = [
           JSON.stringify(data.snapshot),
           JSON.stringify(data.settings),
           JSON.stringify(data.pending),
@@ -383,8 +386,34 @@ async function mutate(
           updatedAt,
           row.id,
           row.revision,
-        )
-        .run();
+        ];
+      let result: { meta?: { changes?: number } };
+      if (trusted) {
+        if (!env.WORLD_DB.batch) throw new ApiError("Atomic event storage is unavailable.", 503);
+        const token = crypto.randomUUID();
+        try {
+          // D1 executes a batch in one transaction. The CHECK constraint rolls
+          // back the receipt as well as the world if this revision lost its CAS.
+          // Thus a crash after commit cannot replay an action after history eviction.
+          const results = await env.WORLD_DB.batch([
+            env.WORLD_DB.prepare("INSERT OR IGNORE INTO world_ingress (world_id, event_id, commit_token, applied_revision, received_at) VALUES (?, ?, ?, 0, ?)").bind(row.id, trusted.event.id, token, now),
+            env.WORLD_DB.prepare("UPDATE worlds SET snapshot_json = ?, settings_json = ?, pending_json = ?, limits_json = ?, revision = revision + 1, updated_at = ?, last_ingress_token = ? WHERE id = ? AND revision = ? AND EXISTS (SELECT 1 FROM world_ingress WHERE world_id = ? AND event_id = ? AND commit_token = ?)")
+              .bind(...values.slice(0, 5), token, row.id, row.revision, row.id, trusted.event.id, token),
+            env.WORLD_DB.prepare("UPDATE world_ingress SET applied_revision = CASE WHEN (SELECT last_ingress_token FROM worlds WHERE id = ?) = ? THEN ? ELSE -1 END WHERE world_id = ? AND event_id = ? AND commit_token = ?")
+              .bind(row.id, token, row.revision + 1, row.id, trusted.event.id, token),
+          ]);
+          result = results[1];
+          if (!result.meta?.changes) {
+            const current = await getWorld(env);
+            return { row: current, data: { snapshot: parseSnapshot(JSON.parse(current.snapshot_json)), settings: JSON.parse(current.settings_json), pending: JSON.parse(current.pending_json), limits: JSON.parse(current.limits_json) } };
+          }
+        } catch (error) {
+          if (/CHECK constraint failed.*applied_revision/i.test(String(error))) continue;
+          throw error;
+        }
+      } else result = await env.WORLD_DB.prepare(
+        "UPDATE worlds SET snapshot_json = ?, settings_json = ?, pending_json = ?, limits_json = ?, revision = revision + 1, updated_at = ? WHERE id = ? AND revision = ?",
+      ).bind(...values).run();
       if (result.meta?.changes)
         return {
           row: { ...row, revision: row.revision + 1, updated_at: updatedAt },
@@ -397,7 +426,9 @@ async function mutate(
   throw new ApiError("The world is busy. Please try your action again.", 409);
 }
 export default {
-  async fetch(request: Request, env: WorkerEnv): Promise<Response> {
+  // Hosts with Cron support can invoke this without any Director tab open.
+  async scheduled(_controller: unknown, env: WorkerEnv) { await maintainHostedTwitch(env); },
+  async fetch(request: Request, env: WorkerEnv, context?: { waitUntil(task: Promise<unknown>): void }): Promise<Response> {
     const url = new URL(request.url);
     if (!url.pathname.startsWith("/api/")) {
       // Sites' asset host does not apply Vite's history fallback to deep links.
@@ -445,6 +476,7 @@ export default {
                   { type: "event", event },
                   { event, system },
                 );
+                return true;
               } catch (error) {
                 if (
                   !(error instanceof ApiError) ||
@@ -452,9 +484,11 @@ export default {
                   error.status === 409
                 )
                   throw error;
+                return false;
               }
             },
           },
+          context ? task => context.waitUntil(task) : undefined,
         );
       }
       const known = [
@@ -498,7 +532,8 @@ export default {
         }
       }
       const director = await isWorldDirector(request, env, viewerId);
-      if (director) await maintainHostedTwitch(env);
+      // Token health is independent of who is viewing the world.
+      await maintainHostedTwitch(env);
       const twitchStatus = await hostedTwitchStatus(env);
       const { row, data } =
         url.pathname === "/api/status" || url.pathname === "/api/health"

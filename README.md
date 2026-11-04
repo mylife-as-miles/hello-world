@@ -12,7 +12,7 @@ The world is public to watch, including the OBS browser-source route. Creating a
 
 ## Run locally
 
-Requires Node.js 22+ and pnpm 10.28+.
+Requires Node.js 22.22.3+ and pnpm 10.28+.
 
 ```bash
 git clone https://github.com/mylife-as-miles/hello-world.git
@@ -51,6 +51,8 @@ The browser identity and Twitch account identity are separate in this slice. Lin
 ## Twitch
 
 See [Twitch configuration and permissions](docs/TWITCH.md) and [verified integration research](docs/RESEARCH.md).
+
+[Composio-managed OAuth investigation](docs/COMPOSIO_TWITCH.md) includes an approval-gated basic-profile proof (`pnpm twitch:composio:poc --mode=plan`). Managed OAuth is documented, but real consent/read/event delivery have not been verified. No Composio credentials are needed to run the Demo world.
 
 The local Node server uses Twurple with authenticated IRC for chat commands and EventSub WebSockets for subscriptions, approved reward redemptions, and incoming raids. Broadcaster authorization and the correct scopes are required; available capabilities and failures are reported honestly. Access tokens, refresh tokens, and client secrets remain on the server.
 

@@ -1,4 +1,5 @@
 /** Hosted Twitch HTTP OAuth/EventSub adapter. All token handling stays inside Workers/D1. */
+import { subscriptionIntent, subscriptionRecord, bindCreatedSubscription, checkWebhookSubscription, markSubscription, deferSubscription, conditionKey } from "./twitch-subscriptions.js";
 import type {
   WorldEvent,
   WorldSnapshot,
@@ -32,6 +33,8 @@ interface Account {
   validated_at: number;
   refresh_lock: number;
   capabilities_json: string;
+  last_event_at: number;
+  last_event_id: string | null;
 }
 interface Token {
   access_token: string;
@@ -48,7 +51,7 @@ interface TokenInfo {
 }
 export interface TwitchDispatch {
   getSnapshot(): Promise<WorldSnapshot>;
-  dispatch(event: WorldEvent, system: boolean): Promise<void>;
+  dispatch(event: WorldEvent, system: boolean): Promise<boolean>;
 }
 export const HOSTED_TWITCH_SCOPES = [
   "user:read:chat",
@@ -109,14 +112,16 @@ export async function twitchOwnerAllowed(env: HostedTwitchEnv, actor: string) {
 }
 function configured(env: HostedTwitchEnv) {
   try {
+    const redirect = new URL(env.TWITCH_REDIRECT_URI || "");
+    const callback = new URL(env.TWITCH_EVENTSUB_CALLBACK || "");
+    const safeUrl = (url: URL) => url.protocol === "https:" && !url.username && !url.password && !url.search && !url.hash && !url.port;
     return Boolean(
       env.TWITCH_CLIENT_ID &&
       env.TWITCH_CLIENT_SECRET &&
       env.TWITCH_REDIRECT_URI &&
-      new URL(env.TWITCH_REDIRECT_URI).protocol === "https:" &&
-      new URL(env.TWITCH_REDIRECT_URI).pathname === "/api/twitch/callback" &&
+      safeUrl(redirect) && redirect.pathname === "/api/twitch/callback" &&
       env.TWITCH_EVENTSUB_CALLBACK &&
-      new URL(env.TWITCH_EVENTSUB_CALLBACK).protocol === "https:" &&
+      safeUrl(callback) &&
       env.TWITCH_WEBHOOK_SECRET &&
       env.TWITCH_WEBHOOK_SECRET.length >= 32 &&
       env.TWITCH_WEBHOOK_SECRET.length <= 100 &&
@@ -140,12 +145,19 @@ export async function hostedTwitchStatus(env: HostedTwitchEnv) {
   if (!configured(env))
     capabilities.authorization =
       "server app credentials, encryption key and public webhook callback required";
+  capabilities["world-events"] = row?.last_event_at ? "A signed Twitch notification changed the authoritative world" : "No Twitch world event verified yet";
+  let registered = 0;
+  if (row?.broadcaster_id) {
+    try {
+      const count = await env.WORLD_DB.prepare("SELECT COUNT(*) AS count FROM twitch_subscriptions WHERE world_id = ? AND status = 'enabled' AND (json_extract(condition_json, '$.broadcaster_user_id') = ? OR json_extract(condition_json, '$.to_broadcaster_user_id') = ?)")
+        .bind(world(env), row.broadcaster_id, row.broadcaster_id).first<{ count: number }>();
+      registered = count?.count || 0;
+    } catch { /* A missing migration never counts as live. */ }
+  }
   const live = Boolean(
     row?.token_cipher &&
     capabilities.authorization?.startsWith("authorized ") &&
-    Object.entries(capabilities).some(
-      ([key, value]) => key.startsWith("channel.") && value === "enabled",
-    ),
+    Date.now() - row.validated_at < 3600000 && row.expires_at > Date.now() && registered > 0 && row.last_event_at > 0,
   );
   return {
     oauthConfigured: configured(env),
@@ -294,8 +306,11 @@ async function subscriptions(env: HostedTwitchEnv, info: TokenInfo) {
     const missing = required.filter((scope) => !scopes.has(scope));
     if (missing.length) {
       await capability(env, type, `missing ${missing.join(", ")}`);
+      await env.WORLD_DB.prepare("UPDATE twitch_subscriptions SET status='disabled', updated_at=? WHERE world_id=? AND type=?")
+        .bind(Date.now(), world(env), type).run();
       continue;
     }
+    if (!(await subscriptionIntent(env, type, condition))) continue;
     await capability(env, type, "pending verification");
     const result = await twitchFetch(
       "https://api.twitch.tv/helix/eventsub/subscriptions",
@@ -318,18 +333,26 @@ async function subscriptions(env: HostedTwitchEnv, info: TokenInfo) {
         }),
       },
     );
-    if (!result.ok && result.status !== 409)
-      await capability(
-        env,
-        type,
-        `subscription failed (HTTP ${result.status})`,
-      );
-    if (result.status === 409)
-      await capability(
-        env,
-        type,
-        "existing subscription; awaiting signed delivery",
-      );
+    if (result.status === 429 || result.status >= 500) {
+      const retryAt = await deferSubscription(env, type, result);
+      await capability(env, type, `subscription retry after ${new Date(retryAt).toISOString()}`);
+      continue;
+    }
+    if (result.status === 409) {
+      const existing = await twitchFetch(`https://api.twitch.tv/helix/eventsub/subscriptions?type=${encodeURIComponent(type)}`, {
+        headers: { Authorization: `Bearer ${app.access_token}`, "Client-Id": env.TWITCH_CLIENT_ID! },
+      });
+      const body = existing.ok ? await existing.json() as { data?: any[] } : {};
+      const match = body.data?.find(sub => sub.version === "1" && conditionKey(sub.condition) === conditionKey(condition) && sub.transport?.method === "webhook" && sub.transport.callback === env.TWITCH_EVENTSUB_CALLBACK);
+      if (match) {
+        const row = await bindCreatedSubscription(env, type, match);
+        await capability(env, type, row.status === "enabled" ? "enabled" : "pending verification");
+      } else await capability(env, type, "existing subscription could not be verified");
+    } else if (result.ok) {
+      const body = await result.json() as { data?: unknown[] };
+      const row = await bindCreatedSubscription(env, type, body.data?.[0]);
+      await capability(env, type, row.status === "enabled" ? "enabled" : "pending verification");
+    } else await capability(env, type, `subscription failed (HTTP ${result.status})`);
   }
 }
 export async function maintainHostedTwitch(env: HostedTwitchEnv) {
@@ -398,12 +421,13 @@ export async function maintainHostedTwitch(env: HostedTwitchEnv) {
 }
 async function reserveMessage(env: HostedTwitchEnv, id: string) {
   const now = Date.now();
+  const claimToken = random();
   const inserted = await env.WORLD_DB.prepare(
-    "INSERT OR IGNORE INTO twitch_webhook_messages (id, world_id, received_at, claimed_until, completed) VALUES (?, ?, ?, ?, 0)",
+    "INSERT OR IGNORE INTO twitch_webhook_messages (id, world_id, received_at, claimed_until, completed, claim_token) VALUES (?, ?, ?, ?, 0, ?)",
   )
-    .bind(id, world(env), now, now + 10000)
+    .bind(id, world(env), now, now + 10000, claimToken)
     .run();
-  if (inserted.meta?.changes) return true;
+  if (inserted.meta?.changes) return claimToken;
   const existing = await env.WORLD_DB.prepare(
     "SELECT completed, claimed_until FROM twitch_webhook_messages WHERE id = ?",
   )
@@ -416,16 +440,16 @@ async function reserveMessage(env: HostedTwitchEnv, id: string) {
       503,
     );
   const retry = await env.WORLD_DB.prepare(
-    "UPDATE twitch_webhook_messages SET claimed_until = ? WHERE id = ? AND completed = 0 AND claimed_until <= ?",
+    "UPDATE twitch_webhook_messages SET claimed_until = ?, claim_token = ? WHERE id = ? AND completed = 0 AND claimed_until <= ?",
   )
-    .bind(now + 10000, id, now)
+    .bind(now + 10000, claimToken, id, now)
     .run();
   if (!retry.meta?.changes)
     throw new TwitchHttpError(
       "Notification is being processed; retry shortly.",
       503,
     );
-  return true;
+  return claimToken;
 }
 export async function verifyTwitchWebhook(
   request: Request,
@@ -439,7 +463,7 @@ export async function verifyTwitchWebhook(
     request.headers.get("Twitch-Eventsub-Message-Signature") || "";
   const time = Date.parse(timestamp);
   if (
-    !secret ||
+    secret.length < 32 || secret.length > 100 || /[^\x20-\x7e]/.test(secret) ||
     id.length < 1 ||
     id.length > 128 ||
     !Number.isFinite(time) ||
@@ -516,8 +540,7 @@ async function normalized(
       snapshot.residents.some((r) => r.id === actorId)
     )
       event = { ...base, kind: "chat", text };
-    if (event) await dispatch.dispatch(event, false);
-    return;
+    return event ? dispatch.dispatch(event, false) : false;
   }
   if (
     [
@@ -526,7 +549,7 @@ async function normalized(
       "channel.subscription.message",
     ].includes(type)
   ) {
-    await dispatch.dispatch(
+    return dispatch.dispatch(
       {
         ...base,
         kind: "confetti",
@@ -535,10 +558,9 @@ async function normalized(
       },
       true,
     );
-    return;
   }
   if (type === "channel.raid") {
-    await dispatch.dispatch(
+    return dispatch.dispatch(
       {
         ...base,
         kind: "raid",
@@ -549,14 +571,14 @@ async function normalized(
       },
       true,
     );
-    return;
   }
   if (type === "channel.channel_points_custom_reward_redemption.add") {
+    let joined = false;
     let mappings: Record<string, string> = {};
     try {
       mappings = JSON.parse(env.TWITCH_REWARD_ACTIONS || "{}");
     } catch {
-      return;
+      return false;
     }
     const action = mappings[e.reward?.id];
     if (
@@ -570,19 +592,19 @@ async function normalized(
         "weather:sunset",
       ].includes(action)
     )
-      return;
+      return false;
     if (
       ["wave", "dance"].includes(action) &&
       !snapshot.residents.some((r) => r.id === actorId)
     )
-      await dispatch.dispatch(
+      joined = await dispatch.dispatch(
         { ...base, id: `${base.id}:join`, kind: "join" },
         false,
       );
     const weather = action.startsWith("weather:")
       ? (action.slice(8) as Weather)
       : undefined;
-    await dispatch.dispatch(
+    const changed = await dispatch.dispatch(
       {
         ...base,
         kind: weather ? "weather" : (action as "wave" | "dance" | "confetti"),
@@ -590,7 +612,9 @@ async function normalized(
       },
       Boolean(weather) || action === "confetti",
     );
+    return changed || joined;
   }
+  return false;
 }
 export async function handleHostedTwitch(
   request: Request,
@@ -598,6 +622,7 @@ export async function handleHostedTwitch(
   actor: string | undefined,
   director: boolean,
   dispatch: TwitchDispatch,
+  schedule?: (task: Promise<unknown>) => void,
 ): Promise<Response> {
   const url = new URL(request.url);
   try {
@@ -637,22 +662,29 @@ export async function handleHostedTwitch(
           "Invalid EventSub signature or timestamp.",
           403,
         );
-      const payload = JSON.parse(
-        new TextDecoder("utf-8", { fatal: true }).decode(raw),
-      );
+      let payload: any;
+      try { payload = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(raw)); }
+      catch { throw new TwitchHttpError("Malformed EventSub payload.", 400); }
+      if (!payload || typeof payload !== "object" || Array.isArray(payload))
+        throw new TwitchHttpError("Malformed EventSub envelope.", 400);
       const id = request.headers.get("Twitch-Eventsub-Message-Id")!;
       const kind = request.headers.get("Twitch-Eventsub-Message-Type");
-      const supported = new Set([
-        "channel.chat.message",
-        "channel.subscribe",
-        "channel.subscription.gift",
-        "channel.subscription.message",
-        "channel.channel_points_custom_reward_redemption.add",
-        "channel.raid",
-      ]);
-      if (!supported.has(payload.subscription?.type))
-        throw new TwitchHttpError("Unsupported EventSub subscription.");
-      if (!(await reserveMessage(env, id))) {
+      let row = await account(env);
+      if (kind === "notification" && row?.token_cipher && (Date.now() - row.validated_at >= 3600000 || row.expires_at <= Date.now())) {
+        const maintenance = maintainHostedTwitch(env);
+        if (schedule) {
+          schedule(maintenance);
+          throw new TwitchHttpError("Authorization validation is in progress; retry this notification.", 503);
+        }
+        await maintenance;
+        row = await account(env);
+      }
+      if (!row?.broadcaster_id || kind !== "revocation" && !JSON.parse(row.capabilities_json).authorization?.startsWith("authorized "))
+        throw new TwitchHttpError("Broadcaster authorization requires reconnection.", 403);
+      try { await checkWebhookSubscription(env, request, payload, kind || "", row.broadcaster_id); }
+      catch { throw new TwitchHttpError("Subscription ID, version, condition or broadcaster is not registered for this world.", 403); }
+      const claimToken = await reserveMessage(env, id);
+      if (!claimToken) {
         if (
           kind === "webhook_callback_verification" &&
           typeof payload.challenge === "string" &&
@@ -673,15 +705,12 @@ export async function handleHostedTwitch(
             payload.challenge.length > 2048
           )
             throw new TwitchHttpError("Invalid challenge.");
-          await capability(
-            env,
-            payload.subscription?.type || "eventsub",
-            "enabled",
-          );
+          await markSubscription(env, payload.subscription.type, payload.subscription.id, "enabled");
+          await capability(env, payload.subscription.type, "enabled");
           await env.WORLD_DB.prepare(
-            "UPDATE twitch_webhook_messages SET completed = 1 WHERE id = ?",
+            "UPDATE twitch_webhook_messages SET completed = 1 WHERE id = ? AND claim_token = ?",
           )
-            .bind(id)
+            .bind(id, claimToken)
             .run();
           return new Response(payload.challenge, {
             headers: {
@@ -690,13 +719,14 @@ export async function handleHostedTwitch(
             },
           });
         }
-        if (kind === "revocation")
+        if (kind === "revocation") {
+          await markSubscription(env, payload.subscription.type, payload.subscription.id, "revoked");
           await capability(
             env,
             payload.subscription?.type || "eventsub",
             `revoked (${clean(payload.subscription?.status, 80)})`,
           );
-        else if (kind === "notification") {
+        } else if (kind === "notification") {
           const row = await account(env);
           if (!row?.broadcaster_id)
             throw new TwitchHttpError(
@@ -726,7 +756,9 @@ export async function handleHostedTwitch(
               "Event targets another broadcaster.",
               403,
             );
-          await normalized(env, payload, id, dispatch);
+          const changed = await normalized(env, payload, id, dispatch);
+          if (changed) await env.WORLD_DB.prepare("UPDATE twitch_accounts SET last_event_at=?, last_event_id=? WHERE world_id=?")
+            .bind(Date.now(), id, world(env)).run();
           await capability(
             env,
             payload.subscription?.type || "eventsub",
@@ -734,16 +766,16 @@ export async function handleHostedTwitch(
           );
         } else throw new TwitchHttpError("Unsupported EventSub message type.");
         await env.WORLD_DB.prepare(
-          "UPDATE twitch_webhook_messages SET completed = 1 WHERE id = ?",
+          "UPDATE twitch_webhook_messages SET completed = 1 WHERE id = ? AND claim_token = ?",
         )
-          .bind(id)
+          .bind(id, claimToken)
           .run();
         return new Response(null, { status: 204 });
       } catch (error) {
         await env.WORLD_DB.prepare(
-          "DELETE FROM twitch_webhook_messages WHERE id = ? AND completed = 0",
+          "DELETE FROM twitch_webhook_messages WHERE id = ? AND completed = 0 AND claim_token = ?",
         )
-          .bind(id)
+          .bind(id, claimToken)
           .run();
         throw error;
       }
@@ -839,7 +871,7 @@ export async function handleHostedTwitch(
       });
       const info = await validate(env, token.access_token);
       await env.WORLD_DB.prepare(
-        "UPDATE twitch_accounts SET broadcaster_id = ?, broadcaster_login = ?, token_cipher = ?, expires_at = ?, validated_at = ?, capabilities_json = ? WHERE world_id = ? AND owner_actor = ?",
+        "UPDATE twitch_accounts SET broadcaster_id = ?, broadcaster_login = ?, token_cipher = ?, expires_at = ?, validated_at = ?, capabilities_json = ?, last_event_at=0, last_event_id=NULL WHERE world_id = ? AND owner_actor = ?",
       )
         .bind(
           info.user_id,

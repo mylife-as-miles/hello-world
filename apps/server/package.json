@@ -12,17 +12,18 @@
   },
   "dependencies": {
     "@hello-world/contracts": "workspace:*",
-    "ws": "^8.18.0",
-    "zod": "^3.24.0",
-    "dotenv": "^16.4.7",
+    "@hello-world/world-engine": "workspace:*",
     "@twurple/api": "^8.0.0",
     "@twurple/auth": "^8.0.0",
     "@twurple/chat": "^8.0.0",
     "@twurple/eventsub-ws": "^8.0.0",
-    "@hello-world/world-engine": "workspace:*"
+    "dotenv": "^16.4.7",
+    "ws": "^8.18.0",
+    "zod": "^3.24.0"
   },
   "devDependencies": {
-    "tsx": "^4.20.0",
-    "@types/ws": "^8.5.13"
+    "@composio/core": "0.28.0",
+    "@types/ws": "^8.5.13",
+    "tsx": "^4.20.0"
   }
 }

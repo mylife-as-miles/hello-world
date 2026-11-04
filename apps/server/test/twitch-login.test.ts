@@ -63,6 +63,13 @@ describe("public Twitch login through Composio", () => {
       expect(f.factory).not.toHaveBeenCalled();
     } finally { f.sqlite.close(); }
   });
+  it("reports sign-in unavailable when persistent provider setup needs review", async () => {
+    const f = fixture(); try {
+      f.sqlite.prepare("INSERT INTO twitch_login_config (id,status,claim_token,updated_at) VALUES ('twitch-profile','review-required','failed',?)").run(Date.now());
+      const status = await (await f.run("/api/auth/session")).json();
+      expect(status.loginConfigured).toBe(false); expect(f.factory).not.toHaveBeenCalled();
+    } finally { f.sqlite.close(); }
+  });
   it("issues an HttpOnly browser-bound state and creates only one shared scope-limited config", async () => {
     const f = fixture(); try {
       const first = await f.start(), second = await f.start();

@@ -14,6 +14,18 @@ The legacy default neighborhood remains a public demo. A Twitch login can open a
 
 The HELLO WORLD operator already stores `COMPOSIO_API_KEY` privately in Sites. Never put it in frontend code, visitor forms, logs, a public repo or chat. End users do not configure this key.
 
+The stored key must permit the server-side login operations. For a scoped key, use these [Composio permission areas](https://docs.composio.dev/reference/authenticating-to-composio/project-api-key-permissions):
+
+| Permission area | Access needed by this login |
+| --- | --- |
+| Auth configs | Read and write |
+| Connected accounts | Read and write |
+| Session management | Write only |
+| Toolkits | Read only |
+| Proxy execute (Legacy) | Write only |
+
+Scoped-key permissions are immutable after creation. If an existing key lacks these permissions, create a replacement key in the same Composio project and privately replace the Site's `COMPOSIO_API_KEY` secret. Do not request an organization key or give the key to visitors. Redeploy the saved Site version after changing the secret.
+
 Composio's ordinary connected-account link is not by itself a secure identity login. Public login uses its documented **OAuth callback verifier**, which supplies a completion-only, single-use credential after Twitch authorization.
 
 In the existing Composio project's [Settings → General](https://dashboard.composio.dev/~/project/settings/general), open **Configuration** and set **OAuth callback verifier URL** to exactly:
@@ -62,3 +74,11 @@ References: [Composio callback identity verification](https://docs.composio.dev/
 Sites version **9** is live at the existing public URL, code `7973a44d316153773c03e564fdb218cc3f335e9f`, source `df5fd1b02205dcfc68a8616fbf42c299c9ab096a`, deployment `appgdep_6aeb024662e881919bfb0427bec5b608`. Production confirmed the new auth/ownership tables and preserved all 13 default-neighborhood resident IDs.
 
 The actual deployed page passed five signed-out Chromium checks: public app loading, visible setup gate, absence of ChatGPT sign-in links, Twitch-only resident login, and zero uncaught browser errors. [Current login screenshot](screenshots/public/twitch-login-v9.png) shows the real setup-pending state, not a completed login. Anonymous world writes remain 401; auth-start safely returns `TWITCH_IDENTITY_VERIFIER_NOT_CONFIGURED` (503) while the project/server verifier setup is pending. [Release evidence](evidence/public-twitch-release.json).
+
+### Activation check after verifier setup
+
+On 2026-11-04 the operator confirmed saving/reloading the Composio project verifier URL. The matching Site variable was applied as environment revision **5**. Real hosted `/api/auth/session` returned `loginConfigured:true`; the real start request reached Composio, but upstream auth-config creation returned **403 `ApiKey_InsufficientPermissions`**, surfaced safely as `COMPOSIO_CONFIG_CREATE_HTTP_403_APIKEY_INSUFFICIENTPERMISSIONS`. No Twitch consent link, provider authorization or user session was created.
+
+The live test exposed missing operational recovery for failed initialization. Setup now records a created config ID before validation, can recover a single existing config through read-only calls, and retries creation only after a confirmed empty remote list and a consistency delay. It preserves the same profile-only scope checks. The adapter also keeps explicit scope evidence from the raw SDK config response's `shared_connection_fields`, which the high-level SDK transformer discards; conflicting/missing scope evidence is never treated as empty permissions. SDK failure diagnostics include only an operation, HTTP status and short provider error slug, never raw request/error bodies or credentials.
+
+Public readiness remains unavailable while persistent initialization is marked for review. Replacing the key with the documented login permissions and repeating the real start test is the remaining operator step before Twitch consent can be tested. Twitch authorization has not been performed on the operator's behalf.

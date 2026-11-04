@@ -12,7 +12,7 @@ import {
 } from "./sites-twitch.js";
 import { createWorldRuntime } from "@hello-world/world-engine/runtime";
 import { handleHostedComposio, type HostedComposioEnv } from "./sites-composio.js";
-import { handleTwitchLogin, resolveTwitchSession, type TwitchLoginEnv } from "./twitch-login.js";
+import { handleTwitchLogin, resolveTwitchSession, publicTwitchLoginReady, type TwitchLoginEnv } from "./twitch-login.js";
 import { conditionKey } from "./twitch-subscriptions.js";
 import type {
   ClientMessage,
@@ -603,7 +603,7 @@ export default {
       )
         .bind(row.id, Date.now() - 15000)
         .first<{ count: number }>();
-      const loginConfigured = Boolean(env.COMPOSIO_API_KEY && env.AUTH_SESSION_SECRET && env.AUTH_SESSION_SECRET.length >= 32 && env.COMPOSIO_OAUTH_VERIFIER_URL === `${url.origin}/api/auth/twitch/verify`);
+      const loginConfigured = await publicTwitchLoginReady(request, env);
       const status: Extract<ServerMessage, { type: "status" }> = {
         type: "status",
         mode: twitchStatus.mode,

@@ -42,6 +42,11 @@ class LoginError extends Error { constructor(readonly code: string, readonly sta
 function verifierConfigured(request: Request, env: TwitchLoginEnv) {
   return env.COMPOSIO_OAUTH_VERIFIER_URL === `${new URL(request.url).origin}/api/auth/twitch/verify`;
 }
+export async function publicTwitchLoginReady(request: Request, env: TwitchLoginEnv) {
+  if (!env.COMPOSIO_API_KEY || !env.AUTH_SESSION_SECRET || env.AUTH_SESSION_SECRET.length < 32 || !verifierConfigured(request, env)) return false;
+  const config = await env.WORLD_DB.prepare("SELECT status FROM twitch_login_config WHERE id='twitch-profile'").first<{ status: string }>();
+  return config?.status !== "review-required";
+}
 function secret(env: TwitchLoginEnv) {
   if (!env.AUTH_SESSION_SECRET || env.AUTH_SESSION_SECRET.length < 32) throw new LoginError("TWITCH_LOGIN_NOT_CONFIGURED", 503);
   return env.AUTH_SESSION_SECRET;
@@ -200,7 +205,7 @@ export async function handleTwitchLogin(request: Request, env: TwitchLoginEnv, f
     if (url.pathname === "/api/auth/session" && request.method === "GET") {
       const user = await resolveTwitchSession(request, env);
       return reply({ user: user ? { id: user.twitchId, login: user.login, displayName: user.displayName } : null,
-        ownWorldId: user ? `twitch-${user.twitchId}` : null, loginConfigured: Boolean(env.COMPOSIO_API_KEY && env.AUTH_SESSION_SECRET && env.AUTH_SESSION_SECRET.length >= 32 && verifierConfigured(request, env)) });
+        ownWorldId: user ? `twitch-${user.twitchId}` : null, loginConfigured: await publicTwitchLoginReady(request, env) });
     }
     if (url.pathname === "/api/auth/logout" && request.method === "POST") {
       await readBody(request);

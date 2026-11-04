@@ -11,6 +11,7 @@ export interface ManagedProfileClient {
   ownedAccounts(owner: string, config: string): Promise<unknown>;
   profile(owner: string, account: string): Promise<{ status: number; data?: unknown }>;
   completeAuth?(owner: string, sessionUri: string): Promise<{ connectedAccountId: string; toolkitSlug: string }>;
+  recoverProfileConfig?(): Promise<unknown>;
 }
 export interface ProfileAttempt {
   ownerId: string;
@@ -24,19 +25,39 @@ export function requireComposioApproval(approval: string | undefined, connect = 
   if (approval !== (connect ? "connect-profile" : "read-only"))
     throw new ComposioPocError("OWNER_APPROVAL_REQUIRED");
 }
+async function providerCall<T>(stage: string, run: () => Promise<T>): Promise<T> {
+  try { return await run(); }
+  catch (error) {
+    if (error instanceof ComposioPocError) throw error;
+    const e = object(error), status = e.status ?? e.statusCode;
+    const suffix = Number.isInteger(status) && status >= 400 && status <= 599 ? `HTTP_${status}`
+      : /abort|timeout/i.test(String(e.name || "")) ? "TIMED_OUT"
+      : /validation|transform/i.test(String(e.name || "")) ? "RESPONSE_INVALID" : "FAILED";
+    // Deliberately omit SDK messages, bodies, request headers and credential state.
+    throw new ComposioPocError(`COMPOSIO_${stage}_${suffix}`);
+  }
+}
 export async function createManagedProfileClient(apiKey: string): Promise<ManagedProfileClient> {
   const { Composio } = await import("@composio/core");
   const composio = new Composio({ apiKey, allowTracking: false, logLevel: "silent", disableVersionCheck: true,
     toolkitVersions: { twitch: "20261101_00" } });
   const bounded = () => ({ signal: AbortSignal.timeout(10_000) });
   return {
+    // Read-only recovery if a previous config creation returned an unusable response.
+    // Never create another config merely to diagnose a failed initialization.
+    recoverProfileConfig: async () => {
+      const list = await providerCall("CONFIG_RECOVERY", () => composio.authConfigs.list({ toolkit: "twitch", isComposioManaged: true, search: "HELLO WORLD profile-only proof", limit: 100 }, bounded()));
+      const matches = list.items.filter(c => c.name === "HELLO WORLD profile-only proof" && c.status === "ENABLED");
+      if (matches.length !== 1) throw new ComposioPocError("COMPOSIO_CONFIG_RECOVERY_REQUIRES_REVIEW");
+      return { id: matches[0].id };
+    },
     completeAuth: (userId, sessionUri) => composio.connectedAccounts.completeAuth({ userId, sessionUri }, bounded()),
     toolkit: () => composio.toolkits.get("twitch", bounded()),
-    createProfileConfig: () => composio.authConfigs.create("twitch", {
+    createProfileConfig: () => providerCall("CONFIG_CREATE", () => composio.authConfigs.create("twitch", {
       type: "use_composio_managed_auth", name: "HELLO WORLD profile-only proof",
       credentials: { scopes: "" },
-    }, bounded()),
-    config: id => composio.authConfigs.get(id, bounded()),
+    }, bounded())),
+    config: id => providerCall("CONFIG_READ", () => composio.authConfigs.get(id, bounded())),
     async authorize(ownerId, authConfigId, callbackUrl) {
       const session = await composio.sessions.create(ownerId, {
         toolkits: ["twitch"], authConfigs: { twitch: authConfigId },

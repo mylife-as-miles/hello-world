@@ -133,7 +133,22 @@ async function managedConfig(env: TwitchLoginEnv, client: ManagedProfileClient) 
   const saved = await env.WORLD_DB.prepare("SELECT status,auth_config_id FROM twitch_login_config WHERE id='twitch-profile'")
     .first<{ status: string; auth_config_id: string | null }>();
   if (saved?.status === "ready" && saved.auth_config_id) { await profileConfig(client, saved.auth_config_id); return saved.auth_config_id; }
-  if (saved) throw new LoginError(saved.status === "creating" ? "TWITCH_LOGIN_INITIALIZING_RETRY" : "TWITCH_LOGIN_CONFIG_REVIEW_REQUIRED", 503);
+  if (saved) {
+    if (saved.status === "creating") throw new LoginError("TWITCH_LOGIN_INITIALIZING_RETRY", 503);
+    // An earlier process may have created the remote config but failed before
+    // saving its ID. Recover that exact named config through read-only API calls.
+    if (saved.status === "review-required" && client.recoverProfileConfig) {
+      const recovered = saved.auth_config_id ? { id: saved.auth_config_id } : object(await client.recoverProfileConfig());
+      if (!id(recovered.id)) throw new LoginError("INVALID_AUTH_CONFIG");
+      await env.WORLD_DB.prepare("UPDATE twitch_login_config SET auth_config_id=?,updated_at=? WHERE id='twitch-profile' AND status='review-required'")
+        .bind(recovered.id, Date.now()).run();
+      await profileConfig(client, recovered.id);
+      await env.WORLD_DB.prepare("UPDATE twitch_login_config SET status='ready',updated_at=? WHERE id='twitch-profile' AND auth_config_id=?")
+        .bind(Date.now(), recovered.id).run();
+      return recovered.id as string;
+    }
+    throw new LoginError("TWITCH_LOGIN_CONFIG_REVIEW_REQUIRED", 503);
+  }
   const claim = random();
   const inserted = await env.WORLD_DB.prepare("INSERT OR IGNORE INTO twitch_login_config (id,status,claim_token,updated_at) VALUES ('twitch-profile','creating',?,?)")
     .bind(claim, Date.now()).run();
@@ -141,6 +156,8 @@ async function managedConfig(env: TwitchLoginEnv, client: ManagedProfileClient) 
   try {
     const config = object(await client.createProfileConfig());
     if (!id(config.id)) throw new LoginError("INVALID_AUTH_CONFIG");
+    await env.WORLD_DB.prepare("UPDATE twitch_login_config SET auth_config_id=?,updated_at=? WHERE id='twitch-profile' AND claim_token=?")
+      .bind(config.id, Date.now(), claim).run();
     await profileConfig(client, config.id);
     const stored = await env.WORLD_DB.prepare("UPDATE twitch_login_config SET status='ready',auth_config_id=?,updated_at=? WHERE id='twitch-profile' AND claim_token=?")
       .bind(config.id, Date.now(), claim).run();

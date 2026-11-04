@@ -241,6 +241,26 @@ describe("public Twitch login through Composio", () => {
       release(); expect((await first).status).toBe(200); expect(f.client.createProfileConfig).toHaveBeenCalledTimes(1);
     } finally { f.sqlite.close(); }
   });
+  it("recovers a remotely created config after a failed initialization without creating another", async () => {
+    const f = fixture(); try {
+      f.sqlite.prepare("INSERT INTO twitch_login_config (id,status,claim_token,updated_at) VALUES ('twitch-profile','review-required','old-claim',?)").run(Date.now());
+      f.client.recoverProfileConfig = vi.fn(async () => ({ id: "ac_login" }));
+      expect((await f.run("/api/auth/twitch/start", {})).status).toBe(200);
+      expect(f.client.createProfileConfig).not.toHaveBeenCalled();
+      expect(f.client.recoverProfileConfig).toHaveBeenCalledTimes(1);
+      expect(f.sqlite.prepare("SELECT status,auth_config_id FROM twitch_login_config").get()).toEqual({ status: "ready", auth_config_id: "ac_login" });
+    } finally { f.sqlite.close(); }
+  });
+  it("does not authorize or create replacements if a recovered config has broader scopes", async () => {
+    const f = fixture(); try {
+      f.sqlite.prepare("INSERT INTO twitch_login_config (id,status,claim_token,auth_config_id,updated_at) VALUES ('twitch-profile','review-required','old-claim','ac_login',?)").run(Date.now());
+      f.client.recoverProfileConfig = vi.fn(async () => { throw new Error("Should use the recorded config ID"); });
+      f.client.config = async () => ({ isComposioManaged: true, status: "ENABLED", toolkit: { slug: "twitch" }, credentials: { scopes: "user:read:email" } });
+      const response = await f.run("/api/auth/twitch/start", {});
+      expect(response.status).toBe(400); expect(await response.json()).toEqual({ error: "EMPTY_SCOPE_OVERRIDE_UNVERIFIED" });
+      expect(f.client.createProfileConfig).not.toHaveBeenCalled(); expect(f.client.recoverProfileConfig).not.toHaveBeenCalled(); expect(f.client.authorize).not.toHaveBeenCalled();
+    } finally { f.sqlite.close(); }
+  });
   it("allows exactly one session when callback deliveries overlap", async () => {
     const f = fixture(); try {
       const start = await f.start();

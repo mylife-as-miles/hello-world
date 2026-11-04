@@ -3,7 +3,7 @@ import { DatabaseSync } from "node:sqlite";
 import { readFileSync } from "node:fs";
 import { sqliteD1 } from "../../../tests/helpers/sqlite-d1.js";
 import { handleTwitchLogin, resolveTwitchSession } from "../src/twitch-login.js";
-import type { ManagedProfileClient } from "../src/composio-twitch-poc.js";
+import { ComposioPocError, type ManagedProfileClient } from "../src/composio-twitch-poc.js";
 
 function fixture() {
   const sqlite = new DatabaseSync(":memory:");
@@ -259,6 +259,17 @@ describe("public Twitch login through Composio", () => {
       const response = await f.run("/api/auth/twitch/start", {});
       expect(response.status).toBe(400); expect(await response.json()).toEqual({ error: "EMPTY_SCOPE_OVERRIDE_UNVERIFIED" });
       expect(f.client.createProfileConfig).not.toHaveBeenCalled(); expect(f.client.recoverProfileConfig).not.toHaveBeenCalled(); expect(f.client.authorize).not.toHaveBeenCalled();
+    } finally { f.sqlite.close(); }
+  });
+  it("retries creation only after a confirmed empty remote list and consistency delay", async () => {
+    const f = fixture(); try {
+      f.sqlite.prepare("INSERT INTO twitch_login_config (id,status,claim_token,updated_at) VALUES ('twitch-profile','review-required','old-claim',?)").run(Date.now());
+      f.client.recoverProfileConfig = async () => { throw new ComposioPocError("COMPOSIO_CONFIG_NOT_FOUND"); };
+      expect((await f.run("/api/auth/twitch/start", {})).status).toBe(400);
+      expect(f.client.createProfileConfig).not.toHaveBeenCalled();
+      f.sqlite.prepare("UPDATE twitch_login_config SET updated_at=?").run(Date.now() - 60001);
+      expect((await f.run("/api/auth/twitch/start", {})).status).toBe(200);
+      expect(f.client.createProfileConfig).toHaveBeenCalledTimes(1);
     } finally { f.sqlite.close(); }
   });
   it("allows exactly one session when callback deliveries overlap", async () => {

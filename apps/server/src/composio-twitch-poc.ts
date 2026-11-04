@@ -30,11 +30,13 @@ async function providerCall<T>(stage: string, run: () => Promise<T>): Promise<T>
   catch (error) {
     if (error instanceof ComposioPocError) throw error;
     const e = object(error), status = e.status ?? e.statusCode;
+    const providerCode = object(e.error).code;
+    const code = typeof providerCode === "string" && /^[A-Z][A-Z0-9_]{1,63}$/.test(providerCode) ? `_${providerCode}` : "";
     const suffix = Number.isInteger(status) && status >= 400 && status <= 599 ? `HTTP_${status}`
       : /abort|timeout/i.test(String(e.name || "")) ? "TIMED_OUT"
       : /validation|transform/i.test(String(e.name || "")) ? "RESPONSE_INVALID" : "FAILED";
     // Deliberately omit SDK messages, bodies, request headers and credential state.
-    throw new ComposioPocError(`COMPOSIO_${stage}_${suffix}`);
+    throw new ComposioPocError(`COMPOSIO_${stage}_${suffix}${code}`);
   }
 }
 export async function createManagedProfileClient(apiKey: string): Promise<ManagedProfileClient> {
@@ -46,7 +48,8 @@ export async function createManagedProfileClient(apiKey: string): Promise<Manage
     // Read-only recovery if a previous config creation returned an unusable response.
     // Never create another config merely to diagnose a failed initialization.
     recoverProfileConfig: async () => {
-      const list = await providerCall("CONFIG_RECOVERY", () => composio.authConfigs.list({ toolkit: "twitch", isComposioManaged: true, search: "HELLO WORLD profile-only proof", limit: 100 }, bounded()));
+      const list = await providerCall("CONFIG_RECOVERY", () => composio.authConfigs.list({ toolkit: "twitch", isComposioManaged: true, limit: 100 }, bounded()));
+      if (list.items.length === 0 && !list.nextCursor) throw new ComposioPocError("COMPOSIO_CONFIG_NOT_FOUND");
       const matches = list.items.filter(c => c.name === "HELLO WORLD profile-only proof" && c.status === "ENABLED");
       if (matches.length !== 1) throw new ComposioPocError("COMPOSIO_CONFIG_RECOVERY_REQUIRES_REVIEW");
       return { id: matches[0].id };

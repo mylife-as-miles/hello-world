@@ -1,6 +1,6 @@
 # Composio-managed Twitch investigation
 
-Checked **2026-11-04**. No Composio account was created, project key used, persistent connection started, Twitch consent granted, or real event received during this investigation. The public world remains Demo Mode. The profile proof is isolated operator tooling; it is not a deployed live-event adapter.
+Checked **2026-11-04**. The owner has supplied a Composio project key privately in Sites and approved a basic-profile proof. Its value is not readable through the Sites settings tool and has not been exported. No persistent connection, Twitch consent or real event has been verified. The public world remains Demo Mode. The profile proof is isolated from the world-event adapter.
 
 ## Findings and the remaining event-path blocker
 
@@ -20,9 +20,21 @@ https://hello-world-miles-society.myles4miles.chatgpt.site/api/twitch/callback
 
 The managed proof uses Composio's own consent redirect, privately returned by its SDK. Do not register the HELLO WORLD callback against a managed app or invent a Composio callback URL.
 
+## Hosted owner flow
+
+The owner-only Twitch connection dialog includes a Composio profile test. Sign into [Director Studio](https://hello-world-miles-society.myles4miles.chatgpt.site/director), open **Connect Twitch**, and select **Check managed OAuth permissions**. This performs the first credential-backed metadata read in the hosted Worker; it creates no connection. If the scope metadata is unavailable or broad, the test stops with a precise code. That is an unverified permission contract, not proof that Composio cannot connect Twitch.
+
+When inspection passes, review the persistent-access checkbox and select **Prepare private Twitch consent**, then **Review Twitch consent**. Approve only the reviewed basic-profile access. Return and select **Verify approved basic profile** within ten minutes. A successful read still explicitly says live events are not connected.
+
+All `/api/composio/twitch/*` routes require the trusted owner identity; neither public visitors nor the relay service token can invoke them. POSTs additionally require same-origin JSON and explicit mode-specific approval. The UI sends no key/token. The fixed server-side SDK client can inspect Twitch auth, create the scope-limited proof, or read the authenticated profile; it cannot execute caller-supplied tools, URLs or scripts. Each provider operation has a ten-second cancellation deadline.
+
+Migration `0004_composio_profile.sql` stores non-secret owner/config/account attempt IDs and the allowlisted basic-profile result separately from world data. A unique owner/world row prevents concurrent/repeated connection creation. The short-lived consent URL is encrypted with AES-GCM under the existing server-only `TWITCH_TOKEN_ENCRYPTION_KEY`, bound to this world and owner. It can resume after a dialog reload until expiry; it is deleted on verification and never returned after expiry. It is never stored in plaintext or logs.
+
+For an expired/uncertain attempt, review and revoke/remove that test connection in the Composio dashboard first, then use **Clear local connection test** with the explicit review checkbox. This clears only the proof record; it does not revoke provider access or reset the world. No automatic retry creates another persistent grant. Project credentials stay in the existing `COMPOSIO_API_KEY` Site secret; `COMPOSIO_OWNER_ID` is needed only for the optional local CLI, since hosted identity is derived from trusted Sites sign-in.
+
 ## Approval-gated basic-profile proof
 
-Requirements: Node **22.22.3+**, pnpm, and an existing Composio **Platform** project. SDK `@composio/core@0.28.0` is pinned as an operator development dependency and dynamically imported only in approved modes. It is not imported into the browser or Sites Worker bundle.
+Requirements: Node **22.22.3+**, pnpm, and an existing Composio **Platform** project. SDK `@composio/core@0.28.0` is pinned as an operator development dependency and dynamically imported only in approved modes. It is not imported into the browser. The hosted Worker also uses the SDK, bundled with its `workerd` platform condition (the default Node build requires unsupported Node modules).
 
 Default command performs **no network calls and reads no credentials**:
 
@@ -71,7 +83,7 @@ Before shipping managed live delivery, verify a real enabled subscription and a 
 
 The [pricing page](https://composio.dev/pricing) advertises Hobby at $0 without a card, 100,000 overall tool calls/month, of which at most **20,000** can use managed apps; managed calls stop at the free allowance. The first 1,000 managed connected accounts are free. The overall trigger allowance is 50,000/month (10,000 managed), but the Twitch toolkit has zero documented triggers. Pro starts at **$29/month** with $29 credits; managed tool-call pricing varies by app and Twitch-specific paid rates were not established here. These prices can change; verify the project dashboard before creating paid usage.
 
-[Rate limits](https://docs.composio.dev/reference/rate-limits) list 2,000 requests/minute on Hobby and 10,000 on Pro across the organization. Managed apps also share provider-side quotas. Honor `Retry-After`, avoid repeated reconnect/config creation, and monitor both providers. No chargeable account/project was created in this investigation.
+[Rate limits](https://docs.composio.dev/reference/rate-limits) list 2,000 requests/minute on Hobby and 10,000 on Pro across the organization. Managed apps also share provider-side quotas. Honor `Retry-After`, avoid repeated reconnect/config creation, and monitor both providers. No account/project was created by this coding agent; the owner configured an existing project key privately.
 
 ## Documentation used
 
@@ -83,4 +95,4 @@ The [pricing page](https://composio.dev/pricing) advertises Hobby at $0 without 
 
 ## Verification boundary
 
-Unit tests use mock Composio responses, never a project key. Hosted acceptance uses real SQLite transactions and the real world runtime with mocked Twitch HTTP/signatures, not a broadcaster grant. The network-free CLI plan has been run. Real consent, basic-profile read, managed EventSub, two-session real-event propagation and native OBS remain unverified. Permission/private configuration and the managed-event transport proof are the next gates; this work does not fix or bypass Twitch 2FA.
+Unit tests use mock Composio responses, never a project key. Hosted acceptance uses real SQLite transactions and the real world runtime with mocked Twitch HTTP/signatures, not a broadcaster grant. The network-free CLI plan has been run. Real consent, basic-profile read, managed EventSub, two-session real-event propagation and native OBS remain unverified. The owner must invoke the hosted inspection and complete Twitch consent; the managed-event transport proof is still a separate gate; this work does not fix or bypass Twitch 2FA.

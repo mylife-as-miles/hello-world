@@ -54,6 +54,7 @@ import type {
   WorldEventKind,
 } from "@hello-world/contracts";
 import { useWorld } from "./lib/world";
+import { ComposioProfileProof } from "./components/ComposioProfileProof";
 
 type Page = "home" | "world" | "director";
 type ModalName = "creator" | "obs" | "twitch" | "director" | "reset" | "signin" | null;
@@ -1777,6 +1778,7 @@ export default function App() {
               </div>
             ))}
           </div>
+          {isDirector && import.meta.env.VITE_TRANSPORT === "http" && <ComposioProfileProof />}
           {world.oauthConfigured && (
             <button
               className="button twitch-connect full-width"

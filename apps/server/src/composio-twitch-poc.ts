@@ -27,26 +27,30 @@ export async function createManagedProfileClient(apiKey: string): Promise<Manage
   const { Composio } = await import("@composio/core");
   const composio = new Composio({ apiKey, allowTracking: false, logLevel: "silent", disableVersionCheck: true,
     toolkitVersions: { twitch: "20261101_00" } });
+  const bounded = () => ({ signal: AbortSignal.timeout(10_000) });
   return {
-    toolkit: () => composio.toolkits.get("twitch"),
+    toolkit: () => composio.toolkits.get("twitch", bounded()),
     createProfileConfig: () => composio.authConfigs.create("twitch", {
       type: "use_composio_managed_auth", name: "HELLO WORLD profile-only proof",
       credentials: { scopes: "" },
-    }),
-    config: id => composio.authConfigs.get(id),
+    }, bounded()),
+    config: id => composio.authConfigs.get(id, bounded()),
     async authorize(ownerId, authConfigId) {
       const session = await composio.sessions.create(ownerId, {
         toolkits: ["twitch"], authConfigs: { twitch: authConfigId },
         tools: { twitch: ["TWITCH_GET_USERS"] }, manageConnections: false,
-      });
-      return session.authorize("twitch");
+      }, bounded());
+      // 0.28.0's facade type omits the third argument; its bound runtime method
+      // forwards it to the generated client's link request (ToolRouterSession).
+      const authorize = session.authorize as (toolkit: string, options: undefined, request: { signal: AbortSignal }) => ReturnType<typeof session.authorize>;
+      return authorize("twitch", undefined, bounded());
     },
     ownedAccounts: (ownerId, configId) => composio.connectedAccounts.list({
       userIds: [ownerId], authConfigIds: [configId], statuses: ["ACTIVE"], limit: 100,
-    }),
+    }, bounded()),
     profile: (userId, connectedAccountId) => composio.tools.proxyExecute({
       userId, connectedAccountId, method: "GET", endpoint: "https://api.twitch.tv/helix/users",
-    }),
+    }, bounded()),
   };
 }
 export async function inspectManagedTwitch(client: ManagedProfileClient) {
@@ -78,7 +82,7 @@ export async function beginManagedProfileProof(client: ManagedProfileClient, own
   await checkConfig(client, config.id);
   const connection = await client.authorize(ownerId, config.id);
   const url = new URL(connection.redirectUrl || "");
-  if (url.protocol !== "https:" || !["connect.composio.dev", "backend.composio.dev"].includes(url.hostname) || url.username || url.password || url.port || url.hash)
+  if (url.href.length > 4096 || url.protocol !== "https:" || !["connect.composio.dev", "backend.composio.dev"].includes(url.hostname) || url.username || url.password || url.port || url.hash)
     throw new ComposioPocError("UNEXPECTED_CONNECT_DESTINATION");
   if (!validId(connection.id)) throw new ComposioPocError("INVALID_CONNECTION_ID");
   return { attempt: { ownerId, authConfigId: config.id, connectedAccountId: connection.id, expiresAt: Date.now() + 600_000 } satisfies ProfileAttempt,

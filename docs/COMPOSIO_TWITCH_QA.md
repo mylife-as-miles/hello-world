@@ -7,7 +7,7 @@ Date: **2026-11-04**. Working baseline: GitHub `main` at `03d937d`. Latest engin
 | Command / check | Result | Evidence boundary |
 | --- | --- | --- |
 | `pnpm typecheck` | Pass, all packages | Real TypeScript compiler |
-| `pnpm test` | **158/158** | 109 engine + 49 server; includes 6 mock Composio cases and 3 SQLite subscription cases |
+| `pnpm test` | **169/169** | 109 engine + 60 server; includes 6 mock Composio cases, 11 hosted profile/security cases and 3 SQLite subscription cases |
 | `pnpm build` | Pass | Real app/engine builds; existing large-chunk/dynamic-import warnings remain |
 | `pnpm build:sites` | Pass | Real bundled HTTP frontend/Worker; includes migration 0003 |
 | `pnpm test:runtime` | **10/10** | Real engine/server, two WebSocket sessions, disk persistence and restart |
@@ -26,9 +26,17 @@ Fault injection commits a Twitch resident/world update and fails the acknowledge
 
 ## Not verified
 
-- No Composio/Twitch credential was used, account created, connection authorized or real profile read performed. Owner approval and private project configuration are pending.
+- The owner approved the basic-profile proof and configured `COMPOSIO_API_KEY` privately in Sites. Its value is unreadable through native settings and was not exported. No real metadata/profile read or connection has been verified yet; the hosted owner flow is ready for the owner to invoke.
 - No actual enabled managed EventSub subscription or real Twitch event was observed. No real-event two-viewer acceptance, reconnect or provider revocation test can be claimed.
 - Native OBS and an always-on managed WebSocket listener are unverified. This patch does not claim to solve 2FA.
-- No fresh browser/visual score is assigned for this server/tooling change. Prior application browser/critic records remain historical.
+- The new profile UI passed 9 checks in real Chromium at 390px with mocked HTTP responses: approval gate, private link, reload recovery, honest live label, revocation-review gate, scope failure stop and no page errors/overflow. This is not real consent or provider evidence. No fresh product score is assigned; prior application browser/critic records remain historical.
 
 See [setup, pricing, scope plan and precise transport blockers](COMPOSIO_TWITCH.md). The existing custom-app adapter remains available. Demo actions retain `source: demo`; test Twitch events exist only in isolated test databases.
+
+## Hosted proof follow-up
+
+The unreadable Sites secret prompted adding an owner-only hosted SDK flow rather than exporting the key. Independent read-only review found consent-link recovery and missing provider deadlines; both were fixed before publishing. The short-lived link is encrypted and resumes for the same owner, expired/uncertain attempts require explicit revocation review before clearing, and each SDK operation receives a ten-second cancellation signal. The hosted SDK uses its documented `workerd` package imports; the initial default-platform bundle failed on Node built-ins and was corrected. No credential was used by those bundle checks.
+
+The follow-up review caught a reset/creation race; a fresh `starting` row now blocks reset for two minutes and all completion writes compare a unique creation claim token. The regression test pauses persistent config creation and proves that a concurrent reset is rejected. Consent-link encryption, expiry, wrong-key rejection, owner isolation and explicit local-record cleanup are also tested.
+
+The first hardening release was published as Sites version **7**, source `8204895ec324637619e541658e01c25cae184342`, deployment `appgdep_6aeae55ea4e88191adb66b761f133cb7` (succeeded). Production D1 confirmed the new subscription and ingress tables. Public snapshot/world/Director shell/overlay returned 200; all 13 resident IDs survived. Anonymous and forged-owner OAuth initiation returned 401; the application remained Demo Mode with `oauthConfigured:false`. Those checks preceded the hosted profile UI follow-up.

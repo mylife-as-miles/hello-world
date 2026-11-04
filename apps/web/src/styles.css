@@ -1976,6 +1976,9 @@ option {
   color: #c5ddb0;
   margin-bottom: 9px;
 }
+.composio-profile-proof { display: grid; gap: 12px; }
+.composio-profile-proof .check-row { display: flex; align-items: flex-start; gap: 10px; font-size: 13px; line-height: 1.5; cursor: pointer; }
+.composio-profile-proof .check-row input { flex: 0 0 auto; width: 18px; height: 18px; margin: 2px 0 0; accent-color: var(--accent, #c4d785); }
 .integration-explanation p {
   line-height: 1.9;
   color: #91ac7a;

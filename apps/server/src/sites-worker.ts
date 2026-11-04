@@ -10,6 +10,7 @@ import {
   type HostedTwitchEnv,
 } from "./sites-twitch.js";
 import { createWorldRuntime } from "@hello-world/world-engine/runtime";
+import { handleHostedComposio, type HostedComposioEnv } from "./sites-composio.js";
 import type {
   ClientMessage,
   DirectorSettings,
@@ -33,7 +34,7 @@ interface D1Database {
   prepare(query: string): D1Statement;
   batch?(statements: D1Statement[]): Promise<Array<{ meta?: { changes?: number } }>>;
 }
-interface WorkerEnv extends HostedTwitchEnv {
+interface WorkerEnv extends HostedTwitchEnv, HostedComposioEnv {
   WORLD_DB: D1Database;
   ASSETS: { fetch(request: Request): Promise<Response> };
   DIRECTOR_OWNER_EMAIL?: string;
@@ -449,6 +450,11 @@ export default {
           "Hosted database binding WORLD_DB is unavailable.",
           503,
         );
+      if (url.pathname.startsWith("/api/composio/twitch/")) {
+        const actor = await siteIdentity(request);
+        await requestLimit(env, env.WORLD_ID || "hello-neighborhood", actor, Date.now());
+        return handleHostedComposio(request, env, actor, await isWorldDirector(request, env, actor));
+      }
       if (url.pathname.startsWith("/api/twitch/")) {
         const webhook = url.pathname === "/api/twitch/webhook";
         const actor = webhook ? undefined : await siteIdentity(request);

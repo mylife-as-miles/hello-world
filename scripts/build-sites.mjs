@@ -9,7 +9,7 @@ const result=spawnSync('pnpm',['--filter','@hello-world/web','exec','vite','buil
 if(result.status)process.exit(result.status);
 mkdirSync(resolve(runtimeOutput,'server'),{recursive:true});mkdirSync(resolve(output,'.openai'),{recursive:true});
 const req=createRequire(resolve(root,'apps/server/package.json'));const esbuild=createRequire(req.resolve('tsx'))('esbuild');
-await esbuild.build({entryPoints:[resolve(root,'apps/server/src/sites-worker.ts')],bundle:true,format:'esm',platform:'browser',target:'es2022',minify:true,outfile:resolve(runtimeOutput,'server/index.js'),define:{'process.env.NODE_ENV':'"production"'}});
+await esbuild.build({entryPoints:[resolve(root,'apps/server/src/sites-worker.ts')],bundle:true,format:'esm',platform:'browser',conditions:['workerd'],target:'es2022',minify:true,outfile:resolve(runtimeOutput,'server/index.js'),define:{'process.env.NODE_ENV':'"production"'}});
 cpSync(resolve(root,'.openai/hosting.json'),resolve(output,'.openai/hosting.json'));
 mkdirSync(resolve(output,'drizzle'),{recursive:true});
 for (const name of readdirSync(resolve(root,'apps/server/sites-migrations')).filter(name=>name.endsWith('.sql')).sort()) cpSync(resolve(root,'apps/server/sites-migrations',name),resolve(output,'drizzle',name));

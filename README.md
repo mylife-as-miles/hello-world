@@ -52,7 +52,7 @@ The browser identity and Twitch account identity are separate in this slice. Lin
 
 See [Twitch configuration and permissions](docs/TWITCH.md) and [verified integration research](docs/RESEARCH.md).
 
-[Composio-managed OAuth investigation](docs/COMPOSIO_TWITCH.md) includes an approval-gated basic-profile proof (`pnpm twitch:composio:poc --mode=plan`). Managed OAuth is documented, but real consent/read/event delivery have not been verified. No Composio credentials are needed to run the Demo world.
+[Composio-managed OAuth investigation](docs/COMPOSIO_TWITCH.md) includes an owner-only hosted basic-profile test in the Twitch connection dialog and an optional CLI (`pnpm twitch:composio:poc --mode=plan`). Managed OAuth is documented, but real consent/read/event delivery have not been verified. No Composio credentials are needed to run the Demo world.
 
 The local Node server uses Twurple with authenticated IRC for chat commands and EventSub WebSockets for subscriptions, approved reward redemptions, and incoming raids. Broadcaster authorization and the correct scopes are required; available capabilities and failures are reported honestly. Access tokens, refresh tokens, and client secrets remain on the server.
 
